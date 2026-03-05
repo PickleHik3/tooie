@@ -343,31 +343,37 @@ func (m model) View() string {
 		return "Loading..."
 	}
 
-	title := headerChip("Theme Manager", "12")
-	main := m.renderMain()
+	const outerPad = 1
+	innerW := max(20, m.width-(outerPad*2))
+	innerH := max(8, m.height-(outerPad*2))
 
+	title := headerChip("Theme Manager", "12")
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	if strings.Contains(strings.ToLower(m.lastStatus), "failed") {
 		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	}
 	status := statusStyle.Render("status: " + m.lastStatus)
 	hints := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[? hints]")
-	footer := joinLR(hints, status, m.width)
+	topBar := joinLR(status, hints, innerW)
 
-	return fmt.Sprintf("%s\n\n%s\n\n%s", title, main, footer)
+	panelH := max(4, innerH-2)
+	main := m.renderMain(innerW, panelH)
+
+	body := fmt.Sprintf("%s\n%s\n%s", title, topBar, main)
+	return lipgloss.NewStyle().Padding(outerPad, outerPad).Render(body)
 }
 
-func (m model) renderMain() string {
-	contentH := max(8, m.height-6)
-	usableW := max(48, m.width-2)
+func (m model) renderMain(usableW, contentH int) string {
+	usableW = max(20, usableW)
+	contentH = max(4, contentH)
 	topRequired := max(8, len(m.settings())+2)
 	if m.hasActiveOverlay() {
 		topRequired = max(topRequired, m.interactionLineCount()+2)
 	}
-	detailsMin := 4
+	detailsMin := 2
 	topH := topRequired
 	if contentH-topH < detailsMin {
-		topH = max(6, contentH-detailsMin)
+		topH = max(3, contentH-detailsMin)
 	}
 	detailsH := max(detailsMin, contentH-topH)
 

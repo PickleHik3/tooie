@@ -7,6 +7,8 @@ BACKUP_ROOT="$THEME_DIR/backups"
 TERMUX_COLORS="$HOME_DIR/.termux/colors.properties"
 TMUX_CONF="$HOME_DIR/.tmux.conf"
 PEACLOCK_CONFIG="$HOME_DIR/.config/peaclock/config"
+STARSHIP_CONFIG="$HOME_DIR/.config/starship.toml"
+NVIM_THEME_FILE="$HOME_DIR/.config/nvim/lua/plugins/tooie-material.lua"
 
 usage() {
   cat <<'EOF'
@@ -58,6 +60,18 @@ fi
 if [ -f "$BACKUP_DIR/peaclock.config.bak" ]; then
   mkdir -p "$HOME_DIR/.config/peaclock"
   cp "$BACKUP_DIR/peaclock.config.bak" "$PEACLOCK_CONFIG"
+  restored_any=1
+fi
+
+if [ -f "$BACKUP_DIR/starship.toml.bak" ]; then
+  mkdir -p "$HOME_DIR/.config"
+  cp "$BACKUP_DIR/starship.toml.bak" "$STARSHIP_CONFIG"
+  restored_any=1
+fi
+
+if [ -f "$BACKUP_DIR/tooie-material.lua.bak" ]; then
+  mkdir -p "$(dirname "$NVIM_THEME_FILE")"
+  cp "$BACKUP_DIR/tooie-material.lua.bak" "$NVIM_THEME_FILE"
   restored_any=1
 fi
 
