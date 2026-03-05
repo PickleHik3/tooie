@@ -1,0 +1,22 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+wx="$("$SCRIPT_DIR/weather-cache" 2>/dev/null || true)"
+[ -n "$wx" ] || wx="…"
+
+fg=""
+fallback_fg="blue"
+if command -v tmux >/dev/null 2>&1; then
+  fallback_fg="$(tmux show -gqv '@status-tmux-color-weather' 2>/dev/null || true)"
+  [ -n "$fallback_fg" ] || fallback_fg="blue"
+  fmt="$(tmux show -gqv window-status-current-format 2>/dev/null || true)"
+  fg="$(printf '%s' "$fmt" | sed -n 's/.*fg=\([^,]*\).*/\1/p' | head -n1)"
+  if [ -z "$fg" ] || [ "$fg" = "default" ]; then
+    style="$(tmux show -gqv window-status-current-style 2>/dev/null || true)"
+    fg="$(printf '%s' "$style" | sed -n 's/.*fg=\([^,]*\).*/\1/p' | head -n1)"
+  fi
+fi
+[ -n "$fg" ] || fg="$fallback_fg"
+[ "$fg" = "default" ] && fg="$fallback_fg"
+printf '#[fg=%s]%s#[default]' "$fg" "$wx"

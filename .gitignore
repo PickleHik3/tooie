@@ -1,0 +1,8 @@
+# Build outputs
+*.out
+*.test
+bin/
+
+# Local runtime artifacts
+files/theme/backups/
+.tmp/

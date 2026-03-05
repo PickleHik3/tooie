@@ -1,0 +1,11 @@
+# Format: type|label|arg1|arg2|pin
+# type:
+#   android  arg1 = package/activity, arg2 ignored
+#   terminal arg1 = shell command, arg2 = tmux window name (optional)
+# pin:
+#   optional 1-9 slot shown in the pinned row
+
+android|Browser|com.brave.browser_nightly/com.google.android.apps.chrome.Main||1
+android|YouTube|app.revanced.android.youtube/app.revanced.android.youtube.revanced_original_1||2
+terminal|btop|rish -c 'XDG_CONFIG_HOME=/data/local/tmp/btop-mini /data/local/tmp/btop/btop --force-utf'|btop|3
+terminal|codex|codex|codex|4

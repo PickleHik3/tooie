@@ -1,0 +1,7 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/helpers.sh"
+
+apps_label="$(get_tmux_option '@status-tmux-apps-label' 'Apps')"
+printf '#[range=user|launch,bold] %s #[norange default]' "$apps_label"

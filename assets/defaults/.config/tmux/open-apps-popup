@@ -1,0 +1,63 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/helpers.sh"
+
+[ -n "${TMUX:-}" ] || exit 0
+
+tmp_root="${XDG_RUNTIME_DIR:-${TMPDIR:-$HOME/.tmp}}"
+log_dir="$tmp_root/status-tmux"
+log_file="$log_dir/omni-debug.log"
+mkdir -p "$log_dir"
+
+log() {
+  printf '%s [open-apps-popup] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log_file"
+}
+
+popup_width="$(get_tmux_option '@status-tmux-apps-popup-width' '95%')"
+popup_height_opt="$(get_tmux_option '@status-tmux-apps-popup-height' 'auto')"
+popup_title="$(get_tmux_option '@status-tmux-apps-popup-title' ' 󰀲 Apps ')"
+
+client_h="$(tmux display -p '#{client_height}' 2>/dev/null || echo 24)"
+case "$client_h" in
+  ''|*[!0-9]*) client_h=24 ;;
+esac
+
+max_h=$((client_h - 2))
+[ "$max_h" -lt 4 ] && max_h=4
+
+if [ "$popup_height_opt" = "auto" ]; then
+  cache_file="${STATUS_TMUX_APP_NAMES_FILE:-$tmp_root/status-tmux/launcher.app_names}"
+  count=0
+  if [ -f "$cache_file" ]; then
+    count="$(wc -l < "$cache_file" 2>/dev/null | tr -d '[:space:]')"
+  fi
+  case "$count" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
+
+  popup_height=$((count + 4))
+  [ "$popup_height" -lt 6 ] && popup_height=6
+  [ "$popup_height" -gt 18 ] && popup_height=18
+  [ "$popup_height" -gt "$max_h" ] && popup_height="$max_h"
+else
+  popup_height="$popup_height_opt"
+  case "$popup_height" in
+    ''|*[!0-9]*) popup_height=8 ;;
+  esac
+  [ "$popup_height" -lt 4 ] && popup_height=4
+  [ "$popup_height" -gt "$max_h" ] && popup_height="$max_h"
+fi
+
+log "launch width=$popup_width height=$popup_height client_h=$client_h max_h=$max_h"
+
+cmd="$SCRIPT_DIR/search-apps"
+if ! tmux display-popup -E -w "$popup_width" -h "$popup_height" -T "$popup_title" "$cmd"; then
+  fallback_h=$((max_h / 2))
+  [ "$fallback_h" -lt 4 ] && fallback_h=4
+  log "primary popup failed; fallback_h=$fallback_h"
+  tmux display-popup -E -w "$popup_width" -h "$fallback_h" -T "$popup_title" "$cmd" || true
+fi
+
+exit 0

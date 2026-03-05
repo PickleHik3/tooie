@@ -1,0 +1,41 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/status-tmux"
+CACHE_FILE="$CACHE_DIR/weather"
+MAX_AGE="${STATUS_TMUX_WEATHER_MAX_AGE:-300}"
+LOCATION="${STATUS_TMUX_WEATHER_LOCATION:-Kuwait}"
+mkdir -p "$CACHE_DIR"
+
+is_night(){ h="$(date +%H)"; [ "$h" -ge 18 ] || [ "$h" -lt 6 ]; }
+placeholder(){ if is_night; then printf '󰖔 ...'; else printf '󰖙 ...'; fi; }
+map_weather_icon(){ code="$1"; n="$2"; case "$code" in 113) [ "$n" -eq 1 ]&&echo '󰖔'||echo '󰖙';;116) [ "$n" -eq 1 ]&&echo ''||echo '󰖕';;119|122) [ "$n" -eq 1 ]&&echo ''||echo '󰖐';;143|248|260) [ "$n" -eq 1 ]&&echo ''||echo '󰖑';;176|266|293|305|308|311|314|317|320|389) [ "$n" -eq 1 ]&&echo ''||echo '󰖗';;323|326|392|395) [ "$n" -eq 1 ]&&echo ''||echo '󰖖';;179|227|230|356|359|362|365|368|371|407|410|413) [ "$n" -eq 1 ]&&echo ''||echo '󰖘';;182|185|296|299|302|329|332|335|338|350|353|398|401|404) [ "$n" -eq 1 ]&&echo ''||echo '󰙿';;200|386|422|425|428|431) [ "$n" -eq 1 ]&&echo ''||echo '󰖓';;*) [ "$n" -eq 1 ]&&echo ''||echo '󰖐';; esac; }
+cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(date +%s)"; mt="$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)"; [ "$mt" -gt 0 ] || { echo 999999; return; }; echo $((now-mt)); }
+read_cache(){ [ -s "$CACHE_FILE" ] && cat "$CACHE_FILE"; }
+
+fetch_weather(){
+  json="$(curl -fsS --connect-timeout 1 --max-time 1 "wttr.in/${LOCATION}?format=j1" 2>/dev/null || true)"
+  [ -n "$json" ] || return 1
+  temp="$(printf '%s' "$json" | sed -n 's/.*"temp_C"[[:space:]]*:[[:space:]]*"\{0,1\}\(-\{0,1\}[0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
+  code="$(printf '%s' "$json" | sed -n 's/.*"weatherCode"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
+  desc="$(printf '%s' "$json" | sed -n 's/.*"weatherDesc".*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  [ -n "$temp" ] || return 1; [ -n "$code" ] || code=119
+  n=0; if is_night; then n=1; fi
+  out="$(map_weather_icon "$code" "$n") ${temp}°C"; [ -n "$desc" ] && out="$out $desc"
+  printf '%s\n' "$out" > "$CACHE_FILE.tmp.$$" && mv "$CACHE_FILE.tmp.$$" "$CACHE_FILE"
+  printf '%s' "$out"
+}
+
+# Always return quickly from cache when available.
+if read_cache; then
+  age="$(cache_age)"
+  if [ "$age" -ge "$MAX_AGE" ]; then
+    (fetch_weather >/dev/null 2>&1 || true) &
+  fi
+  exit 0
+fi
+
+# No cache yet: one quick fetch, then placeholder.
+if out="$(fetch_weather)"; then printf '%s' "$out"; exit 0; fi
+placeholder

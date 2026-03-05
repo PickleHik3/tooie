@@ -1,0 +1,188 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -u
+PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/status-tmux"
+CACHE_FILE="$CACHE_DIR/resources.json"
+LOCK_DIR="$CACHE_DIR/.lock"
+TTL_SECONDS="${STATUS_TMUX_WIDGET_TTL:-3}"
+LOCK_STALE_SECONDS=10
+BACKEND_TIMEOUT="${STATUS_TMUX_BACKEND_TIMEOUT:-1}"
+SHOW_BATTERY="${STATUS_TMUX_SHOW_BATTERY:-on}"
+SHOW_CPU="${STATUS_TMUX_SHOW_CPU:-on}"
+SHOW_RAM="${STATUS_TMUX_SHOW_RAM:-on}"
+MODE="${1:-all}"
+
+SEP_COLOR="${STATUS_TMUX_SEP_COLOR:-colour8}"
+METER_1_COLOR="${STATUS_TMUX_BAT_METER_1_COLOR:-colour160}"
+METER_2_COLOR="${STATUS_TMUX_BAT_METER_2_COLOR:-colour202}"
+METER_3_COLOR="${STATUS_TMUX_BAT_METER_3_COLOR:-colour214}"
+METER_4_COLOR="${STATUS_TMUX_BAT_METER_4_COLOR:-colour226}"
+METER_5_COLOR="${STATUS_TMUX_BAT_METER_5_COLOR:-colour39}"
+METER_6_COLOR="${STATUS_TMUX_BAT_METER_6_COLOR:-colour46}"
+CHARGE_COLOR="${STATUS_TMUX_CHARGE_COLOR:-colour6}"
+CPU_1_COLOR="${STATUS_TMUX_CPU_LEVEL_1_COLOR:-colour2}"
+CPU_2_COLOR="${STATUS_TMUX_CPU_LEVEL_2_COLOR:-colour10}"
+CPU_3_COLOR="${STATUS_TMUX_CPU_LEVEL_3_COLOR:-colour11}"
+CPU_4_COLOR="${STATUS_TMUX_CPU_LEVEL_4_COLOR:-colour3}"
+CPU_5_COLOR="${STATUS_TMUX_CPU_LEVEL_5_COLOR:-colour9}"
+CPU_6_COLOR="${STATUS_TMUX_CPU_LEVEL_6_COLOR:-colour1}"
+RAM_1_COLOR="${STATUS_TMUX_RAM_LEVEL_1_COLOR:-colour6}"
+RAM_2_COLOR="${STATUS_TMUX_RAM_LEVEL_2_COLOR:-colour14}"
+RAM_3_COLOR="${STATUS_TMUX_RAM_LEVEL_3_COLOR:-colour5}"
+RAM_4_COLOR="${STATUS_TMUX_RAM_LEVEL_4_COLOR:-colour13}"
+RAM_5_COLOR="${STATUS_TMUX_RAM_LEVEL_5_COLOR:-colour9}"
+RAM_6_COLOR="${STATUS_TMUX_RAM_LEVEL_6_COLOR:-colour1}"
+BAT_SEGMENTS="${STATUS_TMUX_BAT_SEGMENTS:-6}"
+BAT_FULL_ICON="${STATUS_TMUX_BAT_FULL_ICON:-}"
+BAT_EMPTY_ICON="${STATUS_TMUX_BAT_EMPTY_ICON:-}"
+BAT_CHARGING_ICON="${STATUS_TMUX_BAT_CHARGING_ICON:- 󱈑}"
+
+mkdir -p "$CACHE_DIR"
+
+now_epoch(){ date +%s; }
+cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(now_epoch)"; mt="$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)"; [ "$mt" -gt 0 ] || { echo 999999; return; }; echo $((now-mt)); }
+cleanup_stale_lock(){ [ -d "$LOCK_DIR" ] || return 0; mt="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"; now="$(now_epoch)"; [ "$mt" -gt 0 ] && [ $((now-mt)) -gt "$LOCK_STALE_SECONDS" ] && rmdir "$LOCK_DIR" 2>/dev/null || true; }
+is_on(){ case "$1" in 1|on|true|yes|enabled) return 0;; *) return 1;; esac; }
+
+json_get(){
+  key="$1"; file="$2"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r ".${key} // empty" "$file" 2>/dev/null || true
+  else
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*[^,}]*" "$file" 2>/dev/null | head -n1 | sed 's/.*:[[:space:]]*//; s/"//g; s/[[:space:]]//g'
+  fi
+}
+
+collect_backend_json(){
+  want_bat="$1"
+  command -v tooie >/dev/null 2>&1 || return 1
+  if command -v timeout >/dev/null 2>&1; then
+    bjson="$(timeout "$BACKEND_TIMEOUT" tooie resources 2>/dev/null || true)"
+  else
+    bjson="$(tooie resources 2>/dev/null || true)"
+  fi
+  [ -n "$bjson" ] || return 1
+
+  if command -v jq >/dev/null 2>&1; then
+    cpu="$(printf '%s' "$bjson" | jq -r '.cpuPercent // empty' 2>/dev/null || true)"
+    mem_used="$(printf '%s' "$bjson" | jq -r '.memUsedBytes // empty' 2>/dev/null || true)"
+    mem_total="$(printf '%s' "$bjson" | jq -r '.memTotalBytes // empty' 2>/dev/null || true)"
+    if [ "$want_bat" = "1" ]; then
+      bat_level="$(printf '%s' "$bjson" | jq -r '.battery.levelPercent // .battery.level // 0' 2>/dev/null || echo 0)"
+      bat_charging="$(printf '%s' "$bjson" | jq -r '.battery.charging // false' 2>/dev/null || echo false)"
+    else
+      bat_level=0; bat_charging=false
+    fi
+  else
+    cpu="$(printf '%s' "$bjson" | grep -o '"cpuPercent"[[:space:]]*:[[:space:]]*[-0-9.]*' | head -n1 | sed 's/.*:[[:space:]]*//')"
+    mem_used="$(printf '%s' "$bjson" | grep -o '"memUsedBytes"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//')"
+    mem_total="$(printf '%s' "$bjson" | grep -o '"memTotalBytes"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//')"
+    if [ "$want_bat" = "1" ]; then
+      bat_level="$(printf '%s' "$bjson" | grep -o '"levelPercent"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//')"
+      [ -n "$bat_level" ] || bat_level=0
+      bat_charging="$(printf '%s' "$bjson" | grep -o '"charging"[[:space:]]*:[[:space:]]*\(true\|false\)' | head -n1 | sed 's/.*:[[:space:]]*//')"
+      [ -n "$bat_charging" ] || bat_charging=false
+    else
+      bat_level=0; bat_charging=false
+    fi
+  fi
+
+  [ -n "$cpu" ] || return 1
+  [ -n "$mem_used" ] || return 1
+  [ -n "$mem_total" ] || return 1
+  printf '{"cpuPercent":%s,"memUsedBytes":%s,"memTotalBytes":%s,"battery":{"levelPercent":%s,"charging":%s}}' "$cpu" "$mem_used" "$mem_total" "$bat_level" "$bat_charging"
+}
+
+collect_local_json(){
+  want_bat="$1"
+  cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"; [ -n "$cores" ] || cores=1; [ "$cores" -gt 0 ] || cores=1
+  load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
+  cpu_pct="$(awk -v l="$load1" -v c="$cores" 'BEGIN{v=(l/c)*100; if(v<0)v=0; if(v>100)v=100; printf "%.2f", v}')"
+  mem_total_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  mem_avail_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  mem_total_b=$((mem_total_kb * 1024)); mem_avail_b=$((mem_avail_kb * 1024)); mem_used_b=$((mem_total_b - mem_avail_b)); [ "$mem_used_b" -lt 0 ] && mem_used_b=0
+  bat_level=0; bat_charging=false
+  if [ "$want_bat" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then bjson="$(timeout 1 termux-battery-status 2>/dev/null || true)"; else bjson="$(termux-battery-status 2>/dev/null || true)"; fi
+    if [ -n "$bjson" ]; then
+      if command -v jq >/dev/null 2>&1; then
+        bat_level="$(printf '%s' "$bjson" | jq -r '.percentage // .level // 0' 2>/dev/null || echo 0)"
+        status="$(printf '%s' "$bjson" | jq -r '.status // ""' 2>/dev/null || echo '')"
+      else
+        bat_level="$(printf '%s' "$bjson" | grep -o '"percentage"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//')"; [ -n "$bat_level" ] || bat_level=0
+        status="$(printf '%s' "$bjson" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+      fi
+      case "$status" in CHARGING|FULL) bat_charging=true;; esac
+    fi
+  fi
+  printf '{"cpuPercent":%s,"memUsedBytes":%s,"memTotalBytes":%s,"battery":{"levelPercent":%s,"charging":%s}}' "$cpu_pct" "$mem_used_b" "$mem_total_b" "$bat_level" "$bat_charging"
+}
+
+update_cache_if_needed(){
+  age="$(cache_age)"; [ "$age" -lt "$TTL_SECONDS" ] && return 0
+  want_bat=0
+  if is_on "$SHOW_BATTERY"; then
+    want_bat=1
+  fi
+  cleanup_stale_lock
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    tmp="$CACHE_FILE.tmp.$$"
+    if collect_backend_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+      mv "$tmp" "$CACHE_FILE"
+    elif collect_local_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+      mv "$tmp" "$CACHE_FILE"
+    else
+      rm -f "$tmp"
+    fi
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+meter_color(){ case "$1" in 1) echo "$METER_1_COLOR";;2) echo "$METER_2_COLOR";;3) echo "$METER_3_COLOR";;4) echo "$METER_4_COLOR";;5) echo "$METER_5_COLOR";;*) echo "$METER_6_COLOR";; esac; }
+render_battery(){ level="$1"; charging="$2"; [ "$level" -gt 100 ] && level=100; [ "$level" -lt 0 ] && level=0; [ "$BAT_SEGMENTS" -lt 1 ] && BAT_SEGMENTS=1; filled=$(( (level * BAT_SEGMENTS + 99) / 100 )); [ "$filled" -gt "$BAT_SEGMENTS" ] && filled="$BAT_SEGMENTS"; meter=""; i=1; while [ "$i" -le "$BAT_SEGMENTS" ]; do c="$(meter_color "$i")"; if [ "$i" -le "$filled" ]; then meter="${meter}#[fg=${c}]${BAT_FULL_ICON}"; else meter="${meter}#[fg=${c}]${BAT_EMPTY_ICON}"; fi; i=$((i+1)); done; if [ "$charging" = "true" ]; then charge="#[fg=${CHARGE_COLOR}]${BAT_CHARGING_ICON}"; else charge=""; fi; printf "%s%s#[default]" "$charge" "${charge:+ }$meter"; }
+cpu_usage_color(){
+  v="$1"
+  # CPU palette: healthy -> warning -> critical
+  if [ "$v" -le 20 ]; then echo "$CPU_1_COLOR"
+  elif [ "$v" -le 40 ]; then echo "$CPU_2_COLOR"
+  elif [ "$v" -le 60 ]; then echo "$CPU_3_COLOR"
+  elif [ "$v" -le 75 ]; then echo "$CPU_4_COLOR"
+  elif [ "$v" -le 90 ]; then echo "$CPU_5_COLOR"
+  else echo "$CPU_6_COLOR"
+  fi
+}
+ram_usage_color(){
+  v="$1"
+  # RAM palette: healthy -> warning -> critical
+  if [ "$v" -le 40 ]; then echo "$RAM_1_COLOR"
+  elif [ "$v" -le 60 ]; then echo "$RAM_2_COLOR"
+  elif [ "$v" -le 75 ]; then echo "$RAM_3_COLOR"
+  elif [ "$v" -le 88 ]; then echo "$RAM_4_COLOR"
+  elif [ "$v" -le 95 ]; then echo "$RAM_5_COLOR"
+  else echo "$RAM_6_COLOR"
+  fi
+}
+
+render_widgets(){
+  [ -s "$CACHE_FILE" ] || exit 0
+  cpu="$(json_get cpuPercent "$CACHE_FILE")"
+  mem_used="$(json_get memUsedBytes "$CACHE_FILE")"
+  mem_total="$(json_get memTotalBytes "$CACHE_FILE")"
+  bat_level="$(json_get battery.levelPercent "$CACHE_FILE")"
+  [ -n "$bat_level" ] || bat_level="$(json_get battery.level "$CACHE_FILE")"
+  bat_charging="$(json_get battery.charging "$CACHE_FILE")"
+  [ -n "$cpu" ] || cpu=0; [ -n "$mem_used" ] || mem_used=0; [ -n "$mem_total" ] || mem_total=0; [ -n "$bat_level" ] || bat_level=0; [ -n "$bat_charging" ] || bat_charging=false
+  cpu_pct="$(awk -v x="$cpu" 'BEGIN{printf "%.0f", x}')"; case "$cpu_pct" in ''|*[!0-9]*) cpu_pct=0;; esac; [ "$cpu_pct" -gt 100 ] && cpu_pct=100; [ "$cpu_pct" -lt 0 ] && cpu_pct=0
+  if [ "$mem_total" -gt 0 ] 2>/dev/null; then ram_pct="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.0f", (u*100)/t}')"; else ram_pct=0; fi; case "$ram_pct" in ''|*[!0-9]*) ram_pct=0;; esac; [ "$ram_pct" -gt 100 ] && ram_pct=100; [ "$ram_pct" -lt 0 ] && ram_pct=0
+  cpu_color="$(cpu_usage_color "$cpu_pct")"; ram_color="$(ram_usage_color "$ram_pct")"; cpu_pct_fixed="$(printf "%02d" "$cpu_pct")"; ram_text="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.1f/%.1fG", u/1073741824, t/1073741824}')"; bat_text="$(render_battery "$bat_level" "$bat_charging")"
+  battery_segment="$bat_text"; cpu_segment="#[fg=${cpu_color}] ${cpu_pct_fixed}%"; ram_segment="#[fg=${ram_color}] ${ram_text}"; out=""
+  case "$MODE" in battery) printf "%s#[default]" "$battery_segment"; return;; cpu) printf "%s#[default]" "$cpu_segment"; return;; ram) printf "%s#[default]" "$ram_segment"; return;; all) ;; *) printf "%s#[default]" "$out"; return;; esac
+  if is_on "$SHOW_BATTERY"; then out="$battery_segment"; fi
+  if is_on "$SHOW_CPU"; then [ -n "$out" ] && out="${out}#[fg=${SEP_COLOR}] | "; out="${out}${cpu_segment}"; fi
+  if is_on "$SHOW_RAM"; then [ -n "$out" ] && out="${out}#[fg=${SEP_COLOR}] | "; out="${out}${ram_segment}"; fi
+  printf "%s#[default]" "$out"
+}
+
+update_cache_if_needed
+render_widgets

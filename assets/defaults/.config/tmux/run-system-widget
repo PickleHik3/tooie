@@ -1,0 +1,59 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/helpers.sh"
+
+show_battery="$(get_tmux_option '@status-tmux-widget-battery' 'on')"
+show_cpu="$(get_tmux_option '@status-tmux-widget-cpu' 'on')"
+show_ram="$(get_tmux_option '@status-tmux-widget-ram' 'on')"
+sep_color="$(get_tmux_option '@status-tmux-color-separator' 'colour8')"
+meter_1="$(get_tmux_option '@status-tmux-color-battery-1' 'colour160')"
+meter_2="$(get_tmux_option '@status-tmux-color-battery-2' 'colour202')"
+meter_3="$(get_tmux_option '@status-tmux-color-battery-3' 'colour214')"
+meter_4="$(get_tmux_option '@status-tmux-color-battery-4' 'colour226')"
+meter_5="$(get_tmux_option '@status-tmux-color-battery-5' 'colour39')"
+meter_6="$(get_tmux_option '@status-tmux-color-battery-6' 'colour46')"
+charge_color="$(get_tmux_option '@status-tmux-color-charging' 'colour6')"
+cpu_1="$(get_tmux_option '@status-tmux-color-cpu-1' 'colour2')"
+cpu_2="$(get_tmux_option '@status-tmux-color-cpu-2' 'colour10')"
+cpu_3="$(get_tmux_option '@status-tmux-color-cpu-3' 'colour11')"
+cpu_4="$(get_tmux_option '@status-tmux-color-cpu-4' 'colour3')"
+cpu_5="$(get_tmux_option '@status-tmux-color-cpu-5' 'colour9')"
+cpu_6="$(get_tmux_option '@status-tmux-color-cpu-6' 'colour1')"
+ram_1="$(get_tmux_option '@status-tmux-color-ram-1' 'colour6')"
+ram_2="$(get_tmux_option '@status-tmux-color-ram-2' 'colour14')"
+ram_3="$(get_tmux_option '@status-tmux-color-ram-3' 'colour5')"
+ram_4="$(get_tmux_option '@status-tmux-color-ram-4' 'colour13')"
+ram_5="$(get_tmux_option '@status-tmux-color-ram-5' 'colour9')"
+ram_6="$(get_tmux_option '@status-tmux-color-ram-6' 'colour1')"
+bat_full="$(get_tmux_option '@status-tmux-icon-battery-full' '')"
+bat_empty="$(get_tmux_option '@status-tmux-icon-battery-empty' '')"
+bat_charging="$(get_tmux_option '@status-tmux-icon-battery-charging' ' 󱈑')"
+
+STATUS_TMUX_SHOW_BATTERY="$show_battery" \
+STATUS_TMUX_SHOW_CPU="$show_cpu" \
+STATUS_TMUX_SHOW_RAM="$show_ram" \
+STATUS_TMUX_SEP_COLOR="$sep_color" \
+STATUS_TMUX_BAT_METER_1_COLOR="$meter_1" \
+STATUS_TMUX_BAT_METER_2_COLOR="$meter_2" \
+STATUS_TMUX_BAT_METER_3_COLOR="$meter_3" \
+STATUS_TMUX_BAT_METER_4_COLOR="$meter_4" \
+STATUS_TMUX_BAT_METER_5_COLOR="$meter_5" \
+STATUS_TMUX_BAT_METER_6_COLOR="$meter_6" \
+STATUS_TMUX_CHARGE_COLOR="$charge_color" \
+STATUS_TMUX_CPU_LEVEL_1_COLOR="$cpu_1" \
+STATUS_TMUX_CPU_LEVEL_2_COLOR="$cpu_2" \
+STATUS_TMUX_CPU_LEVEL_3_COLOR="$cpu_3" \
+STATUS_TMUX_CPU_LEVEL_4_COLOR="$cpu_4" \
+STATUS_TMUX_CPU_LEVEL_5_COLOR="$cpu_5" \
+STATUS_TMUX_CPU_LEVEL_6_COLOR="$cpu_6" \
+STATUS_TMUX_RAM_LEVEL_1_COLOR="$ram_1" \
+STATUS_TMUX_RAM_LEVEL_2_COLOR="$ram_2" \
+STATUS_TMUX_RAM_LEVEL_3_COLOR="$ram_3" \
+STATUS_TMUX_RAM_LEVEL_4_COLOR="$ram_4" \
+STATUS_TMUX_RAM_LEVEL_5_COLOR="$ram_5" \
+STATUS_TMUX_RAM_LEVEL_6_COLOR="$ram_6" \
+STATUS_TMUX_BAT_FULL_ICON="$bat_full" \
+STATUS_TMUX_BAT_EMPTY_ICON="$bat_empty" \
+STATUS_TMUX_BAT_CHARGING_ICON="$bat_charging" \
+"$SCRIPT_DIR/system-widgets" "$@"
