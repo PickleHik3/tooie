@@ -2,7 +2,7 @@
 set -eu
 
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
-BACKUP_ROOT="$HOME_DIR/files/theme/backups"
+BACKUP_ROOT="$HOME_DIR/.config/tooie/backups"
 
 if [ ! -d "$BACKUP_ROOT" ]; then
   echo "No backups directory: $BACKUP_ROOT"

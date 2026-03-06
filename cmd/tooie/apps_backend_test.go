@@ -87,6 +87,34 @@ func TestIconEndpointCandidates(t *testing.T) {
 	}
 }
 
+func TestIsRestartCLIArgs(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"--restart"}, want: true},
+		{args: []string{"-restart"}, want: true},
+		{args: []string{"restart"}, want: false},
+		{args: []string{"--restart", "extra"}, want: false},
+		{args: nil, want: false},
+	}
+	for _, tt := range tests {
+		if got := isRestartCLIArgs(tt.args); got != tt.want {
+			t.Fatalf("isRestartCLIArgs(%v) = %v, want %v", tt.args, got, tt.want)
+		}
+	}
+}
+
+func TestResolveLauncherRestartComponentFallback(t *testing.T) {
+	got, err := resolveLauncherRestartComponent()
+	if err != nil {
+		t.Fatalf("resolveLauncherRestartComponent() error = %v", err)
+	}
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("resolveLauncherRestartComponent() returned empty component")
+	}
+}
+
 func TestTrimTransparentImage(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 6, 6))
 	img.Set(2, 1, color.RGBA{255, 0, 0, 255})

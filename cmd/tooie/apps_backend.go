@@ -24,6 +24,10 @@ import (
 )
 
 const defaultAppsCacheTTL = 10 * time.Minute
+const (
+	defaultLauncherPackage   = "com.termux"
+	defaultLauncherComponent = "com.termux/.app.TermuxActivity"
+)
 
 type launchableApp struct {
 	PackageName   string `json:"packageName"`
@@ -55,11 +59,20 @@ func runCLI(args []string) int {
 	if len(args) == 0 {
 		return 0
 	}
+	if isRestartCLIArgs(args) {
+		if err := restartLauncherApp(); err != nil {
+			fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	switch strings.TrimSpace(args[0]) {
 	case "apps":
 		return runAppsCommand(args[1:])
 	case "launch":
 		return runLaunchCommand(args[1:])
+	case "restart":
+		return runRestartCommand(args[1:])
 	case "exec":
 		return runExecCommand(args[1:])
 	case "icon":
@@ -77,13 +90,65 @@ func runCLI(args []string) int {
 }
 
 func printCLIUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  tooie                  Start the TUI")
+	fmt.Fprintln(w, "Tooie")
+	fmt.Fprintln(w, "  Command center for the Termux launcher and Tooie TUI.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage")
+	fmt.Fprintln(w, "  tooie")
+	fmt.Fprintln(w, "      Start the Tooie TUI.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --help")
+	fmt.Fprintln(w, "      Show this help screen.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --restart")
+	fmt.Fprintln(w, "  tooie restart")
+	fmt.Fprintln(w, "      Force-stop and relaunch termux-launcher cleanly.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands")
 	fmt.Fprintln(w, "  tooie apps [--refresh] [--ttl=10m]")
+	fmt.Fprintln(w, "      List launchable Android apps, using the Tooie cache when valid.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie launch <package-or-component> [--refresh] [--ttl=10m]")
+	fmt.Fprintln(w, "      Launch an Android app by package name or explicit component.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie exec <command>")
+	fmt.Fprintln(w, "      Run a command through the Tooie backend /v1/exec endpoint.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie icon <package>")
+	fmt.Fprintln(w, "      Fetch and cache the real app icon for a package.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie icons refresh [--pinned]")
+	fmt.Fprintln(w, "      Refresh cached icons. Use --pinned to limit refresh to pinned apps.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Examples")
+	fmt.Fprintln(w, "  tooie apps")
+	fmt.Fprintln(w, "  tooie apps --refresh")
+	fmt.Fprintln(w, "  tooie launch com.termux")
+	fmt.Fprintln(w, "  tooie launch com.termux/.app.TermuxActivity")
+	fmt.Fprintln(w, "  tooie icon com.termux")
+	fmt.Fprintln(w, "  tooie icons refresh --pinned")
+	fmt.Fprintln(w, "  tooie --restart")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Paths")
+	fmt.Fprintln(w, "  Apps cache:   ~/.cache/tooie/apps.json")
+	fmt.Fprintln(w, "  Icon cache:   ~/.cache/tooie/icons/")
+	fmt.Fprintln(w, "  Pinned apps:  ~/.config/tooie/pinned-apps.json")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Notes")
+	fmt.Fprintln(w, "  Backend actions prefer the configured Tooie endpoint and fall back locally when possible.")
+	fmt.Fprintln(w, "  App discovery merges local launcher activity resolution with Tooie backend metadata when available.")
+}
+
+func isRestartCLIArgs(args []string) bool {
+	if len(args) != 1 {
+		return false
+	}
+	switch strings.TrimSpace(args[0]) {
+	case "--restart", "-restart":
+		return true
+	default:
+		return false
+	}
 }
 
 func runAppsCommand(args []string) int {
@@ -138,6 +203,24 @@ func runLaunchCommand(args []string) int {
 	}
 	if err := launchComponent(component); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie launch: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRestartCommand(args []string) int {
+	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "tooie restart: unexpected arguments")
+		return 2
+	}
+	if err := restartLauncherApp(); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
 		return 1
 	}
 	return 0
@@ -330,6 +413,111 @@ func launchComponent(component string) error {
 		if _, err := tooieExecCommand(base, token, "am start -n "+component); err == nil {
 			return nil
 		}
+	}
+	if out, err := exec.Command("am", "start", "-n", component, "--user", "0").CombinedOutput(); err == nil {
+		return nil
+	} else if len(bytes.TrimSpace(out)) > 0 {
+		_ = out
+	}
+	out, err := exec.Command("am", "start", "-n", component).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local am launch failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func restartLauncherApp() error {
+	component, err := resolveLauncherRestartComponent()
+	if err != nil {
+		return err
+	}
+	base, token, ok := readTooieEndpointToken()
+	var backendErr error
+	if ok {
+		if err := stopPackageViaBackend(base, token, defaultLauncherPackage); err == nil {
+			time.Sleep(350 * time.Millisecond)
+			if err := startComponentViaBackend(base, token, component); err == nil {
+				return nil
+			} else {
+				backendErr = err
+			}
+		} else {
+			backendErr = err
+		}
+	}
+	if err := stopPackageLocally(defaultLauncherPackage); err != nil && backendErr == nil {
+		backendErr = err
+	}
+	time.Sleep(350 * time.Millisecond)
+	if err := startComponentLocally(component); err != nil {
+		if backendErr != nil {
+			return fmt.Errorf("backend restart failed: %v; local restart failed: %w", backendErr, err)
+		}
+		return err
+	}
+	return nil
+}
+
+func resolveLauncherRestartComponent() (string, error) {
+	component, err := resolveLaunchTarget(defaultLauncherPackage, defaultAppsCacheTTL, false)
+	if err == nil && strings.TrimSpace(component) != "" {
+		return component, nil
+	}
+	if strings.TrimSpace(defaultLauncherComponent) == "" {
+		return "", fmt.Errorf("launcher component not configured")
+	}
+	return defaultLauncherComponent, nil
+}
+
+func stopPackageViaBackend(base, token, pkg string) error {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return errors.New("missing package")
+	}
+	if _, err := tooieExecCommand(base, token, "am force-stop "+pkg+" --user 0"); err == nil {
+		return nil
+	}
+	if _, err := tooieExecCommand(base, token, "am force-stop "+pkg); err == nil {
+		return nil
+	}
+	return fmt.Errorf("backend force-stop failed for %s", pkg)
+}
+
+func startComponentViaBackend(base, token, component string) error {
+	component = strings.TrimSpace(component)
+	if component == "" {
+		return errors.New("missing component")
+	}
+	if _, err := tooieExecCommand(base, token, "am start -n "+component+" --user 0"); err == nil {
+		return nil
+	}
+	if _, err := tooieExecCommand(base, token, "am start -n "+component); err == nil {
+		return nil
+	}
+	return fmt.Errorf("backend launch failed for %s", component)
+}
+
+func stopPackageLocally(pkg string) error {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return errors.New("missing package")
+	}
+	if out, err := exec.Command("am", "force-stop", pkg, "--user", "0").CombinedOutput(); err == nil {
+		return nil
+	} else if len(bytes.TrimSpace(out)) > 0 {
+		_ = out
+	}
+	out, err := exec.Command("am", "force-stop", pkg).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local am force-stop failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func startComponentLocally(component string) error {
+	component = strings.TrimSpace(component)
+	if component == "" {
+		return errors.New("missing component")
 	}
 	if out, err := exec.Command("am", "start", "-n", component, "--user", "0").CombinedOutput(); err == nil {
 		return nil

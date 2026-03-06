@@ -6,9 +6,9 @@ HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
 STATE_DIR="$HOME_DIR/.local/state/tooie"
 BACKUP_DIR="$STATE_DIR/backups/$(date +%Y%m%d-%H%M%S)"
 BIN_DIR="$HOME_DIR/.local/bin"
-THEME_DIR="$HOME_DIR/files/theme"
+TOOIE_DIR="$HOME_DIR/.config/tooie"
 
-mkdir -p "$BACKUP_DIR" "$BIN_DIR" "$THEME_DIR" "$STATE_DIR"
+mkdir -p "$BACKUP_DIR" "$BIN_DIR" "$TOOIE_DIR" "$STATE_DIR"
 
 log() { printf '%s\n' "$*"; }
 
@@ -26,30 +26,30 @@ pm_install() {
 }
 
 backup_if_exists() {
-  src="$1"
-  if [ -e "$src" ]; then
-    rel="$(printf '%s' "$src" | sed "s#^$HOME_DIR/##")"
-    dst="$BACKUP_DIR/$rel"
-    mkdir -p "$(dirname "$dst")"
-    cp -a "$src" "$dst"
+  backup_src="$1"
+  if [ -e "$backup_src" ]; then
+    backup_rel="$(printf '%s' "$backup_src" | sed "s#^$HOME_DIR/##")"
+    backup_dst="$BACKUP_DIR/$backup_rel"
+    mkdir -p "$(dirname "$backup_dst")"
+    cp -a "$backup_src" "$backup_dst"
   fi
 }
 
 install_file() {
-  src="$1"
-  dst="$2"
-  backup_if_exists "$dst"
-  mkdir -p "$(dirname "$dst")"
-  cp "$src" "$dst"
+  file_src="$1"
+  file_dst="$2"
+  backup_if_exists "$file_dst"
+  mkdir -p "$(dirname "$file_dst")"
+  cp "$file_src" "$file_dst"
 }
 
 install_dir() {
-  src="$1"
-  dst="$2"
-  backup_if_exists "$dst"
-  mkdir -p "$(dirname "$dst")"
-  rm -rf "$dst"
-  cp -a "$src" "$dst"
+  dir_src="$1"
+  dir_dst="$2"
+  backup_if_exists "$dir_dst"
+  mkdir -p "$(dirname "$dir_dst")"
+  rm -rf "$dir_dst"
+  cp -a "$dir_src" "$dir_dst"
 }
 
 install_base_deps() {
@@ -108,9 +108,9 @@ install_neovim_nightly() {
 build_theme_manager() {
   install_go_if_missing
   log "Building tooie binary..."
-  (cd "$REPO_DIR" && go build -o "$THEME_DIR/tooie" ./cmd/tooie)
-  cp "$THEME_DIR/tooie" "$BIN_DIR/tooie"
-  chmod +x "$THEME_DIR/tooie" "$BIN_DIR/tooie"
+  (cd "$REPO_DIR" && go build -o "$TOOIE_DIR/tooie" ./cmd/tooie)
+  cp "$TOOIE_DIR/tooie" "$BIN_DIR/tooie"
+  chmod +x "$TOOIE_DIR/tooie" "$BIN_DIR/tooie"
 }
 
 deploy_assets() {
@@ -129,10 +129,10 @@ deploy_assets() {
   install_dir "$REPO_DIR/assets/defaults/.config/tmux" "$HOME_DIR/.config/tmux"
   install_dir "$REPO_DIR/assets/defaults/.config/nvim" "$HOME_DIR/.config/nvim"
 
-  install_file "$REPO_DIR/scripts/apply-material.sh" "$THEME_DIR/apply-material.sh"
-  install_file "$REPO_DIR/scripts/restore-material.sh" "$THEME_DIR/restore-material.sh"
-  install_file "$REPO_DIR/scripts/list-material-backups.sh" "$THEME_DIR/list-material-backups.sh"
-  chmod +x "$THEME_DIR/apply-material.sh" "$THEME_DIR/restore-material.sh" "$THEME_DIR/list-material-backups.sh"
+  install_file "$REPO_DIR/scripts/apply-material.sh" "$TOOIE_DIR/apply-material.sh"
+  install_file "$REPO_DIR/scripts/restore-material.sh" "$TOOIE_DIR/restore-material.sh"
+  install_file "$REPO_DIR/scripts/list-material-backups.sh" "$TOOIE_DIR/list-material-backups.sh"
+  chmod +x "$TOOIE_DIR/apply-material.sh" "$TOOIE_DIR/restore-material.sh" "$TOOIE_DIR/list-material-backups.sh"
 }
 
 post_setup() {
@@ -141,12 +141,14 @@ post_setup() {
   fi
 
   if have tmux; then
-    tmux source-file "$HOME_DIR/.tmux.conf" 2>/dev/null || true
+    if [ -n "${TMUX:-}" ] || tmux ls >/dev/null 2>&1; then
+      (tmux source-file "$HOME_DIR/.tmux.conf" >/dev/null 2>&1 || true) &
+    fi
   fi
 
   log "Install complete."
   log "Backup snapshot: $BACKUP_DIR"
-  log "Run: $THEME_DIR/tooie"
+  log "Run: $TOOIE_DIR/tooie"
 }
 
 install_base_deps

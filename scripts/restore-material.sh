@@ -2,8 +2,8 @@
 set -eu
 
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
-THEME_DIR="$HOME_DIR/files/theme"
-BACKUP_ROOT="$THEME_DIR/backups"
+TOOIE_DIR="$HOME_DIR/.config/tooie"
+BACKUP_ROOT="$TOOIE_DIR/backups"
 TERMUX_COLORS="$HOME_DIR/.termux/colors.properties"
 TMUX_CONF="$HOME_DIR/.tmux.conf"
 PEACLOCK_CONFIG="$HOME_DIR/.config/peaclock/config"

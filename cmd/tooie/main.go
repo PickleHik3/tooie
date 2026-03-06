@@ -25,10 +25,10 @@ import (
 
 const (
 	homeDir        = "/data/data/com.termux/files/home"
-	themeDir       = homeDir + "/files/theme"
-	backupRoot     = themeDir + "/backups"
-	applyScript    = themeDir + "/apply-material.sh"
-	restoreScript  = themeDir + "/restore-material.sh"
+	tooieConfigDir = homeDir + "/.config/tooie"
+	backupRoot     = tooieConfigDir + "/backups"
+	applyScript    = tooieConfigDir + "/apply-material.sh"
+	restoreScript  = tooieConfigDir + "/restore-material.sh"
 	defaultWall    = homeDir + "/.termux/background/background.jpeg"
 	defaultMode    = "dark"
 	defaultPalette = "default"
