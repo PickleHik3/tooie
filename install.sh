@@ -112,6 +112,7 @@ build_theme_manager() {
 
 deploy_assets() {
   log "Deploying configs and scripts..."
+  touch "$HOME_DIR/.hushlogin"
   install_file "$REPO_DIR/assets/defaults/.tmux.conf" "$HOME_DIR/.tmux.conf"
 
   install_file "$REPO_DIR/assets/defaults/.termux/termux.properties" "$HOME_DIR/.termux/termux.properties"
@@ -127,6 +128,7 @@ deploy_assets() {
 
   install_dir "$REPO_DIR/assets/defaults/.config/tmux" "$HOME_DIR/.config/tmux"
   install_dir "$REPO_DIR/assets/defaults/.config/nvim" "$HOME_DIR/.config/nvim"
+  install_dir "$REPO_DIR/fonts" "$TOOIE_DIR/fonts"
 
   install_file "$REPO_DIR/scripts/apply-material.sh" "$TOOIE_DIR/apply-material.sh"
   install_file "$REPO_DIR/scripts/restore-material.sh" "$TOOIE_DIR/restore-material.sh"

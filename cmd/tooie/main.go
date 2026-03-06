@@ -2374,6 +2374,7 @@ func loadClockGlyphSet(fontDefs []clockFontDef, idx int) map[rune][]string {
 
 func discoverClockFonts() []clockFontDef {
 	candidates := []string{
+		filepath.Join(homeDir, ".config", "tooie", "fonts"),
 		filepath.Join(homeDir, "files", "tooie", "fonts"),
 	}
 	var out []clockFontDef
