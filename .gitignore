@@ -2,6 +2,8 @@
 *.out
 *.test
 bin/
+/tooie
+/tooie-theme-manager
 
 # Local runtime artifacts
 files/theme/backups/

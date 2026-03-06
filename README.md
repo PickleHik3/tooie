@@ -1,6 +1,6 @@
-# tooie-theme-manager
+# Tooie
 
-Unified Termux theme manager for:
+Unified Termux Tooie manager for:
 - Termux colors/fonts/properties
 - tmux + status widgets
 - peaclock
@@ -10,16 +10,16 @@ Unified Termux theme manager for:
 ## Install
 
 ```sh
-cd ~/files/tooie-theme-manager
+cd ~/files/tooie
 ./install.sh
 ```
 
 ## Run
 
 ```sh
-~/files/theme/tooie-theme-manager
+~/files/theme/tooie
 # or
-~/.local/bin/tooie-theme-manager
+~/.local/bin/tooie
 ```
 
 ## Included install targets
@@ -38,7 +38,7 @@ It supports both `pkg` and `pacman` based setups.
 
 Before replacing files, installer stores backups in:
 
-`~/.local/state/tooie-theme-manager/backups/<timestamp>/`
+`~/.local/state/tooie/backups/<timestamp>/`
 
 ## Next planned integration
 

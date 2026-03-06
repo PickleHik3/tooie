@@ -3,7 +3,7 @@ set -eu
 
 REPO_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
-STATE_DIR="$HOME_DIR/.local/state/tooie-theme-manager"
+STATE_DIR="$HOME_DIR/.local/state/tooie"
 BACKUP_DIR="$STATE_DIR/backups/$(date +%Y%m%d-%H%M%S)"
 BIN_DIR="$HOME_DIR/.local/bin"
 THEME_DIR="$HOME_DIR/files/theme"
@@ -107,10 +107,10 @@ install_neovim_nightly() {
 
 build_theme_manager() {
   install_go_if_missing
-  log "Building tooie-theme-manager binary..."
-  (cd "$REPO_DIR" && go build -o "$THEME_DIR/tooie-theme-manager" ./cmd/tooie-theme-manager)
-  cp "$THEME_DIR/tooie-theme-manager" "$BIN_DIR/tooie-theme-manager"
-  chmod +x "$THEME_DIR/tooie-theme-manager" "$BIN_DIR/tooie-theme-manager"
+  log "Building tooie binary..."
+  (cd "$REPO_DIR" && go build -o "$THEME_DIR/tooie" ./cmd/tooie)
+  cp "$THEME_DIR/tooie" "$BIN_DIR/tooie"
+  chmod +x "$THEME_DIR/tooie" "$BIN_DIR/tooie"
 }
 
 deploy_assets() {
@@ -146,7 +146,7 @@ post_setup() {
 
   log "Install complete."
   log "Backup snapshot: $BACKUP_DIR"
-  log "Run: $THEME_DIR/tooie-theme-manager"
+  log "Run: $THEME_DIR/tooie"
 }
 
 install_base_deps
