@@ -78,22 +78,8 @@ install_neovim_nightly() {
     log "Neovim nightly already installed"
     return 0
   fi
-
-  log "Attempting Neovim nightly via bob..."
-  if ! have cargo; then
-    pm_install rust
-  fi
-
-  if ! have bob; then
-    cargo install bob-nvim || true
-  fi
-
-  if have bob; then
-    bob install nightly || true
-    bob use nightly || true
-  fi
-
-  if ! have nvim; then
+  log "Installing packaged neovim-nightly..."
+  if ! pm_install neovim-nightly; then
     log "Falling back to packaged neovim"
     pm_install neovim
   fi
