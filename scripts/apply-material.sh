@@ -19,20 +19,23 @@ MATUGEN_BIN="${MATUGEN_BIN:-}"
 TEXT_COLOR_OVERRIDE=""
 CURSOR_COLOR_OVERRIDE=""
 STATUS_PALETTE="default"
-STYLE_PRESET="balanced"
+STYLE_PRESET="default"
 ANSI_RED_OVERRIDE=""
 ANSI_GREEN_OVERRIDE=""
 ANSI_YELLOW_OVERRIDE=""
 ANSI_BLUE_OVERRIDE=""
 ANSI_MAGENTA_OVERRIDE=""
 ANSI_CYAN_OVERRIDE=""
+PREVIEW_ONLY=0
+REUSE_BACKUP_ID=""
 
 usage() {
   cat <<'EOF'
 Usage: apply-material.sh [-m dark|light] [-t scheme-type] [-w wallpaper_path] [-b matugen_bin]
                          [--text-color '#rrggbb'] [--cursor-color '#rrggbb']
                          [--status-palette default|vibrant]
-                         [--style-preset balanced|tokyonight|catppuccin|gruvbox|rose-pine|pure-matugen]
+                         [--style-preset default|vivid|playful|energetic|creative|friendly|positive]
+                         [--preview-only] [--reuse-backup backup_id]
                          [--ansi-red '#rrggbb'] [--ansi-green '#rrggbb']
                          [--ansi-yellow '#rrggbb'] [--ansi-blue '#rrggbb']
                          [--ansi-magenta '#rrggbb'] [--ansi-cyan '#rrggbb']
@@ -77,6 +80,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --style-preset)
       STYLE_PRESET="${2:-}"
+      shift 2
+      ;;
+    --preview-only)
+      PREVIEW_ONLY=1
+      shift 1
+      ;;
+    --reuse-backup)
+      REUSE_BACKUP_ID="${2:-}"
       shift 2
       ;;
     --ansi-red)
@@ -179,10 +190,10 @@ case "$STATUS_PALETTE" in
 esac
 
 case "$STYLE_PRESET" in
-  balanced|tokyonight|catppuccin|gruvbox|rose-pine|pure-matugen) ;;
+  default|vivid|playful|energetic|creative|friendly|positive) ;;
   *)
     echo "Invalid style preset: $STYLE_PRESET" >&2
-    echo "Use one of: balanced, tokyonight, catppuccin, gruvbox, rose-pine, pure-matugen" >&2
+    echo "Use one of: default, vivid, playful, energetic, creative, friendly, positive" >&2
     exit 1
     ;;
 esac
@@ -197,28 +208,64 @@ if [ -z "$WALLPAPER" ] || [ ! -f "$WALLPAPER" ]; then
 fi
 
 mkdir -p "$BACKUP_ROOT" "$HOME_DIR/.termux"
-STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP_DIR="$BACKUP_ROOT/$STAMP"
-mkdir -p "$BACKUP_DIR"
+if [ -n "$REUSE_BACKUP_ID" ]; then
+  STAMP="$REUSE_BACKUP_ID"
+  BACKUP_DIR="$BACKUP_ROOT/$STAMP"
+  if [ ! -d "$BACKUP_DIR" ]; then
+    echo "Preview backup not found: $BACKUP_DIR" >&2
+    exit 1
+  fi
+else
+  STAMP="$(date +%Y%m%d-%H%M%S)"
+  BACKUP_DIR="$BACKUP_ROOT/$STAMP"
+  mkdir -p "$BACKUP_DIR"
+fi
+PROGRESS_FILE="${TOOIE_APPLY_PROGRESS_FILE:-$TOOIE_DIR/apply-progress.json}"
 
-if [ -f "$TERMUX_COLORS" ]; then
-  cp "$TERMUX_COLORS" "$BACKUP_DIR/colors.properties.bak"
-fi
-if [ -f "$TMUX_CONF" ]; then
-  cp "$TMUX_CONF" "$BACKUP_DIR/tmux.conf.bak"
-fi
-if [ -f "$PEACLOCK_CONFIG" ]; then
-  cp "$PEACLOCK_CONFIG" "$BACKUP_DIR/peaclock.config.bak"
-fi
-if [ -f "$STARSHIP_CONFIG" ]; then
-  cp "$STARSHIP_CONFIG" "$BACKUP_DIR/starship.toml.bak"
-fi
-if [ -f "$NVIM_THEME_FILE" ]; then
-  cp "$NVIM_THEME_FILE" "$BACKUP_DIR/tooie-material.lua.bak"
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_progress() {
+  label="$1"
+  progress="$2"
+  [ -n "$PROGRESS_FILE" ] || return 0
+  mkdir -p "$(dirname "$PROGRESS_FILE")"
+  printf '{"label":"%s","progress":%s}\n' "$(json_escape "$label")" "$progress" > "$PROGRESS_FILE"
+}
+
+write_progress "Preparing theme" 0.05
+
+if [ -z "$REUSE_BACKUP_ID" ]; then
+  if [ -f "$TERMUX_COLORS" ]; then
+    cp "$TERMUX_COLORS" "$BACKUP_DIR/colors.properties.bak"
+  fi
+  if [ -f "$TMUX_CONF" ]; then
+    cp "$TMUX_CONF" "$BACKUP_DIR/tmux.conf.bak"
+  fi
+  if [ -f "$PEACLOCK_CONFIG" ]; then
+    cp "$PEACLOCK_CONFIG" "$BACKUP_DIR/peaclock.config.bak"
+  fi
+  if [ -f "$STARSHIP_CONFIG" ]; then
+    cp "$STARSHIP_CONFIG" "$BACKUP_DIR/starship.toml.bak"
+  fi
+  if [ -f "$NVIM_THEME_FILE" ]; then
+    cp "$NVIM_THEME_FILE" "$BACKUP_DIR/tooie-material.lua.bak"
+  fi
 fi
 
 JSON_FILE="$BACKUP_DIR/matugen.json"
-"$MATUGEN_BIN" image "$WALLPAPER" -m "$MODE" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$JSON_FILE"
+if [ -n "$REUSE_BACKUP_ID" ]; then
+  write_progress "Reusing updated preview" 0.14
+  if [ ! -f "$JSON_FILE" ]; then
+    echo "Preview data missing: $JSON_FILE" >&2
+    exit 1
+  fi
+else
+  write_progress "Extracting wallpaper roles" 0.14
+  "$MATUGEN_BIN" image "$WALLPAPER" -m "$MODE" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$JSON_FILE"
+fi
+write_progress "Deriving semantic palette" 0.28
 
 jq_color() {
   role="$1"
@@ -351,7 +398,7 @@ role_color() {
   fi
 }
 
-if [ "$STYLE_PRESET" = "pure-matugen" ]; then
+if [ "$STYLE_PRESET" = "default" ]; then
   if [ "$MODE" = "dark" ]; then
     FALLBACK_BG="#1a1b26"
     FALLBACK_FG="#c0caf5"
@@ -395,44 +442,95 @@ if [ "$STYLE_PRESET" = "pure-matugen" ]; then
   C19="$(role_color surface_bright "$(mix_hex "$BG" "#ffffff" 0.08)")"
   C20="$(role_color surface_variant "$(mix_hex "$C0" "$C15" 0.25)")"
   C21="$(role_color outline_variant "$(mix_hex "$C14" "$C0" 0.30)")"
+  EFFECTIVE_BACKGROUND="$BG"
+  EFFECTIVE_SURFACE="$C0"
+  EFFECTIVE_ON_SURFACE="$FG"
+  EFFECTIVE_OUTLINE="$C14"
+  EFFECTIVE_PRIMARY="$(ensure_contrast "$PURE_PRIMARY" "$BG" 4.0)"
+  EFFECTIVE_SECONDARY="$(ensure_contrast "$PURE_SECONDARY" "$BG" 4.0)"
+  EFFECTIVE_TERTIARY="$(ensure_contrast "$PURE_TERTIARY" "$BG" 4.0)"
+  EFFECTIVE_ERROR="$(ensure_contrast "$PURE_ERROR" "$BG" 4.0)"
 else
   if [ "$MODE" = "dark" ]; then
     case "$STYLE_PRESET" in
-      tokyonight)
-        ANCHOR_BG="#1a1b26"; ANCHOR_FG="#c0caf5"; ANCHOR_RED="#f7768e"; ANCHOR_GREEN="#9ece6a"; ANCHOR_YELLOW="#e0af68"; ANCHOR_BLUE="#7aa2f7"; ANCHOR_MAGENTA="#bb9af7"; ANCHOR_CYAN="#7dcfff"
+      vivid)
+        ANCHOR_BG="#15171f"; ANCHOR_FG="#e5e9f0"; ANCHOR_RED="#ff6b7a"; ANCHOR_GREEN="#6fe3a1"; ANCHOR_YELLOW="#ffd166"; ANCHOR_BLUE="#5fb0ff"; ANCHOR_MAGENTA="#d28cff"; ANCHOR_CYAN="#4fe0d0"
         ;;
-      catppuccin)
-        ANCHOR_BG="#1e1e2e"; ANCHOR_FG="#cdd6f4"; ANCHOR_RED="#f38ba8"; ANCHOR_GREEN="#a6e3a1"; ANCHOR_YELLOW="#f9e2af"; ANCHOR_BLUE="#89b4fa"; ANCHOR_MAGENTA="#cba6f7"; ANCHOR_CYAN="#94e2d5"
+      playful)
+        ANCHOR_BG="#171822"; ANCHOR_FG="#ebe7ff"; ANCHOR_RED="#ff7f96"; ANCHOR_GREEN="#7be495"; ANCHOR_YELLOW="#ffd166"; ANCHOR_BLUE="#7aa2ff"; ANCHOR_MAGENTA="#d792ff"; ANCHOR_CYAN="#66e3ff"
         ;;
-      gruvbox)
-        ANCHOR_BG="#282828"; ANCHOR_FG="#ebdbb2"; ANCHOR_RED="#fb4934"; ANCHOR_GREEN="#b8bb26"; ANCHOR_YELLOW="#fabd2f"; ANCHOR_BLUE="#83a598"; ANCHOR_MAGENTA="#d3869b"; ANCHOR_CYAN="#8ec07c"
+      energetic)
+        ANCHOR_BG="#1a1612"; ANCHOR_FG="#f2e7de"; ANCHOR_RED="#ff6b5f"; ANCHOR_GREEN="#78d98b"; ANCHOR_YELLOW="#ffbf5a"; ANCHOR_BLUE="#5ba8ff"; ANCHOR_MAGENTA="#ff84c1"; ANCHOR_CYAN="#42d6c5"
         ;;
-      rose-pine)
-        ANCHOR_BG="#191724"; ANCHOR_FG="#e0def4"; ANCHOR_RED="#eb6f92"; ANCHOR_GREEN="#9ccfd8"; ANCHOR_YELLOW="#f6c177"; ANCHOR_BLUE="#31748f"; ANCHOR_MAGENTA="#c4a7e7"; ANCHOR_CYAN="#9ccfd8"
+      creative)
+        ANCHOR_BG="#151820"; ANCHOR_FG="#e8edf7"; ANCHOR_RED="#ff7285"; ANCHOR_GREEN="#67d9a2"; ANCHOR_YELLOW="#ffc857"; ANCHOR_BLUE="#57a6ff"; ANCHOR_MAGENTA="#bb86ff"; ANCHOR_CYAN="#32d4ff"
+        ;;
+      friendly)
+        ANCHOR_BG="#17191c"; ANCHOR_FG="#e6ece9"; ANCHOR_RED="#f17c8f"; ANCHOR_GREEN="#78d1a2"; ANCHOR_YELLOW="#f3c96b"; ANCHOR_BLUE="#78aee8"; ANCHOR_MAGENTA="#c09de8"; ANCHOR_CYAN="#68d5d3"
+        ;;
+      positive)
+        ANCHOR_BG="#151912"; ANCHOR_FG="#edf0df"; ANCHOR_RED="#ff7c6b"; ANCHOR_GREEN="#89db6a"; ANCHOR_YELLOW="#ffd95c"; ANCHOR_BLUE="#65a6ff"; ANCHOR_MAGENTA="#d29dff"; ANCHOR_CYAN="#59dbba"
         ;;
       *)
-        ANCHOR_BG="#1a1b26"; ANCHOR_FG="#c0caf5"; ANCHOR_RED="#f7768e"; ANCHOR_GREEN="#9ece6a"; ANCHOR_YELLOW="#e0af68"; ANCHOR_BLUE="#7aa2f7"; ANCHOR_MAGENTA="#bb9af7"; ANCHOR_CYAN="#7dcfff"
+        ANCHOR_BG="#15171f"; ANCHOR_FG="#e5e9f0"; ANCHOR_RED="#ff6b7a"; ANCHOR_GREEN="#6fe3a1"; ANCHOR_YELLOW="#ffd166"; ANCHOR_BLUE="#5fb0ff"; ANCHOR_MAGENTA="#d28cff"; ANCHOR_CYAN="#4fe0d0"
         ;;
     esac
   else
     case "$STYLE_PRESET" in
-      tokyonight)
-        ANCHOR_BG="#d5d6db"; ANCHOR_FG="#343b58"; ANCHOR_RED="#8c4351"; ANCHOR_GREEN="#485e30"; ANCHOR_YELLOW="#8f5e15"; ANCHOR_BLUE="#34548a"; ANCHOR_MAGENTA="#5a4a78"; ANCHOR_CYAN="#0f4b6e"
+      vivid)
+        ANCHOR_BG="#f3f5fb"; ANCHOR_FG="#243041"; ANCHOR_RED="#cf334f"; ANCHOR_GREEN="#16794a"; ANCHOR_YELLOW="#8f6300"; ANCHOR_BLUE="#005ac1"; ANCHOR_MAGENTA="#7d3aca"; ANCHOR_CYAN="#006a6a"
         ;;
-      catppuccin)
-        ANCHOR_BG="#eff1f5"; ANCHOR_FG="#4c4f69"; ANCHOR_RED="#d20f39"; ANCHOR_GREEN="#40a02b"; ANCHOR_YELLOW="#df8e1d"; ANCHOR_BLUE="#1e66f5"; ANCHOR_MAGENTA="#8839ef"; ANCHOR_CYAN="#179299"
+      playful)
+        ANCHOR_BG="#f7f3ff"; ANCHOR_FG="#3e3452"; ANCHOR_RED="#c73f68"; ANCHOR_GREEN="#297a49"; ANCHOR_YELLOW="#9a6700"; ANCHOR_BLUE="#375fd3"; ANCHOR_MAGENTA="#8d43d6"; ANCHOR_CYAN="#006f83"
         ;;
-      gruvbox)
-        ANCHOR_BG="#fbf1c7"; ANCHOR_FG="#3c3836"; ANCHOR_RED="#cc241d"; ANCHOR_GREEN="#98971a"; ANCHOR_YELLOW="#d79921"; ANCHOR_BLUE="#458588"; ANCHOR_MAGENTA="#b16286"; ANCHOR_CYAN="#689d6a"
+      energetic)
+        ANCHOR_BG="#fff5ec"; ANCHOR_FG="#432d1b"; ANCHOR_RED="#c63b26"; ANCHOR_GREEN="#2f7b44"; ANCHOR_YELLOW="#9f6200"; ANCHOR_BLUE="#0059b3"; ANCHOR_MAGENTA="#a03c89"; ANCHOR_CYAN="#006e64"
         ;;
-      rose-pine)
-        ANCHOR_BG="#faf4ed"; ANCHOR_FG="#575279"; ANCHOR_RED="#b4637a"; ANCHOR_GREEN="#56949f"; ANCHOR_YELLOW="#ea9d34"; ANCHOR_BLUE="#286983"; ANCHOR_MAGENTA="#907aa9"; ANCHOR_CYAN="#56949f"
+      creative)
+        ANCHOR_BG="#f4f7ff"; ANCHOR_FG="#28354a"; ANCHOR_RED="#c73757"; ANCHOR_GREEN="#1f7b58"; ANCHOR_YELLOW="#8f6900"; ANCHOR_BLUE="#0057c8"; ANCHOR_MAGENTA="#6f45db"; ANCHOR_CYAN="#006d94"
+        ;;
+      friendly)
+        ANCHOR_BG="#f5f7f5"; ANCHOR_FG="#31403d"; ANCHOR_RED="#b85369"; ANCHOR_GREEN="#2f7457"; ANCHOR_YELLOW="#876a1e"; ANCHOR_BLUE="#466fa8"; ANCHOR_MAGENTA="#7f63aa"; ANCHOR_CYAN="#2f8080"
+        ;;
+      positive)
+        ANCHOR_BG="#f8fbe9"; ANCHOR_FG="#33411f"; ANCHOR_RED="#c54b3c"; ANCHOR_GREEN="#3a7d1d"; ANCHOR_YELLOW="#906700"; ANCHOR_BLUE="#2d66c4"; ANCHOR_MAGENTA="#8f57c9"; ANCHOR_CYAN="#18766d"
         ;;
       *)
-        ANCHOR_BG="#eff1f5"; ANCHOR_FG="#4c4f69"; ANCHOR_RED="#d20f39"; ANCHOR_GREEN="#40a02b"; ANCHOR_YELLOW="#df8e1d"; ANCHOR_BLUE="#1e66f5"; ANCHOR_MAGENTA="#8839ef"; ANCHOR_CYAN="#179299"
+        ANCHOR_BG="#f3f5fb"; ANCHOR_FG="#243041"; ANCHOR_RED="#cf334f"; ANCHOR_GREEN="#16794a"; ANCHOR_YELLOW="#8f6300"; ANCHOR_BLUE="#005ac1"; ANCHOR_MAGENTA="#7d3aca"; ANCHOR_CYAN="#006a6a"
         ;;
     esac
   fi
+
+  case "$STYLE_PRESET" in
+    vivid)
+      BG_T="0.28"; SURFACE_T="0.42"; FG_T="0.12"; MUTED_T="0.30"; OUTLINE_T="0.42"; PRIMARY_T="0.82"; SECONDARY_T="0.80"; TERTIARY_T="0.78"; ERROR_T="0.76"
+      PRIMARY_TARGET="$ANCHOR_BLUE"; SECONDARY_TARGET="$ANCHOR_CYAN"; TERTIARY_TARGET="$ANCHOR_MAGENTA"
+      ;;
+    playful)
+      BG_T="0.24"; SURFACE_T="0.38"; FG_T="0.12"; MUTED_T="0.28"; OUTLINE_T="0.40"; PRIMARY_T="0.84"; SECONDARY_T="0.78"; TERTIARY_T="0.86"; ERROR_T="0.74"
+      PRIMARY_TARGET="$ANCHOR_MAGENTA"; SECONDARY_TARGET="$ANCHOR_BLUE"; TERTIARY_TARGET="$ANCHOR_YELLOW"
+      ;;
+    energetic)
+      BG_T="0.34"; SURFACE_T="0.48"; FG_T="0.10"; MUTED_T="0.26"; OUTLINE_T="0.46"; PRIMARY_T="0.88"; SECONDARY_T="0.84"; TERTIARY_T="0.74"; ERROR_T="0.84"
+      PRIMARY_TARGET="$ANCHOR_YELLOW"; SECONDARY_TARGET="$ANCHOR_RED"; TERTIARY_TARGET="$ANCHOR_BLUE"
+      ;;
+    creative)
+      BG_T="0.30"; SURFACE_T="0.44"; FG_T="0.10"; MUTED_T="0.28"; OUTLINE_T="0.44"; PRIMARY_T="0.86"; SECONDARY_T="0.80"; TERTIARY_T="0.82"; ERROR_T="0.76"
+      PRIMARY_TARGET="$ANCHOR_MAGENTA"; SECONDARY_TARGET="$ANCHOR_BLUE"; TERTIARY_TARGET="$ANCHOR_CYAN"
+      ;;
+    friendly)
+      BG_T="0.26"; SURFACE_T="0.36"; FG_T="0.14"; MUTED_T="0.30"; OUTLINE_T="0.38"; PRIMARY_T="0.82"; SECONDARY_T="0.72"; TERTIARY_T="0.72"; ERROR_T="0.70"
+      PRIMARY_TARGET="$ANCHOR_GREEN"; SECONDARY_TARGET="$ANCHOR_BLUE"; TERTIARY_TARGET="$ANCHOR_YELLOW"
+      ;;
+    positive)
+      BG_T="0.30"; SURFACE_T="0.40"; FG_T="0.12"; MUTED_T="0.28"; OUTLINE_T="0.40"; PRIMARY_T="0.86"; SECONDARY_T="0.82"; TERTIARY_T="0.70"; ERROR_T="0.72"
+      PRIMARY_TARGET="$ANCHOR_GREEN"; SECONDARY_TARGET="$ANCHOR_YELLOW"; TERTIARY_TARGET="$ANCHOR_BLUE"
+      ;;
+    *)
+      BG_T="0.28"; SURFACE_T="0.42"; FG_T="0.12"; MUTED_T="0.30"; OUTLINE_T="0.42"; PRIMARY_T="0.82"; SECONDARY_T="0.80"; TERTIARY_T="0.78"; ERROR_T="0.76"
+      PRIMARY_TARGET="$ANCHOR_BLUE"; SECONDARY_TARGET="$ANCHOR_CYAN"; TERTIARY_TARGET="$ANCHOR_MAGENTA"
+      ;;
+  esac
 
   BG_BASE="$(role_color background "$ANCHOR_BG")"
   SURFACE_BASE="$(role_color surface_container "$(mix_hex "$BG_BASE" "$ANCHOR_BG" 0.22)")"
@@ -445,20 +543,29 @@ else
   ERROR_BASE="$(role_color error "$ANCHOR_RED")"
   OUTLINE_BASE="$(role_color outline "$(mix_hex "$FG_BASE" "$BG_BASE" 0.54)")"
 
-  BG="$BG_BASE"
-  C0="$SURFACE_BASE"
-  FG="$(ensure_contrast "$FG_BASE" "$BG" 7.0)"
-  CURSOR="$(ensure_contrast "$CURSOR_BASE" "$BG" 4.5)"
+  BG="$(mix_hex "$BG_BASE" "$ANCHOR_BG" "$BG_T")"
+  C0="$(mix_hex "$SURFACE_BASE" "$ANCHOR_BG" "$SURFACE_T")"
+  FG="$(ensure_contrast "$(mix_hex "$FG_BASE" "$ANCHOR_FG" "$FG_T")" "$BG" 7.0)"
+  CURSOR="$(ensure_contrast "$(mix_hex "$CURSOR_BASE" "$PRIMARY_TARGET" "0.72")" "$BG" 4.5)"
   C7="$(ensure_contrast "$(role_color on_surface "$FG")" "$BG" 6.0)"
-  C15="$(ensure_contrast "$MUTED_BASE" "$BG" 4.5)"
-  C14="$(ensure_contrast "$OUTLINE_BASE" "$BG" 3.2)"
+  C15="$(ensure_contrast "$(mix_hex "$MUTED_BASE" "$ANCHOR_FG" "$MUTED_T")" "$BG" 4.5)"
+  C14="$(ensure_contrast "$(mix_hex "$OUTLINE_BASE" "$ANCHOR_FG" "$OUTLINE_T")" "$BG" 3.2)"
 
-  C1="$(ensure_contrast "$(mix_hex "$ERROR_BASE" "$ANCHOR_RED" 0.42)" "$BG" 3.2)"
-  C2="$(ensure_contrast "$(mix_hex "$TERTIARY_BASE" "$ANCHOR_GREEN" 0.60)" "$BG" 3.2)"
-  C3="$(ensure_contrast "$(mix_hex "$SECONDARY_BASE" "$ANCHOR_YELLOW" 0.55)" "$BG" 3.2)"
-  C4="$(ensure_contrast "$(mix_hex "$PRIMARY_BASE" "$ANCHOR_BLUE" 0.52)" "$BG" 3.2)"
-  C5="$(ensure_contrast "$(mix_hex "$TERTIARY_BASE" "$ANCHOR_MAGENTA" 0.48)" "$BG" 3.2)"
-  C6="$(ensure_contrast "$(mix_hex "$SECONDARY_BASE" "$ANCHOR_CYAN" 0.52)" "$BG" 3.2)"
+  EFFECTIVE_PRIMARY="$(ensure_contrast "$(mix_hex "$PRIMARY_BASE" "$PRIMARY_TARGET" "$PRIMARY_T")" "$BG" 4.0)"
+  EFFECTIVE_SECONDARY="$(ensure_contrast "$(mix_hex "$SECONDARY_BASE" "$SECONDARY_TARGET" "$SECONDARY_T")" "$BG" 4.0)"
+  EFFECTIVE_TERTIARY="$(ensure_contrast "$(mix_hex "$TERTIARY_BASE" "$TERTIARY_TARGET" "$TERTIARY_T")" "$BG" 4.0)"
+  EFFECTIVE_ERROR="$(ensure_contrast "$(mix_hex "$ERROR_BASE" "$ANCHOR_RED" "$ERROR_T")" "$BG" 4.0)"
+  EFFECTIVE_BACKGROUND="$BG"
+  EFFECTIVE_SURFACE="$C0"
+  EFFECTIVE_ON_SURFACE="$FG"
+  EFFECTIVE_OUTLINE="$C14"
+
+  C1="$EFFECTIVE_ERROR"
+  C2="$(ensure_contrast "$(mix_hex "$TERTIARY_BASE" "$ANCHOR_GREEN" 0.76)" "$BG" 3.6)"
+  C3="$(ensure_contrast "$(mix_hex "$SECONDARY_BASE" "$ANCHOR_YELLOW" 0.78)" "$BG" 3.6)"
+  C4="$(ensure_contrast "$(mix_hex "$PRIMARY_BASE" "$ANCHOR_BLUE" 0.76)" "$BG" 3.6)"
+  C5="$(ensure_contrast "$(mix_hex "$TERTIARY_BASE" "$ANCHOR_MAGENTA" 0.78)" "$BG" 3.6)"
+  C6="$(ensure_contrast "$(mix_hex "$SECONDARY_BASE" "$ANCHOR_CYAN" 0.78)" "$BG" 3.6)"
 
   if [ "$MODE" = "dark" ]; then
     C8="$(ensure_contrast "$(mix_hex "$C0" "#ffffff" 0.20)" "$BG" 1.3)"
@@ -531,53 +638,89 @@ validate_override_hex "$ANSI_CYAN_OVERRIDE" "--ansi-cyan"
 [ -n "$ANSI_MAGENTA_OVERRIDE" ] && { C5="$ANSI_MAGENTA_OVERRIDE"; C13="$ANSI_MAGENTA_OVERRIDE"; }
 [ -n "$ANSI_CYAN_OVERRIDE" ] && { C6="$ANSI_CYAN_OVERRIDE"; C14="$ANSI_CYAN_OVERRIDE"; }
 
+STATE_RED="$(ensure_contrast "$C1" "$BG" 3.6)"
+STATE_ORANGE="$(ensure_contrast "$(mix_hex "$C1" "$C3" 0.58)" "$BG" 3.6)"
+STATE_YELLOW="$(ensure_contrast "$C3" "$BG" 3.6)"
+STATE_GREEN="$(ensure_contrast "$C2" "$BG" 3.6)"
+STATE_MINT="$(ensure_contrast "$(mix_hex "$C2" "$C6" 0.42)" "$BG" 3.6)"
+STATE_BLUE="$(ensure_contrast "$C4" "$BG" 3.6)"
+STATE_TEAL="$(ensure_contrast "$C6" "$BG" 3.6)"
+STATE_VIOLET="$(ensure_contrast "$(mix_hex "$C4" "$C5" 0.55)" "$BG" 3.6)"
+STATE_MAGENTA="$(ensure_contrast "$C5" "$BG" 3.6)"
+
 if [ "$STATUS_PALETTE" = "vibrant" ]; then
-  SEP_STATUS="$(ensure_contrast "$C12" "$BG" 3.0)"
-  WEATHER_STATUS="$(ensure_contrast "$C6" "$BG" 3.0)"
-  CHARGING_STATUS="$(ensure_contrast "$C10" "$BG" 3.0)"
-  BAT_1="$(ensure_contrast "$C1" "$BG" 3.0)"
-  BAT_2="$(ensure_contrast "$(mix_hex "$C1" "$C3" 0.45)" "$BG" 3.0)"
-  BAT_3="$(ensure_contrast "$C3" "$BG" 3.0)"
-  BAT_4="$(ensure_contrast "$(mix_hex "$C3" "$C2" 0.45)" "$BG" 3.0)"
-  BAT_5="$(ensure_contrast "$(mix_hex "$C2" "$C10" 0.35)" "$BG" 3.0)"
-  BAT_6="$(ensure_contrast "$C10" "$BG" 3.0)"
-  CPU_1="$(ensure_contrast "$(mix_hex "$C1" "$C9" 0.25)" "$BG" 3.0)"
-  CPU_2="$(ensure_contrast "$C9" "$BG" 3.0)"
-  CPU_3="$(ensure_contrast "$(mix_hex "$C11" "$C3" 0.45)" "$BG" 3.0)"
-  CPU_4="$(ensure_contrast "$C11" "$BG" 3.0)"
-  CPU_5="$(ensure_contrast "$(mix_hex "$C10" "$C2" 0.35)" "$BG" 3.0)"
-  CPU_6="$(ensure_contrast "$C10" "$BG" 3.0)"
-  RAM_1="$(ensure_contrast "$(mix_hex "$C1" "$C5" 0.30)" "$BG" 3.0)"
-  RAM_2="$(ensure_contrast "$(mix_hex "$C1" "$C6" 0.40)" "$BG" 3.0)"
-  RAM_3="$(ensure_contrast "$(mix_hex "$C3" "$C6" 0.42)" "$BG" 3.0)"
-  RAM_4="$(ensure_contrast "$(mix_hex "$C2" "$C6" 0.35)" "$BG" 3.0)"
-  RAM_5="$(ensure_contrast "$C2" "$BG" 3.0)"
-  RAM_6="$(ensure_contrast "$C10" "$BG" 3.0)"
+  SEP_STATUS="$(ensure_contrast "$(mix_hex "$C14" "$C12" 0.55)" "$BG" 3.2)"
+  WEATHER_STATUS="$(ensure_contrast "$(mix_hex "$STATE_BLUE" "$STATE_TEAL" 0.45)" "$BG" 3.6)"
+  CHARGING_STATUS="$(ensure_contrast "$(mix_hex "$STATE_GREEN" "$STATE_MINT" 0.40)" "$BG" 3.6)"
 else
   SEP_STATUS="$(ensure_contrast "$C14" "$BG" 3.0)"
-  WEATHER_STATUS="$(ensure_contrast "$C4" "$BG" 3.0)"
-  CHARGING_STATUS="$(ensure_contrast "$C2" "$BG" 3.0)"
-  BAT_1="$(ensure_contrast "$C1" "$BG" 3.0)"
-  BAT_2="$(ensure_contrast "$(mix_hex "$C1" "$C3" 0.35)" "$BG" 3.0)"
-  BAT_3="$(ensure_contrast "$C3" "$BG" 3.0)"
-  BAT_4="$(ensure_contrast "$(mix_hex "$C3" "$C2" 0.35)" "$BG" 3.0)"
-  BAT_5="$(ensure_contrast "$C2" "$BG" 3.0)"
-  BAT_6="$(ensure_contrast "$C10" "$BG" 3.0)"
-  CPU_1="$(ensure_contrast "$C1" "$BG" 3.0)"
-  CPU_2="$(ensure_contrast "$(mix_hex "$C1" "$C11" 0.42)" "$BG" 3.0)"
-  CPU_3="$(ensure_contrast "$C11" "$BG" 3.0)"
-  CPU_4="$(ensure_contrast "$(mix_hex "$C11" "$C2" 0.48)" "$BG" 3.0)"
-  CPU_5="$(ensure_contrast "$C2" "$BG" 3.0)"
-  CPU_6="$(ensure_contrast "$C10" "$BG" 3.0)"
-  RAM_1="$(ensure_contrast "$(mix_hex "$C1" "$C6" 0.28)" "$BG" 3.0)"
-  RAM_2="$(ensure_contrast "$(mix_hex "$C3" "$C6" 0.32)" "$BG" 3.0)"
-  RAM_3="$(ensure_contrast "$C6" "$BG" 3.0)"
-  RAM_4="$(ensure_contrast "$(mix_hex "$C6" "$C2" 0.40)" "$BG" 3.0)"
-  RAM_5="$(ensure_contrast "$C2" "$BG" 3.0)"
-  RAM_6="$(ensure_contrast "$C10" "$BG" 3.0)"
+  WEATHER_STATUS="$(ensure_contrast "$STATE_BLUE" "$BG" 3.4)"
+  CHARGING_STATUS="$(ensure_contrast "$STATE_GREEN" "$BG" 3.4)"
+fi
+
+BAT_1="$STATE_RED"
+BAT_2="$STATE_ORANGE"
+BAT_3="$STATE_YELLOW"
+BAT_4="$(ensure_contrast "$(mix_hex "$STATE_YELLOW" "$STATE_GREEN" 0.42)" "$BG" 3.6)"
+BAT_5="$STATE_MINT"
+BAT_6="$STATE_GREEN"
+
+CPU_1="$STATE_GREEN"
+CPU_2="$STATE_TEAL"
+CPU_3="$STATE_BLUE"
+CPU_4="$STATE_VIOLET"
+CPU_5="$STATE_ORANGE"
+CPU_6="$STATE_RED"
+
+RAM_1="$STATE_BLUE"
+RAM_2="$(ensure_contrast "$(mix_hex "$STATE_BLUE" "$STATE_TEAL" 0.55)" "$BG" 3.6)"
+RAM_3="$STATE_TEAL"
+RAM_4="$STATE_VIOLET"
+RAM_5="$STATE_MAGENTA"
+RAM_6="$STATE_RED"
+
+{
+  echo "backup_id=$STAMP"
+  echo "wallpaper=$WALLPAPER"
+  echo "mode=$MODE"
+  echo "type=$SCHEME_TYPE"
+  echo "matugen_bin=$MATUGEN_BIN"
+  echo "text_color_override=$TEXT_COLOR_OVERRIDE"
+  echo "cursor_color_override=$CURSOR_COLOR_OVERRIDE"
+  echo "status_palette=$STATUS_PALETTE"
+  echo "style_preset=$STYLE_PRESET"
+  echo "effective_background=$EFFECTIVE_BACKGROUND"
+  echo "effective_surface=$EFFECTIVE_SURFACE"
+  echo "effective_on_surface=$EFFECTIVE_ON_SURFACE"
+  echo "effective_outline=$EFFECTIVE_OUTLINE"
+  echo "effective_primary=$EFFECTIVE_PRIMARY"
+  echo "effective_secondary=$EFFECTIVE_SECONDARY"
+  echo "effective_tertiary=$EFFECTIVE_TERTIARY"
+  echo "effective_error=$EFFECTIVE_ERROR"
+  echo "ansi_red_override=$ANSI_RED_OVERRIDE"
+  echo "ansi_green_override=$ANSI_GREEN_OVERRIDE"
+  echo "ansi_yellow_override=$ANSI_YELLOW_OVERRIDE"
+  echo "ansi_blue_override=$ANSI_BLUE_OVERRIDE"
+  echo "ansi_magenta_override=$ANSI_MAGENTA_OVERRIDE"
+  echo "ansi_cyan_override=$ANSI_CYAN_OVERRIDE"
+  if [ "$PREVIEW_ONLY" -eq 1 ]; then
+    echo "preview_only=true"
+  else
+    echo "preview_only=false"
+  fi
+  if [ -n "$REUSE_BACKUP_ID" ]; then
+    echo "reused_preview_id=$REUSE_BACKUP_ID"
+  fi
+} > "$BACKUP_DIR/meta.env"
+
+if [ "$PREVIEW_ONLY" -eq 1 ]; then
+  write_progress "Preview ready" 1.0
+  echo "Preview created: $BACKUP_DIR"
+  exit 0
 fi
 
 TERMUX_TMP="$BACKUP_DIR/colors.properties.new"
+write_progress "Writing Termux colors" 0.42
 cat > "$TERMUX_TMP" <<EOF
 # Generated by $TOOIE_DIR/apply-material.sh
 # source wallpaper: $WALLPAPER
@@ -615,20 +758,21 @@ EOF
 cp "$TERMUX_TMP" "$TERMUX_COLORS"
 
 TMUX_BLOCK_FILE="$BACKUP_DIR/tmux-material-block.conf"
+write_progress "Writing tmux theme" 0.56
 cat > "$TMUX_BLOCK_FILE" <<EOF
 # >>> MATUGEN THEME START >>>
 # Generated by $TOOIE_DIR/apply-material.sh
 set -g status-style "bg=$BG,fg=$FG"
-set -g status-left "#[fg=$STATUS_LEFT_FG,bg=$C4,bold] #S #[bg=$BG,fg=$FG] "
-set -g status-right "#{?client_prefix,PREFIX ,}#(/data/data/com.termux/files/home/.config/tmux/widget-battery) | #(/data/data/com.termux/files/home/.config/tmux/widget-cpu) | #(/data/data/com.termux/files/home/.config/tmux/widget-ram) | #(/data/data/com.termux/files/home/.config/tmux/widget-weather) "
+set -g status-left "#[fg=$STATUS_LEFT_FG,bg=$EFFECTIVE_PRIMARY,bold] #S #[bg=$BG,fg=$FG] "
+set -g status-right "#{?client_prefix,PREFIX ,}#(\$HOME/.config/tmux/widget-battery) | #(\$HOME/.config/tmux/widget-cpu) | #(\$HOME/.config/tmux/widget-ram) | #(\$HOME/.config/tmux/widget-weather) "
 set -g window-status-format "#[fg=$C14] #I:#W "
-set -g window-status-current-format "#[fg=$C2,bold] #I:#W "
+set -g window-status-current-format "#[fg=$EFFECTIVE_SECONDARY,bold] #I:#W "
 set -g pane-border-style "fg=$C14"
-set -g pane-active-border-style "fg=$C2"
-set -g message-style "bg=$BG,fg=$C2"
-set -g message-command-style "bg=$BG,fg=$C2"
-set -g mode-style "bg=$C2,fg=$MODE_FG"
-setw -g clock-mode-colour "$C2"
+set -g pane-active-border-style "fg=$EFFECTIVE_SECONDARY"
+set -g message-style "bg=$BG,fg=$EFFECTIVE_SECONDARY"
+set -g message-command-style "bg=$BG,fg=$EFFECTIVE_SECONDARY"
+set -g mode-style "bg=$EFFECTIVE_SECONDARY,fg=$MODE_FG"
+setw -g clock-mode-colour "$EFFECTIVE_SECONDARY"
 set -g @status-tmux-palette "$STATUS_PALETTE"
 set -g @status-tmux-color-separator "$SEP_STATUS"
 set -g @status-tmux-color-weather "$WEATHER_STATUS"
@@ -675,6 +819,7 @@ if [ ! -f "$PEACLOCK_CONFIG" ]; then
 fi
 
 PEACLOCK_TMP="$BACKUP_DIR/peaclock.config.new"
+write_progress "Writing peaclock theme" 0.68
 awk '
   BEGIN { skip=0 }
   /^# >>> MATUGEN PEACLOCK START >>>/ { skip=1; next }
@@ -687,15 +832,15 @@ cat >> "$PEACLOCK_TMP" <<EOF
 # >>> MATUGEN PEACLOCK START >>>
 # Generated by $TOOIE_DIR/apply-material.sh
 style inactive-fg $C14
-style active-bg $C2
+style active-bg $EFFECTIVE_PRIMARY
 style active-fg clear
-style colon-fg $C2
+style colon-fg $EFFECTIVE_PRIMARY
 style colon-bg clear
-style date $C3
+style date $EFFECTIVE_TERTIARY
 style text $C15
-style prompt $C2
+style prompt $EFFECTIVE_SECONDARY
 style success $C10
-style error $C1
+style error $EFFECTIVE_ERROR
 # <<< MATUGEN PEACLOCK END <<<
 EOF
 cp "$PEACLOCK_TMP" "$PEACLOCK_CONFIG"
@@ -706,6 +851,7 @@ if [ ! -f "$STARSHIP_CONFIG" ]; then
 fi
 
 STARSHIP_TMP="$BACKUP_DIR/starship.toml.new"
+write_progress "Writing starship theme" 0.78
 awk '
   BEGIN { skip=0 }
   /^# >>> MATUGEN STARSHIP START >>>/ { skip=1; next }
@@ -775,6 +921,7 @@ toml_upsert "$STARSHIP_CONFIG" "jobs" "style" "\"$C15\""
 toml_upsert "$STARSHIP_CONFIG" "jobs" "symbol" "\"[▶]($C4 italic)\""
 
 mkdir -p "$(dirname "$NVIM_THEME_FILE")"
+write_progress "Writing neovim theme" 0.88
 cat > "$NVIM_THEME_FILE" <<EOF
 -- Generated by $TOOIE_DIR/apply-material.sh
 return {
@@ -819,26 +966,12 @@ return {
 EOF
 
 {
-  echo "backup_id=$STAMP"
-  echo "wallpaper=$WALLPAPER"
-  echo "mode=$MODE"
-  echo "type=$SCHEME_TYPE"
-  echo "matugen_bin=$MATUGEN_BIN"
-  echo "text_color_override=$TEXT_COLOR_OVERRIDE"
-  echo "cursor_color_override=$CURSOR_COLOR_OVERRIDE"
-  echo "status_palette=$STATUS_PALETTE"
-  echo "style_preset=$STYLE_PRESET"
-  echo "ansi_red_override=$ANSI_RED_OVERRIDE"
-  echo "ansi_green_override=$ANSI_GREEN_OVERRIDE"
-  echo "ansi_yellow_override=$ANSI_YELLOW_OVERRIDE"
-  echo "ansi_blue_override=$ANSI_BLUE_OVERRIDE"
-  echo "ansi_magenta_override=$ANSI_MAGENTA_OVERRIDE"
-  echo "ansi_cyan_override=$ANSI_CYAN_OVERRIDE"
   echo "peaclock_themed=true"
   echo "starship_themed=true"
   echo "nvim_themed=true"
-} > "$BACKUP_DIR/meta.env"
+} >> "$BACKUP_DIR/meta.env"
 
+write_progress "Reloading shell surfaces" 0.94
 if command -v termux-reload-settings >/dev/null 2>&1; then
   termux-reload-settings || true
 fi
@@ -846,5 +979,7 @@ if command -v tmux >/dev/null 2>&1; then
   tmux source-file "$TMUX_CONF" 2>/dev/null || true
 fi
 
+write_progress "Finishing theme apply" 1.0
 echo "Applied Material theme."
 echo "Backup created: $BACKUP_DIR"
+echo "Fish config updated. Open a new shell or run: exec fish"

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var (
@@ -27,27 +28,31 @@ func ensureTooieSupportScripts() error {
 	scripts := []struct {
 		path    string
 		encoded string
+		repoRel string
 	}{
-		{path: applyScript, encoded: embeddedApplyMaterialScript},
-		{path: restoreScript, encoded: embeddedRestoreMaterialScript},
-		{path: filepath.Join(tooieConfigDir, "list-material-backups.sh"), encoded: embeddedListMaterialBackupsScript},
+		{path: installedApplyScriptPath(), encoded: embeddedApplyMaterialScript, repoRel: filepath.Join("scripts", "apply-material.sh")},
+		{path: installedRestoreScriptPath(), encoded: embeddedRestoreMaterialScript, repoRel: filepath.Join("scripts", "restore-material.sh")},
+		{path: filepath.Join(tooieConfigDir, "list-material-backups.sh"), encoded: embeddedListMaterialBackupsScript, repoRel: filepath.Join("scripts", "list-material-backups.sh")},
 	}
 	for _, script := range scripts {
-		if err := ensureSupportScript(script.path, script.encoded); err != nil {
+		if err := ensureSupportScript(script.path, script.repoRel, script.encoded); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func ensureSupportScript(path, encoded string) error {
-	info, err := os.Stat(path)
-	if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-		return nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
+func ensureSupportScript(path, repoRel, encoded string) error {
+	raw, err := supportScriptBytes(repoRel, encoded)
 	if err != nil {
-		return fmt.Errorf("decode %s: %w", filepath.Base(path), err)
+		return err
+	}
+	existing, err := os.ReadFile(path)
+	if err == nil {
+		info, statErr := os.Stat(path)
+		if statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 && bytesEqualTrimmed(existing, raw) {
+			return nil
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -56,4 +61,62 @@ func ensureSupportScript(path, encoded string) error {
 		return err
 	}
 	return nil
+}
+
+func supportScriptBytes(repoRel, encoded string) ([]byte, error) {
+	if repoPath := resolveRepoSupportPath(repoRel); repoPath != "" {
+		raw, err := os.ReadFile(repoPath)
+		if err == nil && len(raw) > 0 {
+			return raw, nil
+		}
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s: %w", filepath.Base(repoRel), err)
+	}
+	return raw, nil
+}
+
+func installedApplyScriptPath() string {
+	return filepath.Join(tooieConfigDir, "apply-material.sh")
+}
+
+func installedRestoreScriptPath() string {
+	return filepath.Join(tooieConfigDir, "restore-material.sh")
+}
+
+func currentApplyScriptPath() string {
+	if p := resolveRepoSupportPath(filepath.Join("scripts", "apply-material.sh")); p != "" {
+		return p
+	}
+	return installedApplyScriptPath()
+}
+
+func currentRestoreScriptPath() string {
+	if p := resolveRepoSupportPath(filepath.Join("scripts", "restore-material.sh")); p != "" {
+		return p
+	}
+	return installedRestoreScriptPath()
+}
+
+func resolveRepoSupportPath(repoRel string) string {
+	candidates := []string{}
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(exeDir, repoRel))
+	}
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		candidates = append(candidates, filepath.Join(wd, repoRel))
+	}
+	for _, p := range candidates {
+		info, err := os.Stat(p)
+		if err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func bytesEqualTrimmed(a, b []byte) bool {
+	return strings.TrimSpace(string(a)) == strings.TrimSpace(string(b))
 }

@@ -27,20 +27,18 @@ var (
 	homeDir        = resolveHomeDir()
 	tooieConfigDir = filepath.Join(homeDir, ".config", "tooie")
 	backupRoot     = filepath.Join(tooieConfigDir, "backups")
-	applyScript    = filepath.Join(tooieConfigDir, "apply-material.sh")
-	restoreScript  = filepath.Join(tooieConfigDir, "restore-material.sh")
 	defaultWall    = filepath.Join(homeDir, ".termux", "background", "background.jpeg")
 )
 
 const (
 	defaultMode    = "dark"
 	defaultPalette = "default"
-	defaultPreset  = "balanced"
+	defaultPreset  = "default"
 	pageTheme      = 0
 	pageHome       = 1
 )
 
-var stylePresets = []string{"balanced", "tokyonight", "catppuccin", "gruvbox", "rose-pine", "pure-matugen"}
+var stylePresets = []string{"default", "vivid", "playful", "energetic", "creative", "friendly", "positive"}
 
 type tickMsg time.Time
 type metricsTickMsg time.Time
@@ -58,9 +56,13 @@ type metricsMsg struct {
 }
 
 type applyDoneMsg struct {
-	label string
-	err   error
-	out   string
+	label       string
+	err         error
+	out         string
+	backupID    string
+	cacheKey    string
+	reused      bool
+	previewOnly bool
 }
 
 type homeAppsLoadedMsg struct {
@@ -105,6 +107,11 @@ type matugenJSON struct {
 			Color string `json:"color"`
 		} `json:"default"`
 	} `json:"colors"`
+}
+
+type applyProgressState struct {
+	Label    string  `json:"label"`
+	Progress float64 `json:"progress"`
 }
 
 type model struct {
@@ -172,6 +179,9 @@ type model struct {
 	applyVel         float64
 	applyTarget      float64
 	applyLabel       string
+	applyCacheKey    string
+	previewCacheKey  string
+	previewBackupID  string
 	apps             []launchableApp
 	appsLoaded       bool
 	appLoadErr       error
@@ -415,11 +425,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.applying {
 			return m, nil
 		}
-		if m.applyTarget < 0.92 {
-			m.applyTarget += 0.06
-			if m.applyTarget > 0.92 {
-				m.applyTarget = 0.92
+		if st, ok := readApplyProgressState(); ok {
+			if strings.TrimSpace(st.Label) != "" {
+				m.applyLabel = strings.TrimSpace(st.Label)
 			}
+			if st.Progress >= 0 {
+				m.applyTarget = st.Progress
+			}
+		} else if m.applyTarget < 0.08 {
+			m.applyTarget = 0.08
 		}
 		m.applyProgress, m.applyVel = m.barSpring.Update(m.applyProgress, m.applyVel, m.applyTarget)
 		return m, tickApply()
@@ -441,8 +455,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastStatus = msg.label + " failed: " + last
 			}
 		} else {
-			m.lastStatus = msg.label + " completed"
+			switch {
+			case msg.previewOnly:
+				m.lastStatus = "Colors updated"
+			case msg.reused:
+				m.lastStatus = msg.label + " completed from cached preview"
+			default:
+				m.lastStatus = msg.label + " completed"
+			}
+			if strings.TrimSpace(msg.backupID) != "" {
+				m.previewBackupID = msg.backupID
+			}
+			if msg.previewOnly {
+				m.previewCacheKey = msg.cacheKey
+			} else if msg.cacheKey == m.previewCacheKey && msg.reused {
+				m.previewCacheKey = ""
+				m.previewBackupID = ""
+			}
 		}
+		_ = os.Remove(applyProgressPath())
 		m.backups = loadBackups()
 		if m.backupIndex >= len(m.backups) {
 			m.backupIndex = max(0, len(m.backups)-1)
@@ -592,7 +623,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.lastStatus = "Restore unavailable: " + err.Error()
 					return m, nil
 				}
-				cmd := exec.Command(restoreScript, id)
+				cmd := exec.Command(currentRestoreScriptPath(), id)
 				m.lastStatus = "Restoring " + id + "..."
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 					if err != nil {
@@ -680,7 +711,7 @@ func (m model) settings() []string {
 		"Apply Theme",
 		"Update Colors",
 		"Mode: " + m.mode,
-		"Style Preset: " + m.stylePreset,
+		"Style Preset: " + displayStylePreset(m.stylePreset),
 		"Customize Colors...",
 		"Backups...",
 		"Refresh Backups",
@@ -694,9 +725,9 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	}
 	switch m.settingIndex {
 	case 0:
-		return m.startApply("Apply", true)
+		return m.startApply("Apply", true, false)
 	case 1:
-		return m.startApply("Update colors", false)
+		return m.startApply("Update colors", true, true)
 	case 2:
 		if m.mode == "dark" {
 			m.mode = "light"
@@ -764,13 +795,13 @@ func (m model) View() string {
 	if !m.applying {
 		status = statusStyle.Render(statusText)
 	}
-	hints := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[? hints]")
+	hints := ""
+	if !m.applying {
+		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[? hints]")
+	}
 	topBar := joinLR(status, hints, innerW)
 
-	panelH := max(4, innerH-2)
-	if m.page == pageHome {
-		panelH = max(4, innerH-2)
-	}
+	panelH := max(4, innerH-3)
 	main := m.renderMain(innerW, panelH)
 
 	body := fmt.Sprintf("%s\n%s\n%s", title, topBar, main)
@@ -957,7 +988,7 @@ func (m model) detailsBlock(totalWidth int) string {
 		"",
 		headerChip("Current Theme", "8"),
 		"  mode: " + m.mode,
-		"  style preset: " + m.stylePreset,
+		"  style preset: " + displayStylePreset(m.stylePreset),
 		"  status palette: " + m.palette,
 	}
 
@@ -972,7 +1003,7 @@ func (m model) detailsBlock(totalWidth int) string {
 		left = append(left, "  cursor override: auto")
 	}
 
-	right := []string{headerChip("Palette", "11"), ""}
+	right := []string{headerChip("Generated", "11"), ""}
 	right = append(right, m.palettePreviewLines()...)
 
 	return renderTwoColumns(left, right, totalWidth)
@@ -1011,11 +1042,14 @@ func (m model) renderHomePage(usableW, contentH int) string {
 
 	rowH := max(6, topH)
 	clockLines := m.renderDashboardVerticalClockTest(max(1, leftW-4), max(1, rowH-2))
-	clockPanel := panelStyle(leftW, rowH, "13").Render(strings.Join(clockLines, "\n"))
-	sysPanel := panelStyle(rightW, rowH, "10").Render(m.homeSystemBlock(rightW-4, rowH-2))
+	clockBorder := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("outline", "#565f89"), 0.35)
+	sysBorder := blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("outline", "#565f89"), 0.30)
+	launcherBorder := blendHexColor(m.themeRoleColor("outline", "#565f89"), m.themeRoleColor("surface_variant", "#1f2335"), 0.30)
+	clockPanel := panelStyle(leftW, rowH, clockBorder).Render(strings.Join(clockLines, "\n"))
+	sysPanel := panelStyle(rightW, rowH, sysBorder).Render(m.homeSystemBlock(rightW-4, rowH-2))
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, clockPanel, sysPanel)
 	bottomH = max(3, contentH-rowH)
-	bottomRow := panelStyle(usableW, bottomH, "8").Render(m.renderHomeLauncherBlock(usableW-4, bottomH-2))
+	bottomRow := panelStyle(usableW, bottomH, launcherBorder).Render(m.renderHomeLauncherBlock(usableW-4, bottomH-2))
 	return topRow + "\n" + bottomRow
 }
 
@@ -1120,11 +1154,12 @@ func (m model) palettePreviewLines() []string {
 		if hex == "" {
 			continue
 		}
-		sw := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Foreground(lipgloss.Color("#000000")).Render("  ")
+		swFg := ensureReadableTextColor(hex, "#111111", "#f5f5f8")
+		sw := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Foreground(lipgloss.Color(swFg)).Render("  ")
 		out = append(out, fmt.Sprintf("  %s %s", sw, hex+" "+k))
 	}
 	if len(out) == 0 {
-		out = append(out, "  (no matugen.json in selected backup)")
+		out = append(out, "  (no generated palette in selected backup)")
 	}
 	manual := []struct {
 		Label string
@@ -1148,7 +1183,8 @@ func (m model) palettePreviewLines() []string {
 			out = append(out, "", "  manual overrides")
 			anyManual = true
 		}
-		sw := lipgloss.NewStyle().Background(lipgloss.Color(item.Hex)).Foreground(lipgloss.Color("#000000")).Render("  ")
+		swFg := ensureReadableTextColor(item.Hex, "#111111", "#f5f5f8")
+		sw := lipgloss.NewStyle().Background(lipgloss.Color(item.Hex)).Foreground(lipgloss.Color(swFg)).Render("  ")
 		out = append(out, fmt.Sprintf("  %s %s %s", sw, item.Hex, item.Label))
 	}
 	return out
@@ -1159,9 +1195,11 @@ func (m model) hasActiveOverlay() bool {
 }
 
 func headerChip(text, color string) string {
+	bg := terminalColorHex(color)
+	fg := ensureReadableTextColor(bg, "#111111", "#f5f5f8")
 	return lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("0")).
+		Foreground(lipgloss.Color(fg)).
 		Background(lipgloss.Color(color)).
 		Padding(0, 1).
 		Render(text)
@@ -1501,7 +1539,7 @@ func (m model) activateCustomizeItem() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "apply":
-		return m.startApply("Apply", true)
+		return m.startApply("Apply", true, false)
 	case "back":
 		m.customizing = false
 		m.customIndex = 0
@@ -1588,37 +1626,76 @@ func (m model) applyArgs(includeOverrides bool) []string {
 	return args
 }
 
-func runApplyCommand(args []string, label string) tea.Cmd {
+func parseBackupID(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, "Backup created: ") || strings.HasPrefix(ln, "Preview created: ") {
+			path := strings.TrimSpace(strings.SplitN(ln, ":", 2)[1])
+			if path != "" {
+				return filepath.Base(path)
+			}
+		}
+	}
+	return ""
+}
+
+func runApplyCommand(args []string, label, cacheKey, reuseBackup string, previewOnly bool) tea.Cmd {
 	return func() tea.Msg {
 		if err := ensureTooieSupportScripts(); err != nil {
 			return applyDoneMsg{
-				label: label,
-				err:   err,
-				out:   "",
+				label:       label,
+				err:         err,
+				out:         "",
+				cacheKey:    cacheKey,
+				previewOnly: previewOnly,
 			}
 		}
-		cmd := exec.Command(applyScript, args...)
+		if previewOnly {
+			args = append(args, "--preview-only")
+		}
+		if strings.TrimSpace(reuseBackup) != "" {
+			args = append(args, "--reuse-backup", strings.TrimSpace(reuseBackup))
+		}
+		cmd := exec.Command(currentApplyScriptPath(), args...)
+		cmd.Env = append(os.Environ(), "TOOIE_APPLY_PROGRESS_FILE="+applyProgressPath())
 		out, err := cmd.CombinedOutput()
+		outText := strings.TrimSpace(string(out))
 		return applyDoneMsg{
-			label: label,
-			err:   err,
-			out:   strings.TrimSpace(string(out)),
+			label:       label,
+			err:         err,
+			out:         outText,
+			backupID:    parseBackupID(outText),
+			cacheKey:    cacheKey,
+			reused:      strings.TrimSpace(reuseBackup) != "",
+			previewOnly: previewOnly,
 		}
 	}
 }
 
-func (m model) startApply(label string, includeOverrides bool) (tea.Model, tea.Cmd) {
+func (m model) applyCacheSignature() string {
+	return strings.Join(m.applyArgs(true), "\x1f")
+}
+
+func (m model) startApply(label string, includeOverrides bool, previewOnly bool) (tea.Model, tea.Cmd) {
 	if m.applying {
 		return m, nil
 	}
+	_ = os.Remove(applyProgressPath())
 	args := m.applyArgs(includeOverrides)
+	cacheKey := m.applyCacheSignature()
+	reuseBackup := ""
+	if !previewOnly && cacheKey == m.previewCacheKey && strings.TrimSpace(m.previewBackupID) != "" {
+		reuseBackup = m.previewBackupID
+	}
 	m.applying = true
 	m.applyLabel = label
+	m.applyCacheKey = cacheKey
 	m.applyProgress = 0
 	m.applyVel = 0
-	m.applyTarget = 0.12
+	m.applyTarget = 0.02
 	m.lastStatus = label + " in progress..."
-	return m, tea.Batch(tickApply(), runApplyCommand(args, label))
+	return m, tea.Batch(tickApply(), runApplyCommand(args, label, cacheKey, reuseBackup, previewOnly))
 }
 
 func nextStylePreset(cur string) string {
@@ -1631,6 +1708,14 @@ func nextStylePreset(cur string) string {
 		}
 	}
 	return stylePresets[0]
+}
+
+func displayStylePreset(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "Default"
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
 }
 
 func renderTwoColumns(left, right []string, totalWidth int) string {
@@ -2007,41 +2092,34 @@ func (m model) renderUptimeLine(width int, uptime string) string {
 }
 
 func (m model) cpuBarGradientColor(t float64) string {
-	p := m.clockPalette()
-	warmA := blendHexColor(p[len(p)-1], p[3], 0.55)
-	warmB := p[len(p)-1]
 	return gradientFromStops(t, []string{
-		blendHexColor(warmA, "#f6d365", 0.42),
-		warmA,
-		blendHexColor(warmA, warmB, 0.68),
-		blendHexColor(warmB, "#7a0000", 0.25),
+		m.themeRoleColor("secondary", "#94e2d5"),
+		blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("primary", "#89b4fa"), 0.45),
+		m.themeRoleColor("primary", "#89b4fa"),
+		blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("tertiary", "#cba6f7"), 0.52),
+		blendHexColor(m.themeRoleColor("tertiary", "#cba6f7"), m.themeRoleColor("error", "#f38ba8"), 0.45),
+		m.themeRoleColor("error", "#f38ba8"),
 	})
 }
 
 func (m model) ramBarGradientColor(t float64) string {
-	pal := m.clockPalette()
-	coolA := pal[2]
-	coolB := pal[1]
-	coolC := blendHexColor(coolB, "#3ba7ff", 0.4)
 	return gradientFromStops(t, []string{
-		blendHexColor(coolA, "#bff8ff", 0.25),
-		blendHexColor(coolA, coolB, 0.55),
-		coolC,
-		blendHexColor(coolC, "#1f4fff", 0.20),
+		m.themeRoleColor("primary", "#89b4fa"),
+		blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("secondary", "#94e2d5"), 0.50),
+		m.themeRoleColor("secondary", "#94e2d5"),
+		blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("tertiary", "#cba6f7"), 0.58),
+		m.themeRoleColor("tertiary", "#cba6f7"),
+		m.themeRoleColor("error", "#f38ba8"),
 	})
 }
 
 func (m model) storageBarGradientColor(t float64) string {
-	pal := m.clockPalette()
 	muted := m.themeRoleColor("on_surface", "#565f89")
-	storeA := blendHexColor(muted, pal[3], 0.35)
-	storeB := pal[3]
-	storeC := blendHexColor(pal[3], pal[2], 0.22)
 	return gradientFromStops(t, []string{
 		blendHexColor(muted, "#000000", 0.15),
-		storeA,
-		blendHexColor(storeA, storeB, 0.65),
-		blendHexColor(storeC, "#ffffff", 0.08),
+		blendHexColor(muted, m.themeRoleColor("surface_variant", "#1f2335"), 0.35),
+		blendHexColor(m.themeRoleColor("surface_variant", "#1f2335"), m.themeRoleColor("primary", "#89b4fa"), 0.18),
+		blendHexColor(m.themeRoleColor("primary", "#89b4fa"), "#ffffff", 0.12),
 	})
 }
 
@@ -2052,6 +2130,22 @@ func (m model) themeRoleColor(role, fallback string) string {
 		}
 	}
 	return normalizeHexColor(fallback)
+}
+
+func ensureReadableTextColor(bg, preferred, fallback string) string {
+	bg = normalizeHexColor(bg)
+	preferred = normalizeHexColor(preferred)
+	fallback = normalizeHexColor(fallback)
+	if contrastRatioHex(preferred, bg) >= 4.5 {
+		return preferred
+	}
+	if contrastRatioHex("#ffffff", bg) >= 4.5 {
+		return "#ffffff"
+	}
+	if contrastRatioHex("#000000", bg) >= 4.5 {
+		return "#000000"
+	}
+	return fallback
 }
 
 func (m model) clockPalette() []string {
@@ -2826,6 +2920,71 @@ func normalizeHexColor(c string) string {
 	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
 }
 
+func terminalColorHex(c string) string {
+	switch strings.TrimSpace(strings.ToLower(c)) {
+	case "0":
+		return "#111111"
+	case "1":
+		return "#ff5f5f"
+	case "2":
+		return "#8bd450"
+	case "3":
+		return "#ffd75f"
+	case "4":
+		return "#5fafff"
+	case "5":
+		return "#d787ff"
+	case "6":
+		return "#5fd7d7"
+	case "7":
+		return "#d7d7d7"
+	case "8":
+		return "#6c7086"
+	case "9":
+		return "#ff6b6b"
+	case "10":
+		return "#a6e36e"
+	case "11":
+		return "#ffe082"
+	case "12":
+		return "#89b4fa"
+	case "13":
+		return "#f5c2e7"
+	case "14":
+		return "#94e2d5"
+	case "15":
+		return "#f5f5f8"
+	default:
+		if strings.HasPrefix(c, "#") {
+			return normalizeHexColor(c)
+		}
+		return "#d7d7d7"
+	}
+}
+
+func contrastRatioHex(a, b string) float64 {
+	return contrastLuminance(relativeLuminanceHex(a), relativeLuminanceHex(b))
+}
+
+func relativeLuminanceHex(c string) float64 {
+	r, g, b := parseHexColor(c)
+	return 0.2126*linearizeChannel(r) + 0.7152*linearizeChannel(g) + 0.0722*linearizeChannel(b)
+}
+
+func linearizeChannel(v int) float64 {
+	x := float64(v) / 255.0
+	if x <= 0.04045 {
+		return x / 12.92
+	}
+	return math.Pow((x+0.055)/1.055, 2.4)
+}
+
+func contrastLuminance(a, b float64) float64 {
+	hi := math.Max(a, b)
+	lo := math.Min(a, b)
+	return (hi + 0.05) / (lo + 0.05)
+}
+
 func parseHexColor(c string) (int, int, int) {
 	c = strings.TrimSpace(strings.TrimPrefix(c, "#"))
 	if len(c) == 3 {
@@ -2886,10 +3045,50 @@ func runeLen(s string) int {
 	return len([]rune(s))
 }
 
+func applyProgressPath() string {
+	return filepath.Join(tooieConfigDir, "apply-progress.json")
+}
+
+func readApplyProgressState() (applyProgressState, bool) {
+	raw, err := os.ReadFile(applyProgressPath())
+	if err != nil || len(raw) == 0 {
+		return applyProgressState{}, false
+	}
+	var st applyProgressState
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return applyProgressState{}, false
+	}
+	if st.Progress < 0 {
+		st.Progress = 0
+	}
+	if st.Progress > 1 {
+		st.Progress = 1
+	}
+	return st, true
+}
+
 func (m *model) loadPreviewColors() {
 	m.selectedHexes = map[string]string{}
 	if len(m.backups) == 0 {
 		return
+	}
+	meta := m.backups[m.backupIndex].Meta
+	for _, item := range []struct {
+		Role string
+		Key  string
+	}{
+		{"background", "effective_background"},
+		{"surface", "effective_surface"},
+		{"on_surface", "effective_on_surface"},
+		{"outline", "effective_outline"},
+		{"primary", "effective_primary"},
+		{"secondary", "effective_secondary"},
+		{"tertiary", "effective_tertiary"},
+		{"error", "effective_error"},
+	} {
+		if c := strings.TrimSpace(meta[item.Key]); c != "" {
+			m.selectedHexes[item.Role] = strings.ToLower(c)
+		}
 	}
 	p := filepath.Join(backupRoot, m.backups[m.backupIndex].ID, "matugen.json")
 	raw, err := os.ReadFile(p)
@@ -2901,6 +3100,9 @@ func (m *model) loadPreviewColors() {
 		return
 	}
 	for k, v := range data.Colors {
+		if _, ok := m.selectedHexes[k]; ok {
+			continue
+		}
 		m.selectedHexes[k] = strings.TrimSpace(v.Default.Color)
 	}
 }
@@ -2934,13 +3136,7 @@ func joinLR(left, right string, totalWidth int) string {
 }
 
 func (m model) renderApplyStatus(totalWidth int) string {
-	barW := 16
-	if totalWidth > 84 {
-		barW = 22
-	}
-	if totalWidth > 108 {
-		barW = 28
-	}
+	barW := max(18, totalWidth-10)
 	p := m.applyProgress
 	if p < 0 {
 		p = 0
@@ -2955,13 +3151,68 @@ func (m model) renderApplyStatus(totalWidth int) string {
 	if filled > barW {
 		filled = barW
 	}
-	done := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render(strings.Repeat("█", filled))
-	todo := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(strings.Repeat("░", barW-filled))
 	percent := int(math.Round(p * 100))
 	if percent > 99 && m.applying {
 		percent = 99
 	}
-	return fmt.Sprintf("status: %s [%s%s] %d%%", m.applyLabel, done, todo, percent)
+	label := strings.TrimSpace(m.applyLabel)
+	if label == "" {
+		label = "Applying theme"
+	}
+	text := fmt.Sprintf("%s %d%%", label, percent)
+	bar := m.renderApplyStatusBar(barW, filled, text)
+	return "status: " + bar
+}
+
+func (m model) renderApplyStatusBar(barW, filled int, text string) string {
+	if barW < 8 {
+		barW = 8
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > barW {
+		filled = barW
+	}
+	textRunes := []rune(cutPad(strings.TrimSpace(text), barW))
+	start := 0
+	if len(textRunes) < barW {
+		start = (barW - len(textRunes)) / 2
+	}
+	mutedBg := blendHexColor(m.themeRoleColor("surface_container", "#1f2335"), m.themeRoleColor("background", "#11131c"), 0.35)
+	emptyFg := m.themeRoleColor("on_surface", "#7f849c")
+	fillTextFg := ensureReadableTextColor(m.themeRoleColor("background", "#11131c"), m.themeRoleColor("on_primary", "#0b0f16"), m.themeRoleColor("primary", "#89b4fa"))
+	out := strings.Builder{}
+	out.WriteString("[")
+	for i := 0; i < barW; i++ {
+		ch := ' '
+		if idx := i - start; idx >= 0 && idx < len(textRunes) {
+			ch = textRunes[idx]
+		}
+		if i < filled {
+			t := 0.0
+			if barW > 1 {
+				t = math.Mod((float64(i)/float64(barW-1))+(m.clockPhase*0.10), 1.0)
+			}
+			bg := gradientFromStops(t, []string{
+				m.themeRoleColor("primary", "#89b4fa"),
+				m.themeRoleColor("secondary", "#94e2d5"),
+				m.themeRoleColor("tertiary", "#cba6f7"),
+				m.themeRoleColor("primary", "#89b4fa"),
+			})
+			out.WriteString(lipgloss.NewStyle().
+				Background(lipgloss.Color(bg)).
+				Foreground(lipgloss.Color(fillTextFg)).
+				Render(string(ch)))
+			continue
+		}
+		out.WriteString(lipgloss.NewStyle().
+			Background(lipgloss.Color(mutedBg)).
+			Foreground(lipgloss.Color(emptyFg)).
+			Render(string(ch)))
+	}
+	out.WriteString("]")
+	return out.String()
 }
 
 func loadBackups() []backup {
