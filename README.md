@@ -98,3 +98,8 @@ Current uninstall behavior removes only the installed binaries:
 - `~/.config/tooie/tooie`
 
 Configs, helper scripts, and backups are left in place.
+
+## Acknowledgements
+
+- Clock font work in Tooie was created using ideas and source material from `bit` by superstarryeyes:
+  https://github.com/superstarryeyes/bit
