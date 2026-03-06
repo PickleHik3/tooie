@@ -86,10 +86,6 @@ install_neovim_nightly() {
 }
 
 ensure_storage_links() {
-  if have termux-setup-storage; then
-    termux-setup-storage >/dev/null 2>&1 || true
-  fi
-
   link_storage() {
     link_name="$1"
     target_path="$2"
@@ -101,6 +97,10 @@ ensure_storage_links() {
   link_storage "Downloads" "$HOME_DIR/storage/downloads"
   link_storage "Pictures" "$HOME_DIR/storage/pictures"
   link_storage "Shared" "$HOME_DIR/storage/shared"
+
+  if [ ! -d "$HOME_DIR/storage" ]; then
+    log "Storage links skipped. Run termux-setup-storage later if you want Downloads/Pictures/Shared symlinks."
+  fi
 }
 
 build_theme_manager() {
