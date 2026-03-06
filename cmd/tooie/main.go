@@ -60,6 +60,20 @@ type applyDoneMsg struct {
 	out   string
 }
 
+type homeAppsLoadedMsg struct {
+	apps []launchableApp
+	err  error
+}
+
+type homeLaunchDoneMsg struct {
+	label string
+	err   error
+}
+
+type homeIconsWarmedMsg struct {
+	packages []string
+}
+
 type clockFontDef struct {
 	Name string
 	Dir  string
@@ -91,70 +105,80 @@ type matugenJSON struct {
 }
 
 type model struct {
-	width         int
-	height        int
-	page          int
-	now           time.Time
-	cpuPercent    float64
-	cpuFiltered   float64
-	ramUsedGB     float64
-	ramTotalGB    float64
-	ramFiltered   float64
-	storUsedGB    float64
-	storTotalGB   float64
-	storPercent   float64
-	storFiltered  float64
-	uptimeText    string
-	cpuViz        float64
-	ramViz        float64
-	storViz       float64
-	cpuVel        float64
-	ramVel        float64
-	storVel       float64
-	lastTick      time.Time
-	barSpring     harmonica.Spring
-	clockPhase    float64
-	introUntil    time.Time
-	introMode     int
-	introSeed     float64
-	clockFontDefs []clockFontDef
-	clockFontIdx  int
-	clockGlyphs   map[rune][]string
-	clockPatterns []string
-	patternIndex  int
-	clockLoc      *time.Location
-	noticeText    string
-	noticeKind    string
-	noticeStart   time.Time
-	noticeUntil   time.Time
-	backups       []backup
-	backupIndex   int
-	settingIndex  int
-	customIndex   int
-	mode          string
-	palette       string
-	stylePreset   string
-	textColor     string
-	cursorColor   string
-	ansiRed       string
-	ansiGreen     string
-	ansiYellow    string
-	ansiBlue      string
-	ansiMagenta   string
-	ansiCyan      string
-	lastStatus    string
-	pickerTarget  string
-	pickerIndex   int
-	customizing   bool
-	showHints     bool
-	showBackups   bool
-	selectedHexes map[string]string
-	metricsErr    error
-	applying      bool
-	applyProgress float64
-	applyVel      float64
-	applyTarget   float64
-	applyLabel    string
+	width            int
+	height           int
+	page             int
+	now              time.Time
+	cpuPercent       float64
+	cpuFiltered      float64
+	ramUsedGB        float64
+	ramTotalGB       float64
+	ramFiltered      float64
+	storUsedGB       float64
+	storTotalGB      float64
+	storPercent      float64
+	storFiltered     float64
+	uptimeText       string
+	cpuViz           float64
+	ramViz           float64
+	storViz          float64
+	cpuVel           float64
+	ramVel           float64
+	storVel          float64
+	lastTick         time.Time
+	barSpring        harmonica.Spring
+	clockPhase       float64
+	introUntil       time.Time
+	introMode        int
+	introSeed        float64
+	clockFontDefs    []clockFontDef
+	clockFontIdx     int
+	clockGlyphs      map[rune][]string
+	clockPatterns    []string
+	patternIndex     int
+	clockLoc         *time.Location
+	noticeText       string
+	noticeKind       string
+	noticeStart      time.Time
+	noticeUntil      time.Time
+	backups          []backup
+	backupIndex      int
+	settingIndex     int
+	customIndex      int
+	mode             string
+	palette          string
+	stylePreset      string
+	textColor        string
+	cursorColor      string
+	ansiRed          string
+	ansiGreen        string
+	ansiYellow       string
+	ansiBlue         string
+	ansiMagenta      string
+	ansiCyan         string
+	lastStatus       string
+	pickerTarget     string
+	pickerIndex      int
+	customizing      bool
+	showHints        bool
+	showBackups      bool
+	selectedHexes    map[string]string
+	metricsErr       error
+	applying         bool
+	applyProgress    float64
+	applyVel         float64
+	applyTarget      float64
+	applyLabel       string
+	apps             []launchableApp
+	appsLoaded       bool
+	appLoadErr       error
+	pinnedPackages   []string
+	pinnedApps       []launchableApp
+	pinnedIndex      int
+	showAppSearch    bool
+	appSearchQuery   string
+	appSearchIndex   int
+	appSearchResults []launchableApp
 }
 
 func initialModel() model {
@@ -221,12 +245,14 @@ func initialModel() model {
 		}
 	}
 	m.loadPreviewColors()
+	m.pinnedPackages = loadPinnedApps()
+	m.refreshAppSearchResults()
 	m.startHomeIntro()
 	return m
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickClock(), tickMetrics(), pollMetrics())
+	return tea.Batch(tickClock(), tickMetrics(), pollMetrics(), loadHomeAppsCmd(false), warmPinnedIconsCmd(m.pinnedPackages))
 }
 
 func tickApply() tea.Cmd {
@@ -420,6 +446,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loadPreviewColors()
 		return m, nil
+	case homeAppsLoadedMsg:
+		m.appsLoaded = true
+		m.appLoadErr = msg.err
+		if msg.err == nil {
+			m.apps = msg.apps
+			if len(m.pinnedPackages) == 0 {
+				m.pinnedPackages = defaultPinnedPackages(m.apps)
+				savePinnedApps(m.pinnedPackages)
+			}
+			m.refreshPinnedApps()
+			m.refreshAppSearchResults()
+			return m, warmPinnedIconsCmd(m.pinnedPackages)
+		}
+		return m, nil
+	case homeLaunchDoneMsg:
+		if msg.err != nil {
+			m.lastStatus = msg.label + " failed: " + msg.err.Error()
+		} else {
+			m.lastStatus = "Launched " + msg.label
+		}
+		return m, nil
+	case homeIconsWarmedMsg:
+		m.refreshPinnedApps()
+		m.refreshAppSearchResults()
+		return m, nil
 	case statusMsg:
 		m.lastStatus = string(msg)
 		m.backups = loadBackups()
@@ -449,23 +500,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.page == pageHome {
-			switch msg.String() {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			case "?":
-				m.showHints = !m.showHints
-				return m, nil
-			case "esc":
-				m.showHints = false
-				return m, nil
-			case "f":
-				m.cycleClockFont()
-				return m, nil
-			case "p":
-				m.cycleClockPattern()
-				return m, nil
-			}
-			return m, nil
+			return m.updateHomePage(msg)
 		}
 
 		if m.pickerTarget != "" {
@@ -727,19 +762,25 @@ func (m model) View() string {
 
 	panelH := max(4, innerH-2)
 	if m.page == pageHome {
-		panelH = max(4, innerH-3)
+		panelH = max(4, innerH-2)
 	}
 	main := m.renderMain(innerW, panelH)
 
 	body := fmt.Sprintf("%s\n%s\n%s", title, topBar, main)
+	overlays := []sixelOverlay(nil)
 	if m.page == pageHome {
 		header := title
 		if notice := m.homeNoticeLine(innerW); notice != "" {
 			header = joinLR(title, notice, innerW)
 		}
 		body = fmt.Sprintf("%s\n%s\n%s", header, main, m.homeHintsLine(innerW))
+		overlays = m.homePinnedSixelOverlays(innerW, panelH, outerPad)
 	}
-	return lipgloss.NewStyle().Padding(outerPad, outerPad).Render(body)
+	rendered := lipgloss.NewStyle().Padding(outerPad, outerPad).Render(body)
+	if len(overlays) > 0 {
+		rendered += renderSixelOverlays(overlays)
+	}
+	return rendered
 }
 
 func (m model) homeHintsLine(width int) string {
@@ -747,15 +788,25 @@ func (m model) homeHintsLine(width int) string {
 	keyTab := blendHexColor(muted, m.themeRoleColor("primary", "#89b4fa"), 0.35)
 	keyFont := m.themeRoleColor("primary", "#89b4fa")
 	keyAnim := m.themeRoleColor("secondary", "#94e2d5")
+	keyApps := m.themeRoleColor("secondary", "#94e2d5")
+	keySearch := m.themeRoleColor("tertiary", "#cba6f7")
+	keyRedraw := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), muted, 0.18)
 	keyQuit := m.themeRoleColor("error", "#f38ba8")
 
 	styleMuted := lipgloss.NewStyle().Foreground(lipgloss.Color(muted))
 	tab := lipgloss.NewStyle().Foreground(lipgloss.Color(keyTab)).Render("tab/h/l")
 	font := lipgloss.NewStyle().Foreground(lipgloss.Color(keyFont)).Render("f") + styleMuted.Render("ont")
-	anim := lipgloss.NewStyle().Foreground(lipgloss.Color(keyAnim)).Render("a") + styleMuted.Render("nim")
+	anim := lipgloss.NewStyle().Foreground(lipgloss.Color(keyAnim)).Render("p") + styleMuted.Render("attern")
+	appsText := "1-0 Apps"
+	if len(m.pinnedApps) > 0 {
+		appsText = fmt.Sprintf("1-%d", len(m.pinnedApps))
+	}
+	apps := lipgloss.NewStyle().Foreground(lipgloss.Color(keyApps)).Render(appsText) + styleMuted.Render(" Apps")
+	search := lipgloss.NewStyle().Foreground(lipgloss.Color(keySearch)).Render("/") + styleMuted.Render(" search")
+	redraw := lipgloss.NewStyle().Foreground(lipgloss.Color(keyRedraw)).Render("r") + styleMuted.Render(" redraw")
 	quit := lipgloss.NewStyle().Foreground(lipgloss.Color(keyQuit)).Render("q") + styleMuted.Render("uit")
 	sp := styleMuted.Render("    ")
-	line := tab + sp + font + sp + anim + sp + quit
+	line := tab + sp + font + sp + anim + sp + apps + sp + search + sp + redraw + sp + quit
 	return placeCenterStyled(line, width)
 }
 
@@ -957,7 +1008,7 @@ func (m model) renderHomePage(usableW, contentH int) string {
 	sysPanel := panelStyle(rightW, rowH, "10").Render(m.homeSystemBlock(rightW-4, rowH-2))
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, clockPanel, sysPanel)
 	bottomH = max(3, contentH-rowH)
-	bottomRow := panelStyle(usableW, bottomH, "8").Render("")
+	bottomRow := panelStyle(usableW, bottomH, "8").Render(m.renderHomeLauncherBlock(usableW-4, bottomH-2))
 	return topRow + "\n" + bottomRow
 }
 
@@ -982,7 +1033,7 @@ func (m model) homeSystemBlock(innerW, limit int) string {
 }
 
 func (m model) canSwitchPage() bool {
-	return m.pickerTarget == "" && !m.customizing && !m.showBackups
+	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch
 }
 
 func (m model) pageLabel() string {
@@ -2964,6 +3015,9 @@ func maxLineRunes(lines []string) int {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCLI(os.Args[1:]))
+	}
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen(), tea.WithFPS(60))
 	_, err := p.Run()
 	if err != nil {
