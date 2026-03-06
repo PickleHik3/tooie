@@ -32,12 +32,16 @@ const (
 	defaultWall    = homeDir + "/.termux/background/background.jpeg"
 	defaultMode    = "dark"
 	defaultPalette = "default"
+	defaultPreset  = "balanced"
 	pageTheme      = 0
 	pageHome       = 1
 )
 
+var stylePresets = []string{"balanced", "tokyonight", "catppuccin", "gruvbox", "rose-pine", "pure-matugen"}
+
 type tickMsg time.Time
 type metricsTickMsg time.Time
+type applyTickMsg time.Time
 
 type metricsMsg struct {
 	cpuPercent  float64
@@ -48,6 +52,12 @@ type metricsMsg struct {
 	storPercent float64
 	uptimeText  string
 	err         error
+}
+
+type applyDoneMsg struct {
+	label string
+	err   error
+	out   string
 }
 
 type clockFontDef struct {
@@ -123,6 +133,7 @@ type model struct {
 	customIndex   int
 	mode          string
 	palette       string
+	stylePreset   string
 	textColor     string
 	cursorColor   string
 	ansiRed       string
@@ -139,6 +150,11 @@ type model struct {
 	showBackups   bool
 	selectedHexes map[string]string
 	metricsErr    error
+	applying      bool
+	applyProgress float64
+	applyVel      float64
+	applyTarget   float64
+	applyLabel    string
 }
 
 func initialModel() model {
@@ -179,6 +195,7 @@ func initialModel() model {
 		uptimeText:    "--",
 		mode:          defaultMode,
 		palette:       defaultPalette,
+		stylePreset:   defaultPreset,
 		lastStatus:    "Ready",
 		textColor:     "",
 		cursorColor:   "",
@@ -210,6 +227,12 @@ func initialModel() model {
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(tickClock(), tickMetrics(), pollMetrics())
+}
+
+func tickApply() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
+		return applyTickMsg(t)
+	})
 }
 
 func tickClock() tea.Cmd {
@@ -358,6 +381,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.storFiltered = clampPct((alpha * msg.storPercent) + ((1 - alpha) * m.storFiltered))
 		}
+		return m, nil
+	case applyTickMsg:
+		if !m.applying {
+			return m, nil
+		}
+		if m.applyTarget < 0.92 {
+			m.applyTarget += 0.06
+			if m.applyTarget > 0.92 {
+				m.applyTarget = 0.92
+			}
+		}
+		m.applyProgress, m.applyVel = m.barSpring.Update(m.applyProgress, m.applyVel, m.applyTarget)
+		return m, tickApply()
+	case applyDoneMsg:
+		m.applying = false
+		m.applyProgress = 1.0
+		m.applyVel = 0
+		m.applyTarget = 1.0
+		if msg.err != nil {
+			s := strings.TrimSpace(msg.out)
+			if s == "" {
+				m.lastStatus = msg.label + " failed: " + msg.err.Error()
+			} else {
+				lines := strings.Split(s, "\n")
+				last := strings.TrimSpace(lines[len(lines)-1])
+				if last == "" {
+					last = msg.err.Error()
+				}
+				m.lastStatus = msg.label + " failed: " + last
+			}
+		} else {
+			m.lastStatus = msg.label + " completed"
+		}
+		m.backups = loadBackups()
+		if m.backupIndex >= len(m.backups) {
+			m.backupIndex = max(0, len(m.backups)-1)
+		}
+		m.loadPreviewColors()
 		return m, nil
 	case statusMsg:
 		m.lastStatus = string(msg)
@@ -574,10 +635,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) settings() []string {
 	return []string{
-		"Page: " + m.pageLabel(),
 		"Apply Theme",
 		"Update Colors",
 		"Mode: " + m.mode,
+		"Style Preset: " + m.stylePreset,
 		"Customize Colors...",
 		"Backups...",
 		"Refresh Backups",
@@ -586,40 +647,23 @@ func (m model) settings() []string {
 }
 
 func (m model) activateSetting() (tea.Model, tea.Cmd) {
+	if m.applying {
+		return m, nil
+	}
 	switch m.settingIndex {
 	case 0:
-		m.page = (m.page + 1) % 2
-		if m.page == pageHome {
-			m.startHomeIntro()
-			return m, pollMetrics()
-		}
-		return m, nil
+		return m.startApply("Apply", true)
 	case 1:
-		args := m.applyArgs(true)
-		cmd := exec.Command(applyScript, args...)
-		m.lastStatus = "Running apply script..."
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-			if err != nil {
-				return statusMsg("Apply failed: " + err.Error())
-			}
-			return statusMsg("Apply completed")
-		})
+		return m.startApply("Update colors", false)
 	case 2:
-		args := m.applyArgs(false)
-		cmd := exec.Command(applyScript, args...)
-		m.lastStatus = "Updating colors..."
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-			if err != nil {
-				return statusMsg("Color update failed: " + err.Error())
-			}
-			return statusMsg("Colors updated")
-		})
-	case 3:
 		if m.mode == "dark" {
 			m.mode = "light"
 		} else {
 			m.mode = "dark"
 		}
+		return m, nil
+	case 3:
+		m.stylePreset = nextStylePreset(m.stylePreset)
 		return m, nil
 	case 4:
 		m.customizing = true
@@ -670,7 +714,14 @@ func (m model) View() string {
 	if strings.Contains(strings.ToLower(m.lastStatus), "failed") {
 		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	}
-	status := statusStyle.Render("status: " + m.lastStatus)
+	statusText := "status: " + m.lastStatus
+	if m.applying {
+		statusText = m.renderApplyStatus(innerW)
+	}
+	status := statusText
+	if !m.applying {
+		status = statusStyle.Render(statusText)
+	}
 	hints := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[? hints]")
 	topBar := joinLR(status, hints, innerW)
 
@@ -848,6 +899,7 @@ func (m model) detailsBlock(totalWidth int) string {
 		"",
 		headerChip("Current Theme", "8"),
 		"  mode: " + m.mode,
+		"  style preset: " + m.stylePreset,
 		"  status palette: " + m.palette,
 	}
 
@@ -990,6 +1042,9 @@ func (m model) interactionBlock(limit int) string {
 				line := prefix + b.ID
 				if v, ok := b.Meta["status_palette"]; ok && v != "" {
 					line += " [" + v + "]"
+				}
+				if v, ok := b.Meta["style_preset"]; ok && v != "" {
+					line += " {" + v + "}"
 				}
 				lines = append(lines, line)
 			}
@@ -1371,6 +1426,9 @@ func listWindow(total, selected, visible int) (int, int) {
 }
 
 func (m model) activateCustomizeItem() (tea.Model, tea.Cmd) {
+	if m.applying {
+		return m, nil
+	}
 	items := m.customizeItems()
 	if m.customIndex < 0 || m.customIndex >= len(items) {
 		return m, nil
@@ -1385,15 +1443,7 @@ func (m model) activateCustomizeItem() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "apply":
-		args := m.applyArgs(true)
-		cmd := exec.Command(applyScript, args...)
-		m.lastStatus = "Applying customized theme..."
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-			if err != nil {
-				return statusMsg("Apply failed: " + err.Error())
-			}
-			return statusMsg("Apply completed")
-		})
+		return m.startApply("Apply", true)
 	case "back":
 		m.customizing = false
 		m.customIndex = 0
@@ -1450,7 +1500,7 @@ func (m *model) setColorTarget(target, hex string) {
 }
 
 func (m model) applyArgs(includeOverrides bool) []string {
-	args := []string{"-m", m.mode, "-w", defaultWall, "--status-palette", m.palette}
+	args := []string{"-m", m.mode, "-w", defaultWall, "--status-palette", m.palette, "--style-preset", m.stylePreset}
 	if includeOverrides {
 		if strings.TrimSpace(m.textColor) != "" {
 			args = append(args, "--text-color", strings.TrimSpace(m.textColor))
@@ -1478,6 +1528,44 @@ func (m model) applyArgs(includeOverrides bool) []string {
 		}
 	}
 	return args
+}
+
+func runApplyCommand(args []string, label string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command(applyScript, args...)
+		out, err := cmd.CombinedOutput()
+		return applyDoneMsg{
+			label: label,
+			err:   err,
+			out:   strings.TrimSpace(string(out)),
+		}
+	}
+}
+
+func (m model) startApply(label string, includeOverrides bool) (tea.Model, tea.Cmd) {
+	if m.applying {
+		return m, nil
+	}
+	args := m.applyArgs(includeOverrides)
+	m.applying = true
+	m.applyLabel = label
+	m.applyProgress = 0
+	m.applyVel = 0
+	m.applyTarget = 0.12
+	m.lastStatus = label + " in progress..."
+	return m, tea.Batch(tickApply(), runApplyCommand(args, label))
+}
+
+func nextStylePreset(cur string) string {
+	if len(stylePresets) == 0 {
+		return cur
+	}
+	for i, p := range stylePresets {
+		if p == cur {
+			return stylePresets[(i+1)%len(stylePresets)]
+		}
+	}
+	return stylePresets[0]
 }
 
 func renderTwoColumns(left, right []string, totalWidth int) string {
@@ -2777,6 +2865,37 @@ func joinLR(left, right string, totalWidth int) string {
 		return left + " " + right
 	}
 	return left + strings.Repeat(" ", avail-lw-rw) + right
+}
+
+func (m model) renderApplyStatus(totalWidth int) string {
+	barW := 16
+	if totalWidth > 84 {
+		barW = 22
+	}
+	if totalWidth > 108 {
+		barW = 28
+	}
+	p := m.applyProgress
+	if p < 0 {
+		p = 0
+	}
+	if p > 1 {
+		p = 1
+	}
+	filled := int(math.Round(p * float64(barW)))
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > barW {
+		filled = barW
+	}
+	done := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render(strings.Repeat("█", filled))
+	todo := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(strings.Repeat("░", barW-filled))
+	percent := int(math.Round(p * 100))
+	if percent > 99 && m.applying {
+		percent = 99
+	}
+	return fmt.Sprintf("status: %s [%s%s] %d%%", m.applyLabel, done, todo, percent)
 }
 
 func loadBackups() []backup {
