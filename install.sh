@@ -54,7 +54,7 @@ install_dir() {
 
 install_base_deps() {
   log "Installing base dependencies..."
-  pm_install git curl jq fzf tmux fish starship peaclock
+  pm_install git curl jq fzf tmux fish starship peaclock matugen
 }
 
 install_go_if_missing() {
@@ -65,18 +65,12 @@ install_go_if_missing() {
 }
 
 install_matugen() {
-  if have matugen || [ -x "$HOME_DIR/.cargo/bin/matugen" ] || [ -x "$HOME_DIR/cargo/bin/matugen" ]; then
+  if have matugen; then
     log "matugen already available"
     return 0
   fi
-
-  if ! have cargo; then
-    log "Installing Rust toolchain for matugen..."
-    pm_install rust
-  fi
-
-  log "Installing matugen via cargo..."
-  cargo install matugen || true
+  log "Installing matugen..."
+  pm_install matugen
 }
 
 install_neovim_nightly() {
