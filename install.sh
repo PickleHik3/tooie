@@ -54,7 +54,7 @@ install_dir() {
 
 install_base_deps() {
   log "Installing base dependencies..."
-  pm_install git curl jq fzf tmux fish starship peaclock matugen
+  pm_install git curl jq fzf tmux fish starship peaclock matugen termux-api
 }
 
 install_go_if_missing() {
@@ -88,9 +88,8 @@ install_neovim_nightly() {
 build_theme_manager() {
   install_go_if_missing
   log "Building tooie binary..."
-  (cd "$REPO_DIR" && go build -o "$TOOIE_DIR/tooie" ./cmd/tooie)
-  cp "$TOOIE_DIR/tooie" "$BIN_DIR/tooie"
-  chmod +x "$TOOIE_DIR/tooie" "$BIN_DIR/tooie"
+  (cd "$REPO_DIR" && go build -o "$BIN_DIR/tooie" ./cmd/tooie)
+  chmod +x "$BIN_DIR/tooie"
 }
 
 deploy_assets() {
@@ -101,6 +100,7 @@ deploy_assets() {
   install_file "$REPO_DIR/assets/defaults/.termux/colors.properties" "$HOME_DIR/.termux/colors.properties"
   install_file "$REPO_DIR/assets/defaults/.termux/font.ttf" "$HOME_DIR/.termux/font.ttf"
   install_file "$REPO_DIR/assets/defaults/.termux/font-italic.ttf" "$HOME_DIR/.termux/font-italic.ttf"
+  install_dir "$REPO_DIR/assets/defaults/.termux/bin" "$HOME_DIR/.termux/bin"
 
   install_file "$REPO_DIR/assets/defaults/.config/starship.toml" "$HOME_DIR/.config/starship.toml"
   install_file "$REPO_DIR/assets/defaults/.config/fish/config.fish" "$HOME_DIR/.config/fish/config.fish"
@@ -128,7 +128,7 @@ post_setup() {
 
   log "Install complete."
   log "Backup snapshot: $BACKUP_DIR"
-  log "Run: $TOOIE_DIR/tooie"
+  log "Run: $BIN_DIR/tooie"
 }
 
 install_base_deps

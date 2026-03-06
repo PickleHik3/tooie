@@ -184,5 +184,6 @@ if status --is-interactive
     clear
 end
 
-# uv
-fish_add_path "/data/data/com.termux/files/home/.local/share/../bin"
+# User-local executables
+fish_add_path "$HOME/.local/bin"
+fish_add_path "$HOME/.termux/bin"

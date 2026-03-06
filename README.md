@@ -28,8 +28,6 @@ cd ~/files/tooie
 
 ```sh
 ~/.local/bin/tooie
-# or
-~/.config/tooie/tooie
 ```
 
 ## CLI
@@ -51,7 +49,7 @@ tooie icons refresh --pinned
 The installer places files here:
 
 - binary: `~/.local/bin/tooie`
-- runtime copy and helper scripts: `~/.config/tooie/`
+- Tooie helper scripts and state files: `~/.config/tooie/`
 - app cache: `~/.cache/tooie/apps.json`
 - icon cache: `~/.cache/tooie/icons/`
 - pinned apps: `~/.config/tooie/pinned-apps.json`
@@ -65,12 +63,12 @@ The installer places files here:
 - `~/.termux/colors.properties`
 - `~/.termux/font.ttf`
 - `~/.termux/font-italic.ttf`
+- `~/.termux/bin/`
 - `~/.config/starship.toml`
 - `~/.config/fish/config.fish`
 - `~/.config/peaclock/config`
 - `~/.config/tmux/`
 - `~/.config/nvim/`
-- `~/.config/tooie/tooie`
 - `~/.config/tooie/apply-material.sh`
 - `~/.config/tooie/restore-material.sh`
 - `~/.config/tooie/list-material-backups.sh`
@@ -95,7 +93,6 @@ cd ~/files/tooie
 Current uninstall behavior removes only the installed binaries:
 
 - `~/.local/bin/tooie`
-- `~/.config/tooie/tooie`
 
 Configs, helper scripts, and backups are left in place.
 
