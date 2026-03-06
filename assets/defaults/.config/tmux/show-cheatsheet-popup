@@ -1,0 +1,32 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+
+[ -n "${TMUX:-}" ] || exit 0
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+title="$(tmux show-option -gqv '@tooie-cheatsheet-title' 2>/dev/null || true)"
+[ -n "$title" ] || title="    Keybinds    "
+client_w="$(tmux display-message -p '#{client_width}')"
+client_h="$(tmux display-message -p '#{client_height}')"
+
+if [ "$client_w" -lt 74 ]; then
+  width=$((client_w - 4))
+  height=31
+else
+  width=72
+  height=23
+fi
+
+[ "$width" -lt 52 ] && width=52
+if [ "$height" -gt $((client_h - 2)) ]; then
+  height=$((client_h - 2))
+fi
+
+tmux display-popup \
+  -E \
+  -x R \
+  -y S \
+  -w "$width" \
+  -h "$height" \
+  -T "$title" \
+  "$SCRIPT_DIR/show-cheatsheet-view"

@@ -29,6 +29,8 @@ Behavior:
 - `helpers.sh` - tmux option helper
 - `open-apps-popup` - tmux popup opener
 - `search-apps` - fzf omni bar + launcher logic
+- `show-cheatsheet-popup` - quick keybind reference popup
+- `show-cheatsheet-view` - popup content renderer
 - `apps-menu.conf.example` - optional custom entries (`android` + `terminal`)
 
 ## Add To ~/.tmux.conf
@@ -102,4 +104,3 @@ Recommended:
 
 - If `~/.apps` / `~/.app_names` are missing, `search-apps` rebuilds launcher cache using `pm/cmd query-activities` with `MAIN+LAUNCHER`.
 - Terminal entries come from your config file; Android entries come from launcher cache (and are relabeled from `tooie apps` when available).
-

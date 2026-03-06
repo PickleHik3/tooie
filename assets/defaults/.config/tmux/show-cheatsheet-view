@@ -1,0 +1,180 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+
+reset="$(printf '\033[0m')"
+cyan="$(printf '\033[38;5;117m')"
+green="$(printf '\033[38;5;114m')"
+yellow="$(printf '\033[38;5;221m')"
+muted="$(printf '\033[38;5;245m')"
+rose="$(printf '\033[38;5;217m')"
+
+client_w="$(tmux display-message -p '#{client_width}')"
+compact=0
+[ "$client_w" -lt 74 ] && compact=1
+
+cleanup() {
+  printf '\033[?25h'
+  stty sane 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+printf '\033[?25l'
+
+repeat_char() {
+  char="$1"
+  count="$2"
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    printf '%s' "$char"
+    i=$((i + 1))
+  done
+}
+
+pad_text() {
+  text="$1"
+  width="$2"
+  len=${#text}
+  printf '%s' "$text"
+  while [ "$len" -lt "$width" ]; do
+    printf ' '
+    len=$((len + 1))
+  done
+}
+
+emit_half_box() {
+  title="$1"
+  rows="$2"
+  shift 2
+  fill=$((30 - ${#title}))
+  [ "$fill" -lt 0 ] && fill=0
+  printf '┌ %s%s%s ' "$cyan" "$title" "$reset"
+  repeat_char '─' "$fill"
+  printf '┐\n'
+  i=0
+  while [ "$i" -lt "$rows" ]; do
+    action="$1"
+    bind="$2"
+    shift 2
+    action_p="$(pad_text "$action" 10)"
+    bind_p="$(pad_text "$bind" 18)"
+    printf '│ %s%s%s  %s%s%s │\n' \
+      "$yellow" "$action_p" "$reset" \
+      "$green" "$bind_p" "$reset"
+    i=$((i + 1))
+  done
+  printf '└'
+  repeat_char '─' 32
+  printf '┘\n'
+}
+
+emit_wide_box() {
+  title="$1"
+  rows="$2"
+  shift 2
+  fill=$((66 - ${#title}))
+  [ "$fill" -lt 0 ] && fill=0
+  printf '┌ %s%s%s ' "$cyan" "$title" "$reset"
+  repeat_char '─' "$fill"
+  printf '┐\n'
+  i=0
+  while [ "$i" -lt "$rows" ]; do
+    action="$1"
+    bind="$2"
+    shift 2
+    action_p="$(pad_text "$action" 12)"
+    bind_p="$(pad_text "$bind" 52)"
+    printf '│ %s%s%s  %s%s%s │\n' \
+      "$yellow" "$action_p" "$reset" \
+      "$green" "$bind_p" "$reset"
+    i=$((i + 1))
+  done
+  printf '└'
+  repeat_char '─' 68
+  printf '┘\n'
+}
+
+join_pair() {
+  left_file="$1"
+  right_file="$2"
+  paste "$left_file" "$right_file" | while IFS="	" read -r left right; do
+    printf '%s  %s\n' "$left" "$right"
+  done
+}
+
+printf ' %sPrefix:%s %sCtrl+b / Ctrl+Space%s\n' \
+  "$muted" "$reset" "$rose" "$reset"
+
+if [ "$compact" -eq 1 ]; then
+  emit_half_box "Windows" 7 \
+    "New" "Prefix + c" \
+    "Rename" "Prefix + r" \
+    "Close" "Prefix + k" \
+    "Jump" "Alt + 1..9" \
+    "Cycle" "Alt + L/R" \
+    "Last" "Alt + z" \
+    "Move" "Alt + Shift+L/R"
+  emit_half_box "Panes" 5 \
+    "Below" "Prefix + h" \
+    "Right" "Prefix + v" \
+    "Close" "Prefix + x" \
+    "Focus" "C-A + Arrows" \
+    "Resize" "C-A-S + Arrows"
+  emit_half_box "Sessions" 5 \
+    "New" "Prefix + C" \
+    "Rename" "Prefix + R" \
+    "Close" "Prefix + K" \
+    "Prev/Next" "Prefix+P/N" \
+    "Cycle" "Alt + Up/Dn"
+  emit_half_box "Apps" 3 \
+    "Apps Bar" "Alt + Enter" \
+    "Search" "Type / in terminal" \
+    "Customize" "Run tooie"
+  emit_wide_box "Misc" 2 \
+    "Reload" "Prefix + q" \
+    "Copy Mode" "v select, y copy"
+else
+  left_top="$(mktemp)"
+  right_top="$(mktemp)"
+  left_mid="$(mktemp)"
+  right_mid="$(mktemp)"
+  trap 'rm -f "$left_top" "$right_top" "$left_mid" "$right_mid"; cleanup' EXIT HUP INT TERM
+
+  emit_half_box "Windows" 7 \
+    "New" "Prefix + c" \
+    "Rename" "Prefix + r" \
+    "Close" "Prefix + k" \
+    "Jump" "Alt + 1..9" \
+    "Cycle" "Alt + L/R" \
+    "Last" "Alt + z" \
+    "Move" "Alt + Shift+L/R" >"$left_top"
+  emit_half_box "Panes" 7 \
+    "Below" "Prefix + h" \
+    "Right" "Prefix + v" \
+    "Close" "Prefix + x" \
+    "Focus" "C-A + Arrows" \
+    "Resize" "C-A-S + Arrows" \
+    "" "" \
+    "" "" >"$right_top"
+  join_pair "$left_top" "$right_top"
+
+  emit_half_box "Sessions" 5 \
+    "New" "Prefix + C" \
+    "Rename" "Prefix + R" \
+    "Close" "Prefix + K" \
+    "Prev/Next" "Prefix+P/N" \
+    "Cycle" "Alt + Up/Dn" >"$left_mid"
+  emit_half_box "Apps" 5 \
+    "Apps Bar" "Alt + Enter" \
+    "Search" "Type / in terminal" \
+    "Customize" "Run tooie" \
+    "" "" \
+    "" "" >"$right_mid"
+  join_pair "$left_mid" "$right_mid"
+
+  emit_wide_box "Misc" 2 \
+    "Reload" "Prefix + q" \
+    "Copy Mode" "v select, y copy"
+fi
+
+printf ' %sAny key to close%s' "$muted" "$reset"
+stty -echo raw
+dd bs=1 count=1 >/dev/null 2>&1 || true
