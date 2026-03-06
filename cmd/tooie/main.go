@@ -23,13 +23,16 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+var (
+	homeDir        = resolveHomeDir()
+	tooieConfigDir = filepath.Join(homeDir, ".config", "tooie")
+	backupRoot     = filepath.Join(tooieConfigDir, "backups")
+	applyScript    = filepath.Join(tooieConfigDir, "apply-material.sh")
+	restoreScript  = filepath.Join(tooieConfigDir, "restore-material.sh")
+	defaultWall    = filepath.Join(homeDir, ".termux", "background", "background.jpeg")
+)
+
 const (
-	homeDir        = "/data/data/com.termux/files/home"
-	tooieConfigDir = homeDir + "/.config/tooie"
-	backupRoot     = tooieConfigDir + "/backups"
-	applyScript    = tooieConfigDir + "/apply-material.sh"
-	restoreScript  = tooieConfigDir + "/restore-material.sh"
-	defaultWall    = homeDir + "/.termux/background/background.jpeg"
 	defaultMode    = "dark"
 	defaultPalette = "default"
 	defaultPreset  = "balanced"
@@ -585,6 +588,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				id := m.backups[m.backupIndex].ID
+				if err := ensureTooieSupportScripts(); err != nil {
+					m.lastStatus = "Restore unavailable: " + err.Error()
+					return m, nil
+				}
 				cmd := exec.Command(restoreScript, id)
 				m.lastStatus = "Restoring " + id + "..."
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
@@ -1583,6 +1590,13 @@ func (m model) applyArgs(includeOverrides bool) []string {
 
 func runApplyCommand(args []string, label string) tea.Cmd {
 	return func() tea.Msg {
+		if err := ensureTooieSupportScripts(); err != nil {
+			return applyDoneMsg{
+				label: label,
+				err:   err,
+				out:   "",
+			}
+		}
 		cmd := exec.Command(applyScript, args...)
 		out, err := cmd.CombinedOutput()
 		return applyDoneMsg{
@@ -3015,6 +3029,10 @@ func maxLineRunes(lines []string) int {
 }
 
 func main() {
+	if err := ensureTooieSupportScripts(); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie error: failed to prepare support scripts: %v\n", err)
+		os.Exit(1)
+	}
 	if len(os.Args) > 1 {
 		os.Exit(runCLI(os.Args[1:]))
 	}
