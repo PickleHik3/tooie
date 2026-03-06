@@ -118,7 +118,8 @@ deploy_assets() {
   install_file "$REPO_DIR/assets/defaults/.termux/colors.properties" "$HOME_DIR/.termux/colors.properties"
   install_file "$REPO_DIR/assets/defaults/.termux/font.ttf" "$HOME_DIR/.termux/font.ttf"
   install_file "$REPO_DIR/assets/defaults/.termux/font-italic.ttf" "$HOME_DIR/.termux/font-italic.ttf"
-  install_dir "$REPO_DIR/assets/defaults/.termux/bin" "$HOME_DIR/.termux/bin"
+  backup_if_exists "$HOME_DIR/.termux/bin"
+  mkdir -p "$HOME_DIR/.termux/bin"
 
   install_file "$REPO_DIR/assets/defaults/.config/starship.toml" "$HOME_DIR/.config/starship.toml"
   install_file "$REPO_DIR/assets/defaults/.config/fish/config.fish" "$HOME_DIR/.config/fish/config.fish"
