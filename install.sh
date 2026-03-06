@@ -54,7 +54,7 @@ install_dir() {
 
 install_base_deps() {
   log "Installing base dependencies..."
-  pm_install git curl jq fzf tmux fish starship peaclock matugen termux-api
+  pm_install git curl jq fzf tmux fish starship peaclock matugen termux-api eza zoxide
 }
 
 install_go_if_missing() {
@@ -83,6 +83,24 @@ install_neovim_nightly() {
     log "Falling back to packaged neovim"
     pm_install neovim
   fi
+}
+
+ensure_storage_links() {
+  if have termux-setup-storage; then
+    termux-setup-storage >/dev/null 2>&1 || true
+  fi
+
+  link_storage() {
+    link_name="$1"
+    target_path="$2"
+    if [ -L "$target_path" ] || [ -d "$target_path" ]; then
+      ln -sfn "$target_path" "$HOME_DIR/$link_name"
+    fi
+  }
+
+  link_storage "Downloads" "$HOME_DIR/storage/downloads"
+  link_storage "Pictures" "$HOME_DIR/storage/pictures"
+  link_storage "Shared" "$HOME_DIR/storage/shared"
 }
 
 build_theme_manager() {
@@ -134,6 +152,7 @@ post_setup() {
 install_base_deps
 install_matugen
 install_neovim_nightly
+ensure_storage_links
 deploy_assets
 build_theme_manager
 post_setup
