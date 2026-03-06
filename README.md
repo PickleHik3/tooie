@@ -20,7 +20,7 @@ Search / launcher row:
 ## Install
 
 ```sh
-cd ~/files/tooie
+cd ~/tooie
 ./install.sh
 ```
 
@@ -86,7 +86,7 @@ It supports both `pkg` and `pacman`.
 ## Uninstall
 
 ```sh
-cd ~/files/tooie
+cd ~/tooie
 ./uninstall.sh
 ```
 
