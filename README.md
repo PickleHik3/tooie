@@ -24,7 +24,7 @@ The TUI is split into 2 pages:
   </tr>
   <tr>
     <td><img src="docs/screenshots/Screenshot_20260307-212006.png" alt="Tooie screenshot 3"></td>
-    <td></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4"></td>
   </tr>
 </table>
 
