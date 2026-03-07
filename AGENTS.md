@@ -13,7 +13,7 @@ This repository is a Termux-focused Go CLI plus deployment assets.
 - `./install.sh`: installs dependencies, deploys assets, builds `tooie`, and creates backups under `~/.local/state/tooie/backups/<timestamp>/`.
 - `go build -o ./tooie ./cmd/tooie`: local build of the CLI binary.
 - `./update.sh`: fast-forward pull (if git is available) then reruns install.
-- `./uninstall.sh`: removes installed binaries from `~/.local/bin/tooie` and `~/.config/tooie/tooie`.
+- `./uninstall.sh`: removes the installed binary from `~/.local/bin/tooie`.
 - `go test ./...`: run Go tests across all packages.
 
 ## Coding Style & Naming Conventions
@@ -25,7 +25,7 @@ This repository is a Termux-focused Go CLI plus deployment assets.
 ## Testing Guidelines
 - Add tests as `*_test.go` in the same package as the code under test.
 - Prefer table-driven tests for parsing, mapping, and formatting logic.
-- For UI changes, include a manual smoke check: build and launch `./tooie` (or `~/.config/tooie/tooie`) and verify navigation/actions.
+- For UI changes, include a manual smoke check: build and launch `./tooie` and verify navigation/actions.
 - There is currently limited automated coverage, so PRs should include explicit test commands run.
 
 ## Commit & Pull Request Guidelines

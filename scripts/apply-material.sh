@@ -4,8 +4,9 @@ set -eu
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
 TOOIE_DIR="$HOME_DIR/.config/tooie"
 BACKUP_ROOT="$TOOIE_DIR/backups"
-WALLPAPER_FIXED="$HOME_DIR/.termux/background/background.jpeg"
-WALLPAPER_DIR="$HOME_DIR/.termux/backgrounds"
+WALLPAPER_FIXED="$HOME_DIR/.termux/background/background_portrait.jpeg"
+WALLPAPER_DIR="$HOME_DIR/.termux/background"
+BACKUP_KEEP=5
 TERMUX_COLORS="$HOME_DIR/.termux/colors.properties"
 TMUX_CONF="$HOME_DIR/.tmux.conf"
 PEACLOCK_CONFIG="$HOME_DIR/.config/peaclock/config"
@@ -48,8 +49,8 @@ Usage: apply-material.sh [-m dark|light] [-t scheme-type] [-w wallpaper_path] [-
 Defaults:
   mode: dark
   type: scheme-tonal-spot
-  wallpaper: ~/.termux/background/background.jpeg
-             (fallback: newest file in ~/.termux/backgrounds)
+  wallpaper: ~/.termux/background/background_portrait.jpeg
+             (fallback: newest file in ~/.termux/background)
 EOF
 }
 
@@ -182,6 +183,19 @@ pick_latest_wallpaper() {
     return 1
   fi
   printf '%s/%s\n' "$WALLPAPER_DIR" "$latest_file"
+}
+
+list_backup_dirs_by_mtime_desc() {
+  [ -d "$BACKUP_ROOT" ] || return 0
+  ls -1dt "$BACKUP_ROOT"/* 2>/dev/null || true
+}
+
+prune_old_backups() {
+  [ -d "$BACKUP_ROOT" ] || return 0
+  list_backup_dirs_by_mtime_desc | awk -v keep="$BACKUP_KEEP" 'NR > keep { print }' | while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    rm -rf "$dir"
+  done
 }
 
 apply_preset_defaults() {
@@ -349,7 +363,7 @@ if [ -n "$REUSE_BACKUP_ID" ]; then
     exit 1
   fi
 else
-  STAMP="$(date +%Y%m%d-%H%M%S)"
+  STAMP="${STYLE_PRESET}_$(date +%Y%m%d-%H%M%S)"
   BACKUP_DIR="$BACKUP_ROOT/$STAMP"
   mkdir -p "$BACKUP_DIR"
 fi
@@ -921,6 +935,7 @@ RAM_6="$STATE_RED"
 } > "$BACKUP_DIR/meta.env"
 
 if [ "$PREVIEW_ONLY" -eq 1 ]; then
+  prune_old_backups
   write_progress "Preview ready" 1.0
   echo "Preview created: $BACKUP_DIR"
   exit 0
@@ -1142,6 +1157,7 @@ if command -v tmux >/dev/null 2>&1; then
   tmux source-file "$TMUX_CONF" 2>/dev/null || true
 fi
 
+prune_old_backups
 write_progress "Finishing theme apply" 1.0
 echo "Applied Material theme."
 echo "Backup created: $BACKUP_DIR"

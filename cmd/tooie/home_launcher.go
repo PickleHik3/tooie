@@ -14,7 +14,7 @@ import (
 
 const maxPinnedApps = 7
 const pinnedSixelColAdjust = -3
-const pinnedSixelRowAdjust = 1
+const pinnedSixelRowAdjust = 0
 
 type pinnedRowLayout struct {
 	pinnedStart int
@@ -656,6 +656,9 @@ func (m model) homePinnedSixelOverlays(totalInnerW, panelH, outerPad int) []sixe
 	topH := (contentH * 70) / 100
 	if topH < 6 {
 		topH = 6
+	}
+	if contentH > 12 {
+		topH += 2
 	}
 	_, metricH := clockGlyphMetrics(m.clockGlyphs)
 	clockMinH := desiredClockPanelHeight(metricH)

@@ -108,6 +108,7 @@ func resolveRepoSupportPath(repoRel string) string {
 	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
 		candidates = append(candidates, filepath.Join(wd, repoRel))
 	}
+	candidates = append(candidates, filepath.Join(homeDir, "files", "tooie", repoRel))
 	for _, p := range candidates {
 		info, err := os.Stat(p)
 		if err == nil && !info.IsDir() {

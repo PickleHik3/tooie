@@ -28,9 +28,16 @@ if [ ! -d "$BACKUP_ROOT" ]; then
   exit 1
 fi
 
+latest_backup_id() {
+  latest_dir="$(ls -1dt "$BACKUP_ROOT"/* 2>/dev/null | head -n 1 || true)"
+  if [ -n "$latest_dir" ] && [ -d "$latest_dir" ]; then
+    basename "$latest_dir"
+  fi
+}
+
 BACKUP_ID="${1:-}"
 if [ -z "$BACKUP_ID" ]; then
-  BACKUP_ID="$(ls -1 "$BACKUP_ROOT" 2>/dev/null | tail -n 1 || true)"
+  BACKUP_ID="$(latest_backup_id)"
 fi
 
 if [ -z "$BACKUP_ID" ]; then

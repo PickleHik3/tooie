@@ -27,7 +27,7 @@ var (
 	homeDir        = resolveHomeDir()
 	tooieConfigDir = filepath.Join(homeDir, ".config", "tooie")
 	backupRoot     = filepath.Join(tooieConfigDir, "backups")
-	defaultWall    = filepath.Join(homeDir, ".termux", "background", "background.jpeg")
+	defaultWall    = filepath.Join(homeDir, ".termux", "background", "background_portrait.jpeg")
 )
 
 const (
@@ -3638,18 +3638,32 @@ func loadBackups() []backup {
 	if err != nil {
 		return nil
 	}
-	ids := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			ids = append(ids, e.Name())
-		}
+	type backupEntry struct {
+		id      string
+		modTime time.Time
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
-	out := make([]backup, 0, len(ids))
-	for _, id := range ids {
+	items := make([]backupEntry, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		items = append(items, backupEntry{id: e.Name(), modTime: info.ModTime()})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].modTime.Equal(items[j].modTime) {
+			return items[i].id > items[j].id
+		}
+		return items[i].modTime.After(items[j].modTime)
+	})
+	out := make([]backup, 0, len(items))
+	for _, item := range items {
 		out = append(out, backup{
-			ID:   id,
-			Meta: readMeta(filepath.Join(backupRoot, id, "meta.env")),
+			ID:   item.id,
+			Meta: readMeta(filepath.Join(backupRoot, item.id, "meta.env")),
 		})
 	}
 	return out
