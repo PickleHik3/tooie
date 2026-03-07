@@ -1,11 +1,19 @@
 # Tooie
 
-This is a companion bootstrap script + TUI i vibe coded for my termux launcher for android - https://github.com/PickleHik3/termux-launcher.
+This is a companion bootstrap script + TUI i vibe coded for my termux launcher for android - https://github.com/PickleHik3/termux-launcher. As such, i do not expect it to work in other termux versions. 
 
 What it does:
-- Installs necassary packages (tmux, fish, starship, zoxide, eza, go etc.)
+- Installs necassary packages (tmux, fish, starship, zoxide, eza, go, matugen etc.)
 - Copies over config files to their respective locations (~/.config & ~/.termux)
 - Builds the 'tooie' binary and places it at ~/.local/bin/tooie
+
+## Usage Notes
+
+TUI is split into 2 pages; 
+- First page includes the clock, live system stats and an android app launcher.
+  - pressing '/' will bring up app search, from there you can press "Ctrl+p" to pin the highlighted app to the home screen.
+  - pinned apps can be launched directly by pressing their respective number keys 1-7. 
+- Second page includes color scheme controls, uses matugen to generate color palettes from the terminal background situated at ~/.termux/backgrounds/. Optionally, you can override some of the extracted colors and specify various pre-defined styles as well as some preset themes. 
 
 ## Screenshots
 
