@@ -461,7 +461,12 @@ func pollMetrics() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		sizeChanged := m.width != msg.Width || m.height != msg.Height
 		m.width, m.height = msg.Width, msg.Height
+		if sizeChanged && m.page == pageHome {
+			clearPinnedSixelCache()
+			return m, m.homeRedrawCmd(false)
+		}
 		return m, nil
 	case tickMsg:
 		now := time.Time(msg)

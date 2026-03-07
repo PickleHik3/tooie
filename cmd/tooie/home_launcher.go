@@ -57,6 +57,19 @@ func warmPinnedIconsCmd(pkgs []string) tea.Cmd {
 	}
 }
 
+func (m model) homeRedrawCmd(refreshMetrics bool) tea.Cmd {
+	cmds := []tea.Cmd{
+		tea.ClearScreen,
+		loadHomeAppsCmd(false),
+		warmPinnedIconsCmd(m.pinnedPackages),
+		loadSystemInfoCmd(),
+	}
+	if refreshMetrics && !m.metricsPaused {
+		cmds = append(cmds, pollMetrics())
+	}
+	return tea.Batch(cmds...)
+}
+
 func loadPinnedApps() []string {
 	path, err := pinnedAppsPath()
 	if err != nil {
@@ -345,7 +358,7 @@ func (m model) updateHomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		clearPinnedSixelCache()
 		m.lastStatus = "Redrawing..."
-		return m, tea.Batch(loadHomeAppsCmd(false), warmPinnedIconsCmd(m.pinnedPackages))
+		return m, m.homeRedrawCmd(true)
 	case "enter":
 		app, ok := m.currentPinnedApp()
 		if !ok {
