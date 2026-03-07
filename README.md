@@ -9,13 +9,10 @@ It combines:
 
 ## Screenshots
 
-Home page:
-
-![Tooie home](docs/screenshots/home.png)
-
-Search / launcher row:
-
-![Tooie launcher search](docs/screenshots/search.png)
+| | |
+| --- | --- |
+| ![Tooie screenshot 1](docs/screenshots/Screenshot_20260307-211847.png) | ![Tooie screenshot 2](docs/screenshots/Screenshot_20260307-212609.png) |
+| ![Tooie screenshot 3](docs/screenshots/Screenshot_20260307-211944.png) | ![Tooie screenshot 4](docs/screenshots/Screenshot_20260307-211957.png) |
 
 ## Install
 
