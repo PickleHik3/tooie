@@ -41,6 +41,8 @@ pkg i -y git
 git clone https://github.com/PickleHik3/tooie
 cd ~/tooie
 ./install.sh
+chsh -s fish
+~/.local/bin/tooie --restart
 ```
 
 ## Run

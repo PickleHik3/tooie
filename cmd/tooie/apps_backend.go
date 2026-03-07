@@ -434,22 +434,13 @@ func restartLauncherApp() error {
 	base, token, ok := readTooieEndpointToken()
 	var backendErr error
 	if ok {
-		if err := stopPackageViaBackend(base, token, defaultLauncherPackage); err == nil {
-			time.Sleep(350 * time.Millisecond)
-			if err := startComponentViaBackend(base, token, component); err == nil {
-				return nil
-			} else {
-				backendErr = err
-			}
+		if err := restartComponentViaBackend(base, token, component); err == nil {
+			return nil
 		} else {
 			backendErr = err
 		}
 	}
-	if err := stopPackageLocally(defaultLauncherPackage); err != nil && backendErr == nil {
-		backendErr = err
-	}
-	time.Sleep(350 * time.Millisecond)
-	if err := startComponentLocally(component); err != nil {
+	if err := restartComponentLocally(component); err != nil {
 		if backendErr != nil {
 			return fmt.Errorf("backend restart failed: %v; local restart failed: %w", backendErr, err)
 		}
@@ -497,6 +488,20 @@ func startComponentViaBackend(base, token, component string) error {
 	return fmt.Errorf("backend launch failed for %s", component)
 }
 
+func restartComponentViaBackend(base, token, component string) error {
+	component = strings.TrimSpace(component)
+	if component == "" {
+		return errors.New("missing component")
+	}
+	if _, err := tooieExecCommand(base, token, "am start -S -n "+component+" --user 0"); err == nil {
+		return nil
+	}
+	if _, err := tooieExecCommand(base, token, "am start -S -n "+component); err == nil {
+		return nil
+	}
+	return fmt.Errorf("backend restart failed for %s", component)
+}
+
 func stopPackageLocally(pkg string) error {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
@@ -527,6 +532,23 @@ func startComponentLocally(component string) error {
 	out, err := exec.Command("am", "start", "-n", component).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("local am launch failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func restartComponentLocally(component string) error {
+	component = strings.TrimSpace(component)
+	if component == "" {
+		return errors.New("missing component")
+	}
+	if out, err := exec.Command("am", "start", "-S", "-n", component, "--user", "0").CombinedOutput(); err == nil {
+		return nil
+	} else if len(bytes.TrimSpace(out)) > 0 {
+		_ = out
+	}
+	out, err := exec.Command("am", "start", "-S", "-n", component).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local am restart failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

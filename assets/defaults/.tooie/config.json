@@ -1,0 +1,9 @@
+{
+  "execEnabled": true,
+  "allowedCommandPrefixes": [
+    "id",
+    "pm list packages",
+    "cmd package list packages",
+    "am start -S -n"
+  ]
+}

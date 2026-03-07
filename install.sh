@@ -7,8 +7,9 @@ STATE_DIR="$HOME_DIR/.local/state/tooie"
 BACKUP_DIR="$STATE_DIR/backups/$(date +%Y%m%d-%H%M%S)"
 BIN_DIR="$HOME_DIR/.local/bin"
 TOOIE_DIR="$HOME_DIR/.config/tooie"
+TOOIE_BACKEND_DIR="$HOME_DIR/.tooie"
 
-mkdir -p "$BACKUP_DIR" "$BIN_DIR" "$TOOIE_DIR" "$STATE_DIR"
+mkdir -p "$BACKUP_DIR" "$BIN_DIR" "$TOOIE_DIR" "$TOOIE_BACKEND_DIR" "$STATE_DIR"
 
 log() { printf '%s\n' "$*"; }
 
@@ -113,6 +114,7 @@ deploy_assets() {
   install_file "$REPO_DIR/assets/defaults/.config/starship.toml" "$HOME_DIR/.config/starship.toml"
   install_file "$REPO_DIR/assets/defaults/.config/fish/config.fish" "$HOME_DIR/.config/fish/config.fish"
   install_file "$REPO_DIR/assets/defaults/.config/peaclock/config" "$HOME_DIR/.config/peaclock/config"
+  install_file "$REPO_DIR/assets/defaults/.tooie/config.json" "$HOME_DIR/.tooie/config.json"
 
   install_dir "$REPO_DIR/assets/defaults/.config/tmux" "$HOME_DIR/.config/tmux"
   install_dir "$REPO_DIR/fonts" "$TOOIE_DIR/fonts"
