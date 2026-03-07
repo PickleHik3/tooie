@@ -21,15 +21,15 @@ The TUI is split into 2 pages:
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 1" width="70%"></td>
-    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 2" width="70%"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 1"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 2"></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/Screenshot_20260307-212006.png" alt="Tooie screenshot 3" width="70%"></td>
-    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4" width="70%"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212006.png" alt="Tooie screenshot 3"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="docs/screenshots/readme-bottom-guide.png" alt="Tooie bottom screenshot" width="70%"></td>
+    <td colspan="2" align="center"><img src="docs/screenshots/readme-bottom-guide.png" alt="Tooie bottom screenshot"></td>
   </tr>
 </table>
 
