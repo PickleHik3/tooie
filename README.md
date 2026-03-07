@@ -38,6 +38,7 @@ The TUI is split into 2 pages:
 ```sh
 pkg update -y
 pkg i -y git
+termux-setup-storage
 git clone https://github.com/PickleHik3/tooie
 cd ~/tooie
 ./install.sh
