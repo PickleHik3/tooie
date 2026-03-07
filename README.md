@@ -9,10 +9,16 @@ It combines:
 
 ## Screenshots
 
-| | |
-| --- | --- |
-| ![Tooie screenshot 1](docs/screenshots/Screenshot_20260307-211847.png) | ![Tooie screenshot 2](docs/screenshots/Screenshot_20260307-212609.png) |
-| ![Tooie screenshot 3](docs/screenshots/Screenshot_20260307-211944.png) | ![Tooie screenshot 4](docs/screenshots/Screenshot_20260307-211957.png) |
+<table>
+  <tr>
+    <td><img src="docs/screenshots/Screenshot_20260307-211847.png" alt="Tooie screenshot 1"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 2"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 3"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4"></td>
+  </tr>
+</table>
 
 ## Install
 
