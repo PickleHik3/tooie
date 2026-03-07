@@ -1,30 +1,30 @@
 # Tooie
 
-This is a companion bootstrap script + TUI i vibe coded for my termux launcher for android - https://github.com/PickleHik3/termux-launcher. As such, i do not expect it to work in other termux versions. 
+This is a companion bootstrap script + TUI I vibe-coded for my Termux launcher for Android: https://github.com/PickleHik3/termux-launcher. As such, I do not expect it to work in other Termux setups.
 
 What it does:
-- Installs necassary packages (tmux, fish, starship, zoxide, eza, go, matugen etc.)
+- Installs necessary packages (`tmux`, `fish`, `starship`, `zoxide`, `eza`, `go`, `matugen`, etc.)
 - Copies over config files to their respective locations (~/.config & ~/.termux)
 - Builds the 'tooie' binary and places it at ~/.local/bin/tooie
 
 ## Usage Notes
 
-TUI is split into 2 pages; 
+The TUI is split into 2 pages:
 - First page includes the clock, live system stats and an android app launcher.
-  - pressing '/' will bring up app search, from there you can press "Ctrl+p" to pin the highlighted app to the home screen.
-  - pinned apps can be launched directly by pressing their respective number keys 1-7. 
-- Second page includes color scheme controls, uses matugen to generate color palettes from the terminal background situated at ~/.termux/backgrounds/. Optionally, you can override some of the extracted colors and specify various pre-defined styles as well as some preset themes. 
+  - Pressing `/` brings up app search. From there you can press `Ctrl+p` to pin the highlighted app to the home screen.
+  - Pinned apps can be launched directly by pressing their respective number keys `1-7`.
+- Second page includes color scheme controls. It uses `matugen` to generate color palettes from the terminal background situated at `~/.termux/background/`. Optionally, you can override some of the extracted colors and specify various pre-defined styles as well as preset themes.
 
 ## Screenshots
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/Screenshot_20260307-211847.png" alt="Tooie screenshot 1"></td>
-    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 2"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 1"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 2"></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 3"></td>
-    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212006.png" alt="Tooie screenshot 3"></td>
+    <td></td>
   </tr>
 </table>
 
@@ -41,7 +41,7 @@ cd ~/tooie
 ## Run
 
 ```sh
-~/tooie
+~/.local/bin/tooie
 ```
 
 ## CLI
@@ -107,11 +107,11 @@ or
 cd ~/tooie
 ./uninstall.sh
 ```
-the scrip removes only the installed binaries at '~/.local/bin/tooie` and  Configs, helper scripts, and backups are left in place.
+The script removes only the installed binary at `~/.local/bin/tooie`. Configs, helper scripts, and backups are left in place.
 
 ## Acknowledgements
 
-- Clock font work in Tooie was created `bit` by superstarryeyes:
+- Clock font work in Tooie was created with `bit` by superstarryeyes:
   https://github.com/superstarryeyes/bit
-- Uses JetbrainsMono NF:
+- Uses JetBrainsMono NF:
   https://github.com/JetBrains/JetBrainsMono
