@@ -314,9 +314,19 @@ func (m model) updateHomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		m.cycleClockFont()
 		return m, nil
-	case "p":
+	case "a":
 		m.cycleClockPattern()
 		return m, nil
+	case "p":
+		m.metricsPaused = !m.metricsPaused
+		if m.metricsPaused {
+			m.lastStatus = "System stats polling paused"
+			m.showHomeNotice("system stats: paused", "poll")
+			return m, nil
+		}
+		m.lastStatus = "System stats polling resumed"
+		m.showHomeNotice("system stats: unpaused", "poll")
+		return m, tea.Batch(pollMetrics(), tickMetrics())
 	case "/":
 		m.showAppSearch = true
 		m.appSearchQuery = ""
@@ -365,39 +375,18 @@ func (m model) renderHomeLauncherBlock(innerW, innerH int) string {
 	innerW = max(24, innerW)
 	innerH = max(3, innerH)
 
-	pinned := m.renderPinnedAppsStrip(innerW)
-	searchLines := m.renderSearchBarLines(innerW)
-	pinnedLimit := len(pinned)
-	if pinnedLimit > innerH-len(searchLines) {
-		pinnedLimit = max(0, innerH-len(searchLines))
+	if m.showAppSearch {
+		return m.renderSearchPopup(innerW, innerH)
 	}
-	pinned = pinned[:pinnedLimit]
+
+	pinned := m.renderPinnedAppsStrip(innerW, innerH)
+	if len(pinned) > innerH {
+		pinned = pinned[:innerH]
+	}
 
 	lines := make([]string, 0, innerH)
 	blank := strings.Repeat(" ", innerW)
-	availableAboveSearch := max(0, innerH-len(searchLines))
-	topPad := 0
-	if availableAboveSearch > len(pinned) {
-		topPad = (availableAboveSearch - len(pinned)) / 2
-	}
-	for i := 0; i < topPad; i++ {
-		lines = append(lines, blank)
-	}
 	lines = append(lines, pinned...)
-	if m.showAppSearch {
-		resultsAvail := max(1, availableAboveSearch-topPad-len(pinned))
-		resultLines := m.renderSearchResults(innerW, resultsAvail)
-		for _, line := range resultLines {
-			if len(lines) >= availableAboveSearch {
-				break
-			}
-			lines = append(lines, line)
-		}
-	}
-	for len(lines) < availableAboveSearch {
-		lines = append(lines, blank)
-	}
-	lines = append(lines, searchLines...)
 	for len(lines) < innerH {
 		lines = append(lines, blank)
 	}
@@ -409,19 +398,13 @@ func (m model) renderHomeLauncherBlock(innerW, innerH int) string {
 
 func (m model) computePinnedRowLayout(innerW, innerH int) pinnedRowLayout {
 	slotWidths := distributedSlotWidths(innerW, len(m.pinnedApps), 8)
-	rowH := 4
-	searchHeight := len(m.renderSearchBarLines(innerW))
-	pinnedRows := rowH
-	pinnedSpace := max(0, innerH-searchHeight)
+	rowH := max(4, min(innerH, 5))
 	pinnedStart := 0
-	if pinnedRows > 0 && pinnedSpace > pinnedRows {
-		pinnedStart = (pinnedSpace - pinnedRows) / 2
-	}
 	iconCellW := make([]int, len(slotWidths))
 	minCellW := 5
-	iconWidth := 4
-	iconHeight := 2
-	iconTopPad := 0
+	iconWidth := 5
+	iconHeight := 3
+	iconTopPad := 2
 	for i, slotW := range slotWidths {
 		cellW := max(minCellW, slotW-2)
 		maxAllowed := max(minCellW, slotW-1)
@@ -437,9 +420,9 @@ func (m model) computePinnedRowLayout(innerW, innerH int) pinnedRowLayout {
 				narrowest = w
 			}
 		}
-		iconWidth = max(3, narrowest-2)
-		if iconWidth > 6 {
-			iconWidth = 6
+		iconWidth = max(4, narrowest-1)
+		if iconWidth > 7 {
+			iconWidth = 7
 		}
 	}
 	return pinnedRowLayout{
@@ -453,12 +436,12 @@ func (m model) computePinnedRowLayout(innerW, innerH int) pinnedRowLayout {
 	}
 }
 
-func (m model) renderPinnedAppsStrip(innerW int) []string {
+func (m model) renderPinnedAppsStrip(innerW, innerH int) []string {
 	if len(m.pinnedApps) == 0 {
 		empty := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("  no pinned apps yet")
 		return []string{empty, empty, empty}
 	}
-	layout := m.computePinnedRowLayout(innerW, 4)
+	layout := m.computePinnedRowLayout(innerW, innerH)
 	slotWidths := layout.slotWidths
 	cellWs := layout.iconCellW
 	useSixel := m.canUseSixelPinnedIcons()
@@ -541,9 +524,59 @@ func (m model) renderSearchBarLines(innerW int) []string {
 		Foreground(color).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(color).
-		Padding(0, 1).
+		Padding(1, 1).
 		Width(max(12, innerW-2))
 	return strings.Split(style.Render(prompt), "\n")
+}
+
+func (m model) renderSearchPromptLine(width int) string {
+	prompt := "/" + m.appSearchQuery
+	if prompt == "/" {
+		prompt = "/"
+	}
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("12")).
+		Bold(true).
+		Width(width)
+	return style.Render(cutPad(prompt, width))
+}
+
+func (m model) renderSearchPopup(innerW, innerH int) string {
+	popupW := max(28, min(innerW-4, (innerW*2)/3))
+	prompt := m.renderSearchPromptLine(popupW)
+	resultsAvail := max(2, innerH-3)
+	results := m.renderSearchResults(popupW, resultsAvail)
+	lines := []string{prompt}
+	lines = append(lines, results...)
+	popupH := min(innerH, len(lines)+2)
+	if popupH < 4 {
+		popupH = 4
+	}
+	bodyLimit := max(1, popupH-2)
+	if len(lines) > bodyLimit {
+		lines = lines[:bodyLimit]
+	}
+	for len(lines) < bodyLimit {
+		lines = append(lines, strings.Repeat(" ", popupW))
+	}
+	popup := framedPanel(popupW+2, popupH, m.themeRoleColor("primary", "#89b4fa"), strings.Join(lines, "\n"), "Search", "left", "", "left")
+	popupLines := strings.Split(popup, "\n")
+	out := make([]string, 0, innerH)
+	topPad := max(0, (innerH-len(popupLines))/2)
+	blank := strings.Repeat(" ", innerW)
+	for i := 0; i < topPad; i++ {
+		out = append(out, blank)
+	}
+	for _, line := range popupLines {
+		out = append(out, placeCenterStyled(line, innerW))
+	}
+	for len(out) < innerH {
+		out = append(out, blank)
+	}
+	if len(out) > innerH {
+		out = out[:innerH]
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m model) renderSearchResults(innerW, limit int) []string {
@@ -598,7 +631,7 @@ func (m model) canUseSixelPinnedIcons() bool {
 }
 
 func (m model) homePinnedSixelOverlays(totalInnerW, panelH, outerPad int) []sixelOverlay {
-	if !m.canUseSixelPinnedIcons() {
+	if m.showAppSearch || !m.canUseSixelPinnedIcons() {
 		return nil
 	}
 	geom, ok := sixelCellGeometry()

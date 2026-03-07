@@ -65,6 +65,7 @@ type metricsMsg struct {
 	storUsedGB  float64
 	storTotalGB float64
 	storPercent float64
+	uptimeSecs  uint64
 	uptimeText  string
 	err         error
 }
@@ -142,6 +143,7 @@ type model struct {
 	storTotalGB      float64
 	storPercent      float64
 	storFiltered     float64
+	uptimeSeconds    uint64
 	uptimeText       string
 	cpuViz           float64
 	ramViz           float64
@@ -199,6 +201,7 @@ type model struct {
 	applyCacheKey    string
 	previewCacheKey  string
 	previewBackupID  string
+	metricsPaused    bool
 	apps             []launchableApp
 	appsLoaded       bool
 	appLoadErr       error
@@ -209,6 +212,7 @@ type model struct {
 	appSearchQuery   string
 	appSearchIndex   int
 	appSearchResults []launchableApp
+	systemInfo       systemInfo
 }
 
 func initialModel() model {
@@ -366,7 +370,17 @@ func contains(items []string, want string) bool {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickClock(), tickMetrics(), pollMetrics(), loadHomeAppsCmd(false), warmPinnedIconsCmd(m.pinnedPackages))
+	cmds := []tea.Cmd{
+		tickClock(),
+		pollMetrics(),
+		loadHomeAppsCmd(false),
+		warmPinnedIconsCmd(m.pinnedPackages),
+		loadSystemInfoCmd(),
+	}
+	if !m.metricsPaused {
+		cmds = append(cmds, tickMetrics())
+	}
+	return tea.Batch(cmds...)
 }
 
 func tickApply() tea.Cmd {
@@ -438,6 +452,7 @@ func pollMetrics() tea.Cmd {
 			storUsedGB:  stUsedGB,
 			storTotalGB: stTotalGB,
 			storPercent: stPct,
+			uptimeSecs:  up,
 			uptimeText:  fmt.Sprintf("%dd %dh", d, h),
 		}
 	}
@@ -487,6 +502,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clockPhase += dt * 0.45
 		return m, tickClock()
 	case metricsTickMsg:
+		if m.metricsPaused {
+			return m, nil
+		}
 		return m, tea.Batch(pollMetrics(), tickMetrics())
 	case metricsMsg:
 		if msg.err != nil {
@@ -500,6 +518,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.storUsedGB = msg.storUsedGB
 		m.storTotalGB = msg.storTotalGB
 		m.storPercent = msg.storPercent
+		m.uptimeSeconds = msg.uptimeSecs
 		m.uptimeText = msg.uptimeText
 		ramPct := 0.0
 		if msg.ramTotalGB > 0 {
@@ -521,6 +540,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.storFiltered = clampPct((alpha * msg.storPercent) + ((1 - alpha) * m.storFiltered))
 		}
+		return m, nil
+	case systemInfoMsg:
+		m.systemInfo = msg.info
 		return m, nil
 	case applyTickMsg:
 		if !m.applying {
@@ -625,6 +647,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.page = (m.page + 1) % 2
 				if m.page == pageHome {
 					m.startHomeIntro()
+					if m.metricsPaused {
+						return m, nil
+					}
 					return m, pollMetrics()
 				}
 				return m, nil
@@ -632,6 +657,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.page = (m.page + 1) % 2
 				if m.page == pageHome {
 					m.startHomeIntro()
+					if m.metricsPaused {
+						return m, nil
+					}
 					return m, pollMetrics()
 				}
 				return m, nil
@@ -911,6 +939,11 @@ func (m model) View() string {
 	const outerPad = 1
 	innerW := max(20, m.width-(outerPad*2))
 	innerH := max(8, m.height-(outerPad*2))
+	renderPadBottom := outerPad
+	if m.page == pageHome {
+		renderPadBottom = 0
+		innerH = max(8, m.height-outerPad-renderPadBottom)
+	}
 
 	title := headerChip("Tooie", "12")
 	if m.page == pageTheme {
@@ -935,6 +968,9 @@ func (m model) View() string {
 	topBar := joinLR(status, hints, innerW)
 
 	panelH := max(4, innerH-3)
+	if m.page == pageHome {
+		panelH = max(4, innerH-2)
+	}
 	main := m.renderMain(innerW, panelH)
 
 	body := fmt.Sprintf("%s\n%s\n%s", title, topBar, main)
@@ -947,7 +983,7 @@ func (m model) View() string {
 		body = fmt.Sprintf("%s\n%s\n%s", header, main, m.homeHintsLine(innerW))
 		overlays = m.homePinnedSixelOverlays(innerW, panelH, outerPad)
 	}
-	rendered := lipgloss.NewStyle().Padding(outerPad, outerPad).Render(body)
+	rendered := lipgloss.NewStyle().Padding(outerPad, outerPad, renderPadBottom, outerPad).Render(body)
 	if len(overlays) > 0 {
 		rendered += renderSixelOverlays(overlays)
 	}
@@ -961,23 +997,30 @@ func (m model) homeHintsLine(width int) string {
 	keyAnim := m.themeRoleColor("secondary", "#94e2d5")
 	keyApps := m.themeRoleColor("secondary", "#94e2d5")
 	keySearch := m.themeRoleColor("tertiary", "#cba6f7")
+	keyPause := blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), muted, 0.10)
 	keyRedraw := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), muted, 0.18)
 	keyQuit := m.themeRoleColor("error", "#f38ba8")
 
 	styleMuted := lipgloss.NewStyle().Foreground(lipgloss.Color(muted))
 	tab := lipgloss.NewStyle().Foreground(lipgloss.Color(keyTab)).Render("tab/h/l")
 	font := lipgloss.NewStyle().Foreground(lipgloss.Color(keyFont)).Render("f") + styleMuted.Render("ont")
-	anim := lipgloss.NewStyle().Foreground(lipgloss.Color(keyAnim)).Render("p") + styleMuted.Render("attern")
+	anim := lipgloss.NewStyle().Foreground(lipgloss.Color(keyAnim)).Render("a") + styleMuted.Render("nim")
 	appsText := "1-0 Apps"
 	if len(m.pinnedApps) > 0 {
 		appsText = fmt.Sprintf("1-%d", len(m.pinnedApps))
 	}
 	apps := lipgloss.NewStyle().Foreground(lipgloss.Color(keyApps)).Render(appsText) + styleMuted.Render(" Apps")
 	search := lipgloss.NewStyle().Foreground(lipgloss.Color(keySearch)).Render("/") + styleMuted.Render(" search")
-	redraw := lipgloss.NewStyle().Foreground(lipgloss.Color(keyRedraw)).Render("r") + styleMuted.Render(" redraw")
+	pause := ""
+	if m.metricsPaused {
+		pause = styleMuted.Render("un") + lipgloss.NewStyle().Foreground(lipgloss.Color(keyPause)).Render("p") + styleMuted.Render("ause")
+	} else {
+		pause = lipgloss.NewStyle().Foreground(lipgloss.Color(keyPause)).Render("p") + styleMuted.Render("ause")
+	}
+	redraw := lipgloss.NewStyle().Foreground(lipgloss.Color(keyRedraw)).Render("r") + styleMuted.Render("edraw")
 	quit := lipgloss.NewStyle().Foreground(lipgloss.Color(keyQuit)).Render("q") + styleMuted.Render("uit")
-	sp := styleMuted.Render("    ")
-	line := tab + sp + font + sp + anim + sp + apps + sp + search + sp + redraw + sp + quit
+	sp := styleMuted.Render("  ")
+	line := tab + sp + font + sp + anim + sp + apps + sp + search + sp + pause + sp + redraw + sp + quit
 	return placeCenterStyled(line, width)
 }
 
@@ -1161,6 +1204,9 @@ func (m model) renderHomePage(usableW, contentH int) string {
 	if topH < 6 {
 		topH = 6
 	}
+	if contentH > 12 {
+		topH += 2
+	}
 	metricW, metricH := clockGlyphMetrics(m.clockGlyphs)
 	clockMinH := desiredClockPanelHeight(metricH)
 	switch m.currentClockFontName() {
@@ -1179,8 +1225,8 @@ func (m model) renderHomePage(usableW, contentH int) string {
 		leftW = 18
 	}
 	rightW := usableW - leftW
-	if rightW < 24 {
-		rightW = 24
+	if rightW < 38 {
+		rightW = 38
 		leftW = usableW - rightW
 	}
 
@@ -1189,8 +1235,8 @@ func (m model) renderHomePage(usableW, contentH int) string {
 	clockBorder := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("outline", "#565f89"), 0.35)
 	sysBorder := blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("outline", "#565f89"), 0.30)
 	launcherBorder := blendHexColor(m.themeRoleColor("outline", "#565f89"), m.themeRoleColor("surface_variant", "#1f2335"), 0.30)
-	clockPanel := panelStyle(leftW, rowH, clockBorder).Render(strings.Join(clockLines, "\n"))
-	sysPanel := panelStyle(rightW, rowH, sysBorder).Render(m.homeSystemBlock(rightW-4, rowH-2))
+	clockPanel := framedPanel(leftW, rowH, clockBorder, strings.Join(clockLines, "\n"), "", "left", m.clockMeridiemLabel(), "right")
+	sysPanel := framedPanel(rightW, rowH, sysBorder, m.homeSystemBlock(rightW-4, rowH-2), m.systemPanelTitle(), "left", "", "left")
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, clockPanel, sysPanel)
 	bottomH = max(3, contentH-rowH)
 	bottomRow := panelStyle(usableW, bottomH, launcherBorder).Render(m.renderHomeLauncherBlock(usableW-4, bottomH-2))
@@ -1198,19 +1244,61 @@ func (m model) renderHomePage(usableW, contentH int) string {
 }
 
 func (m model) homeSystemBlock(innerW, limit int) string {
-	if innerW < 20 {
-		innerW = 20
+	if innerW < 28 {
+		innerW = 28
 	}
-	lines := []string{
-		"",
-		m.renderUsageProgressBar(innerW, "", m.cpuViz, m.cpuBarGradientColor),
-		"",
-		m.renderUsageProgressBar(innerW, "", m.ramViz, m.ramBarGradientColor),
-		"",
-		m.renderUsageProgressBar(innerW, "󰋊", m.storViz, m.storageBarGradientColor),
-		"",
-		m.renderUptimeLine(innerW, m.uptimeText),
+
+	rows := m.systemInfoRows()
+	labelW := 8
+	fixedLines := 9 + 5
+	infoSlots := len(rows)
+	if limit > 0 {
+		infoSlots = max(0, min(len(rows), limit-fixedLines))
 	}
+	shown := make([]systemInfoRow, 0, infoSlots)
+	for priority := 0; priority <= 4 && len(shown) < infoSlots; priority++ {
+		for _, row := range rows {
+			if row.Priority == priority {
+				shown = append(shown, row)
+				if len(shown) >= infoSlots {
+					break
+				}
+			}
+		}
+	}
+
+	lines := []string{""}
+	for _, row := range shown {
+		lines = append(lines, m.renderSystemInfoRow(innerW, row, labelW))
+	}
+	lines = append(lines, "")
+	lines = append(lines, m.renderSystemMetric(
+		innerW,
+		"",
+		"CPU",
+		fmt.Sprintf("%d%%", int(clampPct(m.cpuFiltered)+0.5)),
+		m.cpuViz,
+		m.cpuBarGradientColor,
+	)...)
+	lines = append(lines, m.renderSystemMetric(
+		innerW,
+		"",
+		"RAM",
+		m.systemMetricSummary(m.ramUsedGB, m.ramTotalGB, m.ramFiltered),
+		m.ramViz,
+		m.ramBarGradientColor,
+	)...)
+	lines = append(lines, m.renderSystemMetric(
+		innerW,
+		"󰋊",
+		"Storage",
+		m.systemMetricSummary(m.storUsedGB, m.storTotalGB, m.storFiltered),
+		m.storViz,
+		m.storageBarGradientColor,
+	)...)
+	lines = append(lines, "")
+	lines = append(lines, m.systemInfoFooter(innerW))
+
 	if limit > 0 && len(lines) > limit {
 		lines = lines[:limit]
 	}
@@ -3373,6 +3461,78 @@ func panelStyle(w, h int, borderColor string) lipgloss.Style {
 		Padding(0, 1).
 		Width(w - 2).
 		Height(h - 2)
+}
+
+func framedPanel(w, h int, borderColor, body, topLabel, topAlign, bottomLabel, bottomAlign string) string {
+	if w < 28 {
+		w = 28
+	}
+	if h < 3 {
+		h = 3
+	}
+	border := lipgloss.RoundedBorder()
+	innerW := max(1, w-4)
+	innerH := max(1, h-2)
+	lines := strings.Split(body, "\n")
+
+	top := framedBorderLine(w, borderColor, border.TopLeft, border.Top, border.TopRight, topLabel, topAlign)
+	bottom := framedBorderLine(w, borderColor, border.BottomLeft, border.Bottom, border.BottomRight, bottomLabel, bottomAlign)
+	sideStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(borderColor))
+	contentStyle := lipgloss.NewStyle().Width(innerW)
+
+	out := make([]string, 0, h)
+	out = append(out, top)
+	for i := 0; i < innerH; i++ {
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
+		}
+		out = append(out,
+			sideStyle.Render(border.Left)+" "+
+				contentStyle.Render(line)+" "+
+				sideStyle.Render(border.Right),
+		)
+	}
+	out = append(out, bottom)
+	return strings.Join(out, "\n")
+}
+
+func framedBorderLine(w int, borderColor, left, horiz, right, label, align string) string {
+	sideStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(borderColor))
+	innerW := max(1, w-2)
+	if strings.TrimSpace(label) == "" {
+		return sideStyle.Render(left + strings.Repeat(horiz, innerW) + right)
+	}
+
+	labelW := lipgloss.Width(label) + 2
+	if labelW >= innerW {
+		return sideStyle.Render(left + strings.Repeat(horiz, innerW) + right)
+	}
+
+	inset := 2
+	if inset+labelW > innerW {
+		inset = 1
+	}
+	start := inset
+	switch align {
+	case "right":
+		start = innerW - labelW - inset
+	case "center":
+		start = (innerW - labelW) / 2
+	}
+	if start < 0 {
+		start = 0
+	}
+	rightFill := innerW - start - labelW
+	if rightFill < 0 {
+		rightFill = 0
+	}
+
+	return sideStyle.Render(left) +
+		sideStyle.Render(strings.Repeat(horiz, start)) +
+		" " + label + " " +
+		sideStyle.Render(strings.Repeat(horiz, rightFill)) +
+		sideStyle.Render(right)
 }
 
 func joinLR(left, right string, totalWidth int) string {
