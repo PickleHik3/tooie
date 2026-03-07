@@ -9,6 +9,8 @@ What it does:
 
 ## Usage Notes
 
+Press keybind "prefix + i" to bring up quick reference to the tmux keybinds. The prefix is "Ctrl + b" and "Ctrl + Space".
+
 The TUI is split into 2 pages:
 - First page includes the clock, live system stats and an android app launcher.
   - Pressing `/` brings up app search. From there you can press `Ctrl+p` to pin the highlighted app to the home screen.
