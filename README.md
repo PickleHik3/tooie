@@ -21,12 +21,15 @@ The TUI is split into 2 pages:
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 1"></td>
-    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 2"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212609.png" alt="Tooie screenshot 1" width="70%"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211944.png" alt="Tooie screenshot 2" width="70%"></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/Screenshot_20260307-212006.png" alt="Tooie screenshot 3"></td>
-    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-212006.png" alt="Tooie screenshot 3" width="70%"></td>
+    <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4" width="70%"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/screenshots/tmux-gesture-guide.png" alt="Tooie tmux gesture guide" width="70%"></td>
   </tr>
 </table>
 
