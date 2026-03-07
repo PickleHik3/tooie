@@ -73,18 +73,6 @@ install_matugen() {
   pm_install matugen
 }
 
-install_neovim_nightly() {
-  if have nvim && nvim --version 2>/dev/null | head -n1 | grep -qi nightly; then
-    log "Neovim nightly already installed"
-    return 0
-  fi
-  log "Installing packaged neovim-nightly..."
-  if ! pm_install neovim-nightly; then
-    log "Falling back to packaged neovim"
-    pm_install neovim
-  fi
-}
-
 ensure_storage_links() {
   link_storage() {
     link_name="$1"
@@ -127,7 +115,6 @@ deploy_assets() {
   install_file "$REPO_DIR/assets/defaults/.config/peaclock/config" "$HOME_DIR/.config/peaclock/config"
 
   install_dir "$REPO_DIR/assets/defaults/.config/tmux" "$HOME_DIR/.config/tmux"
-  install_dir "$REPO_DIR/assets/defaults/.config/nvim" "$HOME_DIR/.config/nvim"
   install_dir "$REPO_DIR/fonts" "$TOOIE_DIR/fonts"
 
   install_file "$REPO_DIR/scripts/apply-material.sh" "$TOOIE_DIR/apply-material.sh"
@@ -154,7 +141,6 @@ post_setup() {
 
 install_base_deps
 install_matugen
-install_neovim_nightly
 ensure_storage_links
 deploy_assets
 build_theme_manager

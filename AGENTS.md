@@ -5,7 +5,7 @@ This repository is a Termux-focused Go CLI plus deployment assets.
 
 - `cmd/tooie/main.go`: main Bubble Tea TUI application entrypoint.
 - `scripts/`: helper scripts copied into `~/.config/tooie` (`apply-material.sh`, `restore-material.sh`, `list-material-backups.sh`).
-- `assets/defaults/`: baseline configs deployed by installer (`.termux`, `tmux`, `nvim`, `fish`, `starship`, `peaclock`).
+- `assets/defaults/`: baseline configs deployed by installer (`.termux`, `tmux`, `fish`, `starship`, `peaclock`).
 - `fonts/`: clock glyph sets (`0-9.txt`, `colon.txt`) grouped by font directory.
 - Root scripts: `install.sh`, `update.sh`, `uninstall.sh`.
 

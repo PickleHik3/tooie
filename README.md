@@ -68,10 +68,11 @@ The installer places files here:
 - `~/.config/fish/config.fish`
 - `~/.config/peaclock/config`
 - `~/.config/tmux/`
-- `~/.config/nvim/`
 - `~/.config/tooie/apply-material.sh`
 - `~/.config/tooie/restore-material.sh`
 - `~/.config/tooie/list-material-backups.sh`
+
+Neovim is intentionally not managed by Tooie. Bring your own Neovim distro/config.
 
 It supports both `pkg` and `pacman`.
 
