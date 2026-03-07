@@ -14,7 +14,7 @@ import (
 
 const maxPinnedApps = 7
 const pinnedSixelColAdjust = -3
-const pinnedSixelRowAdjust = 0
+const pinnedSixelRowAdjust = -1
 
 type pinnedRowLayout struct {
 	pinnedStart int
