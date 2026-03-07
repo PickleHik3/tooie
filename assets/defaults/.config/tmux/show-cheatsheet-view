@@ -9,8 +9,16 @@ muted="$(printf '\033[38;5;245m')"
 rose="$(printf '\033[38;5;217m')"
 
 client_w="$(tmux display-message -p '#{client_width}')"
-compact=0
-[ "$client_w" -lt 74 ] && compact=1
+client_h="$(tmux display-message -p '#{client_height}')"
+mode="${TOOIE_CHEATSHEET_MODE:-}"
+if [ -z "$mode" ]; then
+  if [ "$client_w" -lt 76 ] || [ "$client_h" -lt 35 ]; then
+    mode="narrow"
+  else
+    mode="wide"
+  fi
+fi
+popup_w="${TOOIE_CHEATSHEET_WIDTH:-$client_w}"
 
 cleanup() {
   printf '\033[?25h'
@@ -92,6 +100,45 @@ emit_wide_box() {
   printf '┘\n'
 }
 
+emit_full_box() {
+  title="$1"
+  rows="$2"
+  shift 2
+  inner_w=$((popup_w - 6))
+  [ "$inner_w" -lt 34 ] && inner_w=34
+  action_w=12
+  bind_w=$((inner_w - action_w - 2))
+  [ "$bind_w" -lt 18 ] && bind_w=18
+  fill=$((inner_w - ${#title} - 2))
+  [ "$fill" -lt 0 ] && fill=0
+  printf '┌ %s%s%s ' "$cyan" "$title" "$reset"
+  repeat_char '─' "$fill"
+  printf '┐\n'
+  i=0
+  while [ "$i" -lt "$rows" ]; do
+    action="$1"
+    bind="$2"
+    shift 2
+    action_p="$(pad_text "$action" "$action_w")"
+    bind_p="$(pad_text "$bind" "$bind_w")"
+    printf '│ %s%s%s  %s%s%s │\n' \
+      "$yellow" "$action_p" "$reset" \
+      "$green" "$bind_p" "$reset"
+    i=$((i + 1))
+  done
+  printf '└'
+  repeat_char '─' "$inner_w"
+  printf '┘\n'
+}
+
+emit_narrow_line() {
+  action="$1"
+  bind="$2"
+  printf ' %s%-12s%s  %s%s%s\n' \
+    "$yellow" "$action" "$reset" \
+    "$green" "$bind" "$reset"
+}
+
 join_pair() {
   left_file="$1"
   right_file="$2"
@@ -103,34 +150,31 @@ join_pair() {
 printf ' %sPrefix:%s %sCtrl+b / Ctrl+Space%s\n' \
   "$muted" "$reset" "$rose" "$reset"
 
-if [ "$compact" -eq 1 ]; then
-  emit_half_box "Windows" 7 \
-    "New" "Prefix + c" \
-    "Rename" "Prefix + r" \
-    "Close" "Prefix + k" \
-    "Jump" "Alt + 1..9" \
-    "Cycle" "Alt + L/R" \
-    "Last" "Alt + z" \
-    "Move" "Alt + Shift+L/R"
-  emit_half_box "Panes" 5 \
-    "Below" "Prefix + h" \
-    "Right" "Prefix + v" \
-    "Close" "Prefix + x" \
-    "Focus" "C-A + Arrows" \
-    "Resize" "C-A-S + Arrows"
-  emit_half_box "Sessions" 5 \
-    "New" "Prefix + C" \
-    "Rename" "Prefix + R" \
-    "Close" "Prefix + K" \
-    "Prev/Next" "Prefix+P/N" \
-    "Cycle" "Alt + Up/Dn"
-  emit_half_box "Apps" 3 \
-    "Apps Bar" "Alt + Enter" \
-    "Search" "Type / in terminal" \
-    "Customize" "Run tooie"
-  emit_wide_box "Misc" 2 \
-    "Reload" "Prefix + q" \
-    "Copy Mode" "v select, y copy"
+if [ "$mode" = "narrow" ]; then
+  printf '%sQuick Keys%s\n' "$cyan" "$reset"
+  emit_narrow_line "New Win" "Prefix + c"
+  emit_narrow_line "Rename Win" "Prefix + r"
+  emit_narrow_line "Close Win" "Prefix + k"
+  emit_narrow_line "Jump Win" "Alt + 1..9"
+  emit_narrow_line "Cycle Win" "Alt + L/R"
+  emit_narrow_line "Last Win" "Alt + z"
+  emit_narrow_line "Move Win" "Alt + Shift+L/R"
+  emit_narrow_line "Split Pane" "Prefix + h / Prefix + v"
+  emit_narrow_line "Close Pane" "Prefix + x"
+  emit_narrow_line "Pane Focus" "Ctrl+Alt + Arrows"
+  emit_narrow_line "Pane Resize" "Ctrl+Alt+Shift + Arrows"
+  emit_narrow_line "Session New" "Prefix + C"
+  emit_narrow_line "Session Name" "Prefix + R"
+  emit_narrow_line "Session Kill" "Prefix + K"
+  emit_narrow_line "Session Prev/Nxt" "Prefix + P / Prefix + N"
+  emit_narrow_line "Session Cycle" "Alt + Up/Dn"
+  emit_narrow_line "Apps Bar" "Alt + Enter"
+  emit_narrow_line "Search" "Type / in terminal"
+  emit_narrow_line "Customize" "Run tooie"
+  emit_narrow_line "Copy Mode" "v select, y copy"
+  printf '\n%sMisc%s\n' "$cyan" "$reset"
+  emit_narrow_line "Reload" "Prefix + q"
+  emit_narrow_line "Search / Theme" "Type /, run tooie"
 else
   left_top="$(mktemp)"
   right_top="$(mktemp)"
