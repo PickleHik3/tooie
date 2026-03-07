@@ -1,11 +1,11 @@
 # Tooie
 
-Tooie is a single command center for your Termux launcher setup.
+This is a companion bootstrap script + TUI i vibe coded for my termux launcher for android - https://github.com/PickleHik3/termux-launcher.
 
-It combines:
-- a Bubble Tea TUI for dashboard, theme, and launcher workflows
-- CLI commands for app discovery, icon caching, app launch, and launcher restart
-- install scripts that deploy a usable Termux baseline
+What it does:
+- Installs necassary packages (tmux, fish, starship, zoxide, eza, go etc.)
+- Copies over config files to their respective locations (~/.config & ~/.termux)
+- Builds the 'tooie' binary and places it at ~/.local/bin/tooie
 
 ## Screenshots
 
@@ -23,6 +23,9 @@ It combines:
 ## Install
 
 ```sh
+pkg update -y
+pkg i -y git
+git clone https://github.com/PickleHik3/tooie
 cd ~/tooie
 ./install.sh
 ```
@@ -30,7 +33,7 @@ cd ~/tooie
 ## Run
 
 ```sh
-~/.local/bin/tooie
+~/tooie
 ```
 
 ## CLI
@@ -75,8 +78,6 @@ The installer places files here:
 - `~/.config/tooie/restore-material.sh`
 - `~/.config/tooie/list-material-backups.sh`
 
-Neovim is intentionally not managed by Tooie. Bring your own Neovim distro/config.
-
 It supports both `pkg` and `pacman`.
 
 ## CLI Notes
@@ -90,17 +91,19 @@ It supports both `pkg` and `pacman`.
 ## Uninstall
 
 ```sh
+rm ~/.local/bin/tooie
+rm -rf ~/.config/tooie
+```
+or
+```sh
 cd ~/tooie
 ./uninstall.sh
 ```
-
-Current uninstall behavior removes only the installed binaries:
-
-- `~/.local/bin/tooie`
-
-Configs, helper scripts, and backups are left in place.
+the scrip removes only the installed binaries at '~/.local/bin/tooie` and  Configs, helper scripts, and backups are left in place.
 
 ## Acknowledgements
 
-- Clock font work in Tooie was created using ideas and source material from `bit` by superstarryeyes:
+- Clock font work in Tooie was created `bit` by superstarryeyes:
   https://github.com/superstarryeyes/bit
+- Uses JetbrainsMono NF:
+  https://github.com/JetBrains/JetBrainsMono
