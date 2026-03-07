@@ -34,11 +34,25 @@ const (
 	defaultMode    = "dark"
 	defaultPalette = "default"
 	defaultPreset  = "default"
+	defaultSource  = "wallpaper"
 	pageTheme      = 0
 	pageHome       = 1
 )
 
 var stylePresets = []string{"default", "vivid", "playful", "energetic", "creative", "friendly", "positive"}
+var themeSources = []string{"wallpaper", "preset"}
+var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84"}
+var presetVariantsByFamily = map[string][]string{
+	"catppuccin":   {"latte", "frappe", "macchiato", "mocha"},
+	"rose-pine":    {"main", "moon", "dawn"},
+	"tokyo-night":  {"storm", "moon", "night", "day"},
+	"synthwave-84": {"default"},
+}
+
+type settingItem struct {
+	Label  string
+	Target string
+}
 
 type tickMsg time.Time
 type metricsTickMsg time.Time
@@ -158,6 +172,9 @@ type model struct {
 	mode             string
 	palette          string
 	stylePreset      string
+	themeSource      string
+	presetFamily     string
+	presetVariant    string
 	textColor        string
 	cursorColor      string
 	ansiRed          string
@@ -233,6 +250,9 @@ func initialModel() model {
 		mode:          defaultMode,
 		palette:       defaultPalette,
 		stylePreset:   defaultPreset,
+		themeSource:   defaultSource,
+		presetFamily:  presetFamilyOrder[0],
+		presetVariant: presetVariantsByFamily[presetFamilyOrder[0]][0],
 		lastStatus:    "Ready",
 		textColor:     "",
 		cursorColor:   "",
@@ -257,11 +277,92 @@ func initialModel() model {
 			}
 		}
 	}
+	m.loadThemeStateFromBackups()
 	m.loadPreviewColors()
 	m.pinnedPackages = loadPinnedApps()
 	m.refreshAppSearchResults()
 	m.startHomeIntro()
 	return m
+}
+
+func (m *model) loadThemeStateFromBackups() {
+	if len(m.backups) == 0 {
+		m.normalizeThemeSelection()
+		return
+	}
+	meta := m.backups[0].Meta
+	if v := strings.TrimSpace(meta["theme_source"]); v != "" {
+		m.themeSource = v
+	}
+	if v := strings.TrimSpace(meta["mode"]); v != "" {
+		m.mode = v
+	}
+	if v := strings.TrimSpace(meta["status_palette"]); v != "" {
+		m.palette = v
+	}
+	if v := strings.TrimSpace(meta["style_preset"]); v != "" {
+		m.stylePreset = v
+	}
+	if v := strings.TrimSpace(meta["preset_family"]); v != "" {
+		m.presetFamily = v
+	}
+	if v := strings.TrimSpace(meta["preset_variant"]); v != "" {
+		m.presetVariant = v
+	}
+	if v := strings.TrimSpace(meta["text_color_override"]); v != "" {
+		m.textColor = v
+	}
+	if v := strings.TrimSpace(meta["cursor_color_override"]); v != "" {
+		m.cursorColor = v
+	}
+	if v := strings.TrimSpace(meta["ansi_red_override"]); v != "" {
+		m.ansiRed = v
+	}
+	if v := strings.TrimSpace(meta["ansi_green_override"]); v != "" {
+		m.ansiGreen = v
+	}
+	if v := strings.TrimSpace(meta["ansi_yellow_override"]); v != "" {
+		m.ansiYellow = v
+	}
+	if v := strings.TrimSpace(meta["ansi_blue_override"]); v != "" {
+		m.ansiBlue = v
+	}
+	if v := strings.TrimSpace(meta["ansi_magenta_override"]); v != "" {
+		m.ansiMagenta = v
+	}
+	if v := strings.TrimSpace(meta["ansi_cyan_override"]); v != "" {
+		m.ansiCyan = v
+	}
+	m.normalizeThemeSelection()
+}
+
+func (m *model) normalizeThemeSelection() {
+	if !contains(themeSources, m.themeSource) {
+		m.themeSource = defaultSource
+	}
+	if !contains(stylePresets, m.stylePreset) {
+		m.stylePreset = defaultPreset
+	}
+	if !contains(presetFamilyOrder, m.presetFamily) {
+		m.presetFamily = presetFamilyOrder[0]
+	}
+	variants := presetVariantsByFamily[m.presetFamily]
+	if len(variants) == 0 {
+		m.presetVariant = ""
+		return
+	}
+	if !contains(variants, m.presetVariant) {
+		m.presetVariant = variants[0]
+	}
+}
+
+func contains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (m model) Init() tea.Cmd {
@@ -457,7 +558,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			switch {
 			case msg.previewOnly:
-				m.lastStatus = "Colors updated"
+				if m.themeSource == "preset" {
+					m.lastStatus = "Preset preview updated"
+				} else {
+					m.lastStatus = "Colors updated"
+				}
 			case msg.reused:
 				m.lastStatus = msg.label + " completed from cached preview"
 			default:
@@ -706,46 +811,74 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) settings() []string {
-	return []string{
-		"Apply Theme",
-		"Update Colors",
-		"Mode: " + m.mode,
-		"Style Preset: " + displayStylePreset(m.stylePreset),
-		"Customize Colors...",
-		"Backups...",
-		"Refresh Backups",
-		"Quit",
+func (m model) settings() []settingItem {
+	items := []settingItem{
+		{Label: "Apply Theme", Target: "apply"},
+		{Label: "Update Colors", Target: "preview"},
+		{Label: "Theme Source: " + displayThemeSource(m.themeSource), Target: "theme_source"},
 	}
+	if m.themeSource == "preset" {
+		items = append(items,
+			settingItem{Label: "Preset Family: " + displayPresetFamily(m.presetFamily), Target: "preset_family"},
+			settingItem{Label: "Preset Variant: " + displayPresetVariant(m.presetVariant), Target: "preset_variant"},
+		)
+	} else {
+		items = append(items,
+			settingItem{Label: "Mode: " + m.mode, Target: "mode"},
+			settingItem{Label: "Style Preset: " + displayStylePreset(m.stylePreset), Target: "style_preset"},
+		)
+	}
+	items = append(items,
+		settingItem{Label: "Customize Colors...", Target: "customize"},
+		settingItem{Label: "Backups...", Target: "backups"},
+		settingItem{Label: "Refresh Backups", Target: "refresh_backups"},
+		settingItem{Label: "Quit", Target: "quit"},
+	)
+	return items
 }
 
 func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	if m.applying {
 		return m, nil
 	}
-	switch m.settingIndex {
-	case 0:
-		return m.startApply("Apply", true, false)
-	case 1:
-		return m.startApply("Update colors", true, true)
-	case 2:
+	items := m.settings()
+	if m.settingIndex < 0 || m.settingIndex >= len(items) {
+		return m, nil
+	}
+	switch items[m.settingIndex].Target {
+	case "apply":
+		return m.startApply(m.themeActionLabel(false), true, false)
+	case "preview":
+		return m.startApply(m.themeActionLabel(true), true, true)
+	case "theme_source":
+		m.themeSource = nextThemeSource(m.themeSource)
+		m.normalizeThemeSelection()
+		return m, nil
+	case "mode":
 		if m.mode == "dark" {
 			m.mode = "light"
 		} else {
 			m.mode = "dark"
 		}
 		return m, nil
-	case 3:
+	case "style_preset":
 		m.stylePreset = nextStylePreset(m.stylePreset)
 		return m, nil
-	case 4:
+	case "preset_family":
+		m.presetFamily = nextPresetFamily(m.presetFamily)
+		m.normalizeThemeSelection()
+		return m, nil
+	case "preset_variant":
+		m.presetVariant = nextPresetVariant(m.presetFamily, m.presetVariant)
+		return m, nil
+	case "customize":
 		m.customizing = true
 		m.customIndex = 0
 		return m, nil
-	case 5:
+	case "backups":
 		m.showBackups = true
 		return m, nil
-	case 6:
+	case "refresh_backups":
 		m.backups = loadBackups()
 		if m.backupIndex >= len(m.backups) {
 			m.backupIndex = max(0, len(m.backups)-1)
@@ -753,7 +886,7 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		m.loadPreviewColors()
 		m.lastStatus = "Backups refreshed"
 		return m, nil
-	case 7:
+	case "quit":
 		return m, tea.Quit
 	}
 	return m, nil
@@ -970,7 +1103,7 @@ func (m model) settingsBlock(limit int) string {
 	visible := max(1, limit-1)
 	start, end := listWindow(len(items), m.settingIndex, visible)
 	for i := start; i < end; i++ {
-		s := items[i]
+		s := items[i].Label
 		prefix := "  "
 		style := lipgloss.NewStyle()
 		if i == m.settingIndex {
@@ -987,9 +1120,20 @@ func (m model) detailsBlock(totalWidth int) string {
 		headerChip("Details", "10"),
 		"",
 		headerChip("Current Theme", "8"),
-		"  mode: " + m.mode,
-		"  style preset: " + displayStylePreset(m.stylePreset),
+		"  source: " + displayThemeSource(m.themeSource),
 		"  status palette: " + m.palette,
+	}
+	if m.themeSource == "preset" {
+		left = append(left,
+			"  preset family: "+displayPresetFamily(m.presetFamily),
+			"  preset variant: "+displayPresetVariant(m.presetVariant),
+			"  preset mode: "+presetVariantMode(m.presetFamily, m.presetVariant),
+		)
+	} else {
+		left = append(left,
+			"  mode: "+m.mode,
+			"  style preset: "+displayStylePreset(m.stylePreset),
+		)
 	}
 
 	if strings.TrimSpace(m.textColor) != "" {
@@ -1132,11 +1276,23 @@ func (m model) interactionBlock(limit int) string {
 					prefix = "▶ "
 				}
 				line := prefix + b.ID
-				if v, ok := b.Meta["status_palette"]; ok && v != "" {
-					line += " [" + v + "]"
+				if v, ok := b.Meta["theme_source"]; ok && v != "" {
+					line += " <" + v + ">"
 				}
-				if v, ok := b.Meta["style_preset"]; ok && v != "" {
+				if v, ok := b.Meta["preset_family"]; ok && v != "" {
+					line += " [" + v
+					if vv, ok := b.Meta["preset_variant"]; ok && vv != "" {
+						line += ":" + vv
+					}
+					line += "]"
+				}
+				if v, ok := b.Meta["status_palette"]; ok && v != "" {
 					line += " {" + v + "}"
+				}
+				if b.Meta["theme_source"] != "preset" {
+					if v, ok := b.Meta["style_preset"]; ok && v != "" {
+						line += " (" + v + ")"
+					}
 				}
 				lines = append(lines, line)
 			}
@@ -1596,7 +1752,12 @@ func (m *model) setColorTarget(target, hex string) {
 }
 
 func (m model) applyArgs(includeOverrides bool) []string {
-	args := []string{"-m", m.mode, "-w", defaultWall, "--status-palette", m.palette, "--style-preset", m.stylePreset}
+	args := []string{"--theme-source", m.themeSource, "--status-palette", m.palette}
+	if m.themeSource == "preset" {
+		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
+	} else {
+		args = append(args, "-m", m.mode, "-w", defaultWall, "--style-preset", m.stylePreset)
+	}
 	if includeOverrides {
 		if strings.TrimSpace(m.textColor) != "" {
 			args = append(args, "--text-color", strings.TrimSpace(m.textColor))
@@ -1710,12 +1871,104 @@ func nextStylePreset(cur string) string {
 	return stylePresets[0]
 }
 
+func (m model) themeActionLabel(previewOnly bool) string {
+	if m.themeSource == "preset" {
+		if previewOnly {
+			return "Preview preset"
+		}
+		return "Apply preset"
+	}
+	if previewOnly {
+		return "Update colors"
+	}
+	return "Apply theme"
+}
+
+func nextThemeSource(cur string) string {
+	if len(themeSources) == 0 {
+		return cur
+	}
+	for i, src := range themeSources {
+		if src == cur {
+			return themeSources[(i+1)%len(themeSources)]
+		}
+	}
+	return themeSources[0]
+}
+
+func nextPresetFamily(cur string) string {
+	if len(presetFamilyOrder) == 0 {
+		return cur
+	}
+	for i, family := range presetFamilyOrder {
+		if family == cur {
+			return presetFamilyOrder[(i+1)%len(presetFamilyOrder)]
+		}
+	}
+	return presetFamilyOrder[0]
+}
+
+func nextPresetVariant(family, cur string) string {
+	variants := presetVariantsByFamily[family]
+	if len(variants) == 0 {
+		return cur
+	}
+	for i, variant := range variants {
+		if variant == cur {
+			return variants[(i+1)%len(variants)]
+		}
+	}
+	return variants[0]
+}
+
 func displayStylePreset(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "Default"
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func displayThemeSource(source string) string {
+	switch strings.TrimSpace(source) {
+	case "preset":
+		return "Preset"
+	default:
+		return "Wallpaper"
+	}
+}
+
+func displayPresetFamily(family string) string {
+	switch strings.TrimSpace(family) {
+	case "catppuccin":
+		return "Catppuccin"
+	case "rose-pine":
+		return "Rose Pine"
+	case "tokyo-night":
+		return "Tokyo Night"
+	case "synthwave-84":
+		return "Synthwave 84"
+	default:
+		return displayStylePreset(family)
+	}
+}
+
+func displayPresetVariant(variant string) string {
+	switch strings.TrimSpace(variant) {
+	case "default":
+		return "Default"
+	default:
+		return displayStylePreset(variant)
+	}
+}
+
+func presetVariantMode(family, variant string) string {
+	switch family + ":" + variant {
+	case "catppuccin:latte", "rose-pine:dawn", "tokyo-night:day":
+		return "light"
+	default:
+		return "dark"
+	}
 }
 
 func renderTwoColumns(left, right []string, totalWidth int) string {

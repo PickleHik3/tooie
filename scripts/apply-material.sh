@@ -14,6 +14,9 @@ STARSHIP_CONFIG="$HOME_DIR/.config/starship.toml"
 MODE="dark"
 SCHEME_TYPE="scheme-tonal-spot"
 WALLPAPER=""
+THEME_SOURCE="wallpaper"
+PRESET_FAMILY="catppuccin"
+PRESET_VARIANT=""
 MATUGEN_BIN="${MATUGEN_BIN:-}"
 TEXT_COLOR_OVERRIDE=""
 CURSOR_COLOR_OVERRIDE=""
@@ -31,6 +34,9 @@ REUSE_BACKUP_ID=""
 usage() {
   cat <<'EOF'
 Usage: apply-material.sh [-m dark|light] [-t scheme-type] [-w wallpaper_path] [-b matugen_bin]
+                         [--theme-source wallpaper|preset]
+                         [--preset-family catppuccin|rose-pine|tokyo-night|synthwave-84]
+                         [--preset-variant name]
                          [--text-color '#rrggbb'] [--cursor-color '#rrggbb']
                          [--status-palette default|vibrant]
                          [--style-preset default|vivid|playful|energetic|creative|friendly|positive]
@@ -59,6 +65,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     -w|--wallpaper)
       WALLPAPER="${2:-}"
+      shift 2
+      ;;
+    --theme-source)
+      THEME_SOURCE="${2:-}"
+      shift 2
+      ;;
+    --preset-family)
+      PRESET_FAMILY="${2:-}"
+      shift 2
+      ;;
+    --preset-variant)
+      PRESET_VARIANT="${2:-}"
       shift 2
       ;;
     -b|--matugen-bin)
@@ -166,10 +184,122 @@ pick_latest_wallpaper() {
   printf '%s/%s\n' "$WALLPAPER_DIR" "$latest_file"
 }
 
-MATUGEN_BIN="$(resolve_matugen_bin || true)"
-if [ -z "$MATUGEN_BIN" ]; then
-  echo "matugen binary not found. Set MATUGEN_BIN or install matugen." >&2
-  exit 1
+apply_preset_defaults() {
+  case "$PRESET_FAMILY" in
+    catppuccin)
+      [ -n "$PRESET_VARIANT" ] || PRESET_VARIANT="mocha"
+      ;;
+    rose-pine)
+      [ -n "$PRESET_VARIANT" ] || PRESET_VARIANT="main"
+      ;;
+    tokyo-night)
+      [ -n "$PRESET_VARIANT" ] || PRESET_VARIANT="storm"
+      ;;
+    synthwave-84)
+      PRESET_VARIANT="default"
+      ;;
+  esac
+}
+
+load_preset_theme() {
+  case "$PRESET_FAMILY:$PRESET_VARIANT" in
+    catppuccin:latte)
+      PRESET_MODE="light"
+      PRESET_BG="#eff1f5"; PRESET_SURFACE="#e6e9ef"; PRESET_FG="#4c4f69"; PRESET_OUTLINE="#9ca0b0"
+      PRESET_PRIMARY="#1e66f5"; PRESET_SECONDARY="#179299"; PRESET_TERTIARY="#8839ef"; PRESET_ERROR="#d20f39"
+      PRESET_RED="#d20f39"; PRESET_GREEN="#40a02b"; PRESET_YELLOW="#df8e1d"; PRESET_BLUE="#1e66f5"; PRESET_MAGENTA="#ea76cb"; PRESET_CYAN="#179299"
+      ;;
+    catppuccin:frappe)
+      PRESET_MODE="dark"
+      PRESET_BG="#303446"; PRESET_SURFACE="#292c3c"; PRESET_FG="#c6d0f5"; PRESET_OUTLINE="#737994"
+      PRESET_PRIMARY="#8caaee"; PRESET_SECONDARY="#81c8be"; PRESET_TERTIARY="#ca9ee6"; PRESET_ERROR="#e78284"
+      PRESET_RED="#e78284"; PRESET_GREEN="#a6d189"; PRESET_YELLOW="#e5c890"; PRESET_BLUE="#8caaee"; PRESET_MAGENTA="#f4b8e4"; PRESET_CYAN="#81c8be"
+      ;;
+    catppuccin:macchiato)
+      PRESET_MODE="dark"
+      PRESET_BG="#24273a"; PRESET_SURFACE="#1f2230"; PRESET_FG="#cad3f5"; PRESET_OUTLINE="#6e738d"
+      PRESET_PRIMARY="#8aadf4"; PRESET_SECONDARY="#8bd5ca"; PRESET_TERTIARY="#c6a0f6"; PRESET_ERROR="#ed8796"
+      PRESET_RED="#ed8796"; PRESET_GREEN="#a6da95"; PRESET_YELLOW="#eed49f"; PRESET_BLUE="#8aadf4"; PRESET_MAGENTA="#f5bde6"; PRESET_CYAN="#8bd5ca"
+      ;;
+    catppuccin:mocha)
+      PRESET_MODE="dark"
+      PRESET_BG="#1e1e2e"; PRESET_SURFACE="#181825"; PRESET_FG="#cdd6f4"; PRESET_OUTLINE="#6c7086"
+      PRESET_PRIMARY="#89b4fa"; PRESET_SECONDARY="#94e2d5"; PRESET_TERTIARY="#cba6f7"; PRESET_ERROR="#f38ba8"
+      PRESET_RED="#f38ba8"; PRESET_GREEN="#a6e3a1"; PRESET_YELLOW="#f9e2af"; PRESET_BLUE="#89b4fa"; PRESET_MAGENTA="#f5c2e7"; PRESET_CYAN="#94e2d5"
+      ;;
+    rose-pine:main)
+      PRESET_MODE="dark"
+      PRESET_BG="#191724"; PRESET_SURFACE="#1f1d2e"; PRESET_FG="#e0def4"; PRESET_OUTLINE="#524f67"
+      PRESET_PRIMARY="#9ccfd8"; PRESET_SECONDARY="#f6c177"; PRESET_TERTIARY="#c4a7e7"; PRESET_ERROR="#eb6f92"
+      PRESET_RED="#eb6f92"; PRESET_GREEN="#31748f"; PRESET_YELLOW="#f6c177"; PRESET_BLUE="#9ccfd8"; PRESET_MAGENTA="#c4a7e7"; PRESET_CYAN="#ebbcba"
+      ;;
+    rose-pine:moon)
+      PRESET_MODE="dark"
+      PRESET_BG="#232136"; PRESET_SURFACE="#2a273f"; PRESET_FG="#e0def4"; PRESET_OUTLINE="#6e6a86"
+      PRESET_PRIMARY="#9ccfd8"; PRESET_SECONDARY="#ea9a97"; PRESET_TERTIARY="#c4a7e7"; PRESET_ERROR="#eb6f92"
+      PRESET_RED="#eb6f92"; PRESET_GREEN="#3e8fb0"; PRESET_YELLOW="#f6c177"; PRESET_BLUE="#9ccfd8"; PRESET_MAGENTA="#c4a7e7"; PRESET_CYAN="#ea9a97"
+      ;;
+    rose-pine:dawn)
+      PRESET_MODE="light"
+      PRESET_BG="#faf4ed"; PRESET_SURFACE="#fffaf3"; PRESET_FG="#575279"; PRESET_OUTLINE="#9893a5"
+      PRESET_PRIMARY="#56949f"; PRESET_SECONDARY="#d7827e"; PRESET_TERTIARY="#907aa9"; PRESET_ERROR="#b4637a"
+      PRESET_RED="#b4637a"; PRESET_GREEN="#286983"; PRESET_YELLOW="#ea9d34"; PRESET_BLUE="#56949f"; PRESET_MAGENTA="#907aa9"; PRESET_CYAN="#d7827e"
+      ;;
+    tokyo-night:storm)
+      PRESET_MODE="dark"
+      PRESET_BG="#24283b"; PRESET_SURFACE="#1f2335"; PRESET_FG="#c0caf5"; PRESET_OUTLINE="#565f89"
+      PRESET_PRIMARY="#7aa2f7"; PRESET_SECONDARY="#7dcfff"; PRESET_TERTIARY="#bb9af7"; PRESET_ERROR="#f7768e"
+      PRESET_RED="#f7768e"; PRESET_GREEN="#9ece6a"; PRESET_YELLOW="#e0af68"; PRESET_BLUE="#7aa2f7"; PRESET_MAGENTA="#bb9af7"; PRESET_CYAN="#7dcfff"
+      ;;
+    tokyo-night:moon)
+      PRESET_MODE="dark"
+      PRESET_BG="#222436"; PRESET_SURFACE="#1e2030"; PRESET_FG="#c8d3f5"; PRESET_OUTLINE="#636da6"
+      PRESET_PRIMARY="#82aaff"; PRESET_SECONDARY="#86e1fc"; PRESET_TERTIARY="#c099ff"; PRESET_ERROR="#ff757f"
+      PRESET_RED="#ff757f"; PRESET_GREEN="#c3e88d"; PRESET_YELLOW="#ffc777"; PRESET_BLUE="#82aaff"; PRESET_MAGENTA="#c099ff"; PRESET_CYAN="#86e1fc"
+      ;;
+    tokyo-night:night)
+      PRESET_MODE="dark"
+      PRESET_BG="#1a1b26"; PRESET_SURFACE="#16161e"; PRESET_FG="#c0caf5"; PRESET_OUTLINE="#414868"
+      PRESET_PRIMARY="#7aa2f7"; PRESET_SECONDARY="#7dcfff"; PRESET_TERTIARY="#bb9af7"; PRESET_ERROR="#f7768e"
+      PRESET_RED="#f7768e"; PRESET_GREEN="#9ece6a"; PRESET_YELLOW="#e0af68"; PRESET_BLUE="#7aa2f7"; PRESET_MAGENTA="#bb9af7"; PRESET_CYAN="#7dcfff"
+      ;;
+    tokyo-night:day)
+      PRESET_MODE="light"
+      PRESET_BG="#e1e2e7"; PRESET_SURFACE="#d5d6db"; PRESET_FG="#3760bf"; PRESET_OUTLINE="#9699a3"
+      PRESET_PRIMARY="#2e7de9"; PRESET_SECONDARY="#007197"; PRESET_TERTIARY="#9854f1"; PRESET_ERROR="#f52a65"
+      PRESET_RED="#f52a65"; PRESET_GREEN="#587539"; PRESET_YELLOW="#8c6c3e"; PRESET_BLUE="#2e7de9"; PRESET_MAGENTA="#9854f1"; PRESET_CYAN="#007197"
+      ;;
+    synthwave-84:default)
+      PRESET_MODE="dark"
+      PRESET_BG="#241b2f"; PRESET_SURFACE="#2a2139"; PRESET_FG="#f8f8f2"; PRESET_OUTLINE="#495495"
+      PRESET_PRIMARY="#36f9f6"; PRESET_SECONDARY="#fede5d"; PRESET_TERTIARY="#ff7edb"; PRESET_ERROR="#ff5c8a"
+      PRESET_RED="#ff5c8a"; PRESET_GREEN="#72f1b8"; PRESET_YELLOW="#fede5d"; PRESET_BLUE="#36f9f6"; PRESET_MAGENTA="#ff7edb"; PRESET_CYAN="#36f9f6"
+      ;;
+    *)
+      echo "Invalid preset selection: $PRESET_FAMILY:$PRESET_VARIANT" >&2
+      exit 1
+      ;;
+  esac
+}
+
+case "$THEME_SOURCE" in
+  wallpaper|preset) ;;
+  *)
+    echo "Invalid theme source: $THEME_SOURCE (use wallpaper or preset)" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$THEME_SOURCE" = "preset" ]; then
+  apply_preset_defaults
+  load_preset_theme
+  MODE="$PRESET_MODE"
+else
+  MATUGEN_BIN="$(resolve_matugen_bin || true)"
+  if [ -z "$MATUGEN_BIN" ]; then
+    echo "matugen binary not found. Set MATUGEN_BIN or install matugen." >&2
+    exit 1
+  fi
 fi
 
 case "$MODE" in
@@ -197,13 +327,17 @@ case "$STYLE_PRESET" in
     ;;
 esac
 
-if [ -z "$WALLPAPER" ]; then
-  WALLPAPER="$(pick_latest_wallpaper || true)"
-fi
+if [ "$THEME_SOURCE" = "wallpaper" ]; then
+  if [ -z "$WALLPAPER" ]; then
+    WALLPAPER="$(pick_latest_wallpaper || true)"
+  fi
 
-if [ -z "$WALLPAPER" ] || [ ! -f "$WALLPAPER" ]; then
-  echo "Wallpaper not found. Expected $WALLPAPER_FIXED (or use -w)." >&2
-  exit 1
+  if [ -z "$WALLPAPER" ] || [ ! -f "$WALLPAPER" ]; then
+    echo "Wallpaper not found. Expected $WALLPAPER_FIXED (or use -w)." >&2
+    exit 1
+  fi
+else
+  WALLPAPER=""
 fi
 
 mkdir -p "$BACKUP_ROOT" "$HOME_DIR/.termux"
@@ -258,8 +392,33 @@ if [ -n "$REUSE_BACKUP_ID" ]; then
     exit 1
   fi
 else
-  write_progress "Extracting wallpaper roles" 0.14
-  "$MATUGEN_BIN" image "$WALLPAPER" -m "$MODE" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$JSON_FILE"
+  if [ "$THEME_SOURCE" = "preset" ]; then
+    write_progress "Loading preset palette" 0.14
+    cat > "$JSON_FILE" <<EOF
+{"colors":{
+  "background":{"default":{"color":"$PRESET_BG"}},
+  "surface_container":{"default":{"color":"$PRESET_SURFACE"}},
+  "surface_container_high":{"default":{"color":"$PRESET_SURFACE"}},
+  "surface_variant":{"default":{"color":"$PRESET_SURFACE"}},
+  "surface_dim":{"default":{"color":"$PRESET_BG"}},
+  "surface_bright":{"default":{"color":"$PRESET_SURFACE"}},
+  "on_background":{"default":{"color":"$PRESET_FG"}},
+  "on_surface":{"default":{"color":"$PRESET_FG"}},
+  "on_surface_variant":{"default":{"color":"$PRESET_OUTLINE"}},
+  "outline":{"default":{"color":"$PRESET_OUTLINE"}},
+  "outline_variant":{"default":{"color":"$PRESET_OUTLINE"}},
+  "primary":{"default":{"color":"$PRESET_PRIMARY"}},
+  "secondary":{"default":{"color":"$PRESET_SECONDARY"}},
+  "tertiary":{"default":{"color":"$PRESET_TERTIARY"}},
+  "error":{"default":{"color":"$PRESET_ERROR"}},
+  "secondary_fixed":{"default":{"color":"$PRESET_SECONDARY"}},
+  "tertiary_fixed":{"default":{"color":"$PRESET_TERTIARY"}}
+}}
+EOF
+  else
+    write_progress "Extracting wallpaper roles" 0.14
+    "$MATUGEN_BIN" image "$WALLPAPER" -m "$MODE" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$JSON_FILE"
+  fi
 fi
 write_progress "Deriving semantic palette" 0.28
 
@@ -394,7 +553,54 @@ role_color() {
   fi
 }
 
-if [ "$STYLE_PRESET" = "default" ]; then
+if [ "$THEME_SOURCE" = "preset" ]; then
+  BG="$(normalize_hex "$PRESET_BG")"
+  C0="$(normalize_hex "$PRESET_SURFACE")"
+  FG="$(ensure_contrast "$PRESET_FG" "$BG" 7.0)"
+  CURSOR="$(ensure_contrast "$PRESET_PRIMARY" "$BG" 4.5)"
+  C1="$(ensure_contrast "$PRESET_RED" "$BG" 3.6)"
+  C2="$(ensure_contrast "$PRESET_GREEN" "$BG" 3.6)"
+  C3="$(ensure_contrast "$PRESET_YELLOW" "$BG" 3.6)"
+  C4="$(ensure_contrast "$PRESET_BLUE" "$BG" 3.6)"
+  C5="$(ensure_contrast "$PRESET_MAGENTA" "$BG" 3.6)"
+  C6="$(ensure_contrast "$PRESET_CYAN" "$BG" 3.6)"
+  C7="$(ensure_contrast "$PRESET_FG" "$BG" 6.0)"
+  C14="$(ensure_contrast "$PRESET_OUTLINE" "$BG" 3.2)"
+  C15="$(ensure_contrast "$(mix_hex "$PRESET_FG" "$BG" 0.34)" "$BG" 4.5)"
+  EFFECTIVE_BACKGROUND="$BG"
+  EFFECTIVE_SURFACE="$C0"
+  EFFECTIVE_ON_SURFACE="$FG"
+  EFFECTIVE_OUTLINE="$C14"
+  EFFECTIVE_PRIMARY="$(ensure_contrast "$PRESET_PRIMARY" "$BG" 4.0)"
+  EFFECTIVE_SECONDARY="$(ensure_contrast "$PRESET_SECONDARY" "$BG" 4.0)"
+  EFFECTIVE_TERTIARY="$(ensure_contrast "$PRESET_TERTIARY" "$BG" 4.0)"
+  EFFECTIVE_ERROR="$(ensure_contrast "$PRESET_ERROR" "$BG" 4.0)"
+  if [ "$MODE" = "dark" ]; then
+    C8="$(ensure_contrast "$(mix_hex "$C0" "#ffffff" 0.18)" "$BG" 1.3)"
+    C9="$(ensure_contrast "$(mix_hex "$C1" "#ffffff" 0.20)" "$BG" 4.0)"
+    C10="$(ensure_contrast "$(mix_hex "$C2" "#ffffff" 0.18)" "$BG" 4.0)"
+    C11="$(ensure_contrast "$(mix_hex "$C3" "#ffffff" 0.18)" "$BG" 4.0)"
+    C12="$(ensure_contrast "$(mix_hex "$C4" "#ffffff" 0.18)" "$BG" 4.0)"
+    C13="$(ensure_contrast "$(mix_hex "$C5" "#ffffff" 0.18)" "$BG" 4.0)"
+    C16="$(ensure_contrast "$(mix_hex "$C2" "$C6" 0.36)" "$BG" 3.2)"
+    C17="$(ensure_contrast "$(mix_hex "$C5" "$C4" 0.36)" "$BG" 3.2)"
+    C18="$(mix_hex "$BG" "#000000" 0.10)"
+    C19="$(mix_hex "$BG" "#ffffff" 0.12)"
+  else
+    C8="$(ensure_contrast "$(mix_hex "$C0" "#000000" 0.12)" "$BG" 1.3)"
+    C9="$(ensure_contrast "$(mix_hex "$C1" "#000000" 0.18)" "$BG" 4.0)"
+    C10="$(ensure_contrast "$(mix_hex "$C2" "#000000" 0.18)" "$BG" 4.0)"
+    C11="$(ensure_contrast "$(mix_hex "$C3" "#000000" 0.18)" "$BG" 4.0)"
+    C12="$(ensure_contrast "$(mix_hex "$C4" "#000000" 0.18)" "$BG" 4.0)"
+    C13="$(ensure_contrast "$(mix_hex "$C5" "#000000" 0.18)" "$BG" 4.0)"
+    C16="$(ensure_contrast "$(mix_hex "$C2" "$C6" 0.32)" "$BG" 3.2)"
+    C17="$(ensure_contrast "$(mix_hex "$C5" "$C4" 0.32)" "$BG" 3.2)"
+    C18="$(mix_hex "$BG" "#000000" 0.06)"
+    C19="$(mix_hex "$BG" "#ffffff" 0.06)"
+  fi
+  C20="$(ensure_contrast "$(mix_hex "$C0" "$C15" 0.24)" "$BG" 1.5)"
+  C21="$(ensure_contrast "$(mix_hex "$C14" "$C0" 0.28)" "$BG" 1.4)"
+elif [ "$STYLE_PRESET" = "default" ]; then
   if [ "$MODE" = "dark" ]; then
     FALLBACK_BG="#1a1b26"
     FALLBACK_FG="#c0caf5"
@@ -677,6 +883,11 @@ RAM_6="$STATE_RED"
 
 {
   echo "backup_id=$STAMP"
+  echo "theme_source=$THEME_SOURCE"
+  if [ "$THEME_SOURCE" = "preset" ]; then
+    echo "preset_family=$PRESET_FAMILY"
+    echo "preset_variant=$PRESET_VARIANT"
+  fi
   echo "wallpaper=$WALLPAPER"
   echo "mode=$MODE"
   echo "type=$SCHEME_TYPE"
@@ -719,7 +930,9 @@ TERMUX_TMP="$BACKUP_DIR/colors.properties.new"
 write_progress "Writing Termux colors" 0.42
 cat > "$TERMUX_TMP" <<EOF
 # Generated by $TOOIE_DIR/apply-material.sh
-# source wallpaper: $WALLPAPER
+# theme source: $THEME_SOURCE
+# wallpaper: $WALLPAPER
+# preset: $PRESET_FAMILY:$PRESET_VARIANT
 # mode: $MODE
 # type: $SCHEME_TYPE
 foreground=$FG
