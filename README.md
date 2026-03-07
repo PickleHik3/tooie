@@ -29,7 +29,7 @@ The TUI is split into 2 pages:
     <td><img src="docs/screenshots/Screenshot_20260307-211957.png" alt="Tooie screenshot 4" width="70%"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="docs/screenshots/tmux-gesture-guide.png" alt="Tooie tmux gesture guide" width="70%"></td>
+    <td colspan="2" align="center"><img src="docs/screenshots/readme-bottom-guide.png" alt="Tooie bottom screenshot" width="70%"></td>
   </tr>
 </table>
 
