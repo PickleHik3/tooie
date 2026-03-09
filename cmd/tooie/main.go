@@ -1451,6 +1451,13 @@ func (m model) renderCalendarDateLines(width, height, day int) []string {
 	gh := len(glyph)
 	startX := max(0, (width-gw)/2)
 	startY := max(0, (height-gh)/2)
+	if nudge := m.currentCalendarTopNudge(); nudge != 0 {
+		startY += nudge
+		maxStartY := max(0, height-gh)
+		if startY > maxStartY {
+			startY = maxStartY
+		}
+	}
 	canvas := make([][]rune, height)
 	for y := 0; y < height; y++ {
 		canvas[y] = []rune(strings.Repeat(" ", width))
@@ -2764,6 +2771,22 @@ func (m model) currentFontClockLayout() fontClockLayout {
 		return fontClockLayout{gapYMin: 1, innerPadY: 0, topNudgeY: 0, bottomNudge: 0}
 	default:
 		return fontClockLayout{gapYMin: 1, innerPadY: 0, topNudgeY: 0, bottomNudge: 0}
+	}
+}
+
+func (m model) currentCalendarFontName() string {
+	if m.calFontIdx < 0 || m.calFontIdx >= len(m.calFontDefs) {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(m.calFontDefs[m.calFontIdx].Name))
+}
+
+func (m model) currentCalendarTopNudge() int {
+	switch m.currentCalendarFontName() {
+	case "cal-ember":
+		return 1
+	default:
+		return 0
 	}
 }
 
