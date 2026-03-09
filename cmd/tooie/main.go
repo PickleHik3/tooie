@@ -1077,7 +1077,7 @@ func (m model) renderClockOnlyView() string {
 
 	glyphW, glyphH := clockGlyphMetrics(m.clockGlyphs)
 	if m.clockOnly {
-		glyphW, glyphH = clockGlyphMetricsTrimmedAllRight(m.clockGlyphs)
+		glyphW, glyphH = clockGlyphMetricsNormalized(m.clockGlyphs)
 	}
 	innerW := max(20, glyphW*2)
 	innerH := max(8, (glyphH*2)+1)
@@ -2383,11 +2383,11 @@ func (m *model) renderDashboardVerticalClockTest(width, height int) []string {
 		return applyVerticalCenter(lines, height)
 	}
 	if m.clockOnly {
-		d0 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(hh[0]), glyphs, width, height))
-		d1 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(hh[1]), glyphs, width, height))
-		d2 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(mm[0]), glyphs, width, height))
-		d3 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(mm[1]), glyphs, width, height))
-		fixedColW, _ := clockGlyphMetricsTrimmedAllRight(glyphs)
+		d0 := normalizeGlyphLines(renderDashboardDigitGlyph(rune(hh[0]), glyphs, width, height))
+		d1 := normalizeGlyphLines(renderDashboardDigitGlyph(rune(hh[1]), glyphs, width, height))
+		d2 := normalizeGlyphLines(renderDashboardDigitGlyph(rune(mm[0]), glyphs, width, height))
+		d3 := normalizeGlyphLines(renderDashboardDigitGlyph(rune(mm[1]), glyphs, width, height))
+		fixedColW, _ := clockGlyphMetricsNormalized(glyphs)
 
 		lines := renderClockOnlyGlyphGrid(width, height, d0, d1, d2, d3, fixedColW)
 		palette := boostPalette(m.clockPalette(), 0.18*introWeight(now, m.introUntil))
@@ -2560,7 +2560,7 @@ func clockGlyphMetrics(glyphs map[rune][]string) (int, int) {
 	return maxW, maxH
 }
 
-func clockGlyphMetricsTrimmedAllRight(glyphs map[rune][]string) (int, int) {
+func clockGlyphMetricsNormalized(glyphs map[rune][]string) (int, int) {
 	if len(glyphs) == 0 {
 		return 11, 8
 	}
@@ -2571,7 +2571,7 @@ func clockGlyphMetricsTrimmedAllRight(glyphs map[rune][]string) (int, int) {
 		if len(g) == 0 {
 			continue
 		}
-		g = trimGlyphLinesRightAll(g)
+		g = normalizeGlyphLines(g)
 		if w := maxLineRunes(g); w > maxW {
 			maxW = w
 		}
@@ -2595,6 +2595,42 @@ func trimGlyphLinesRightAll(lines []string) []string {
 	out := make([]string, len(lines))
 	for i, ln := range lines {
 		out[i] = strings.TrimRight(ln, " ")
+	}
+	return out
+}
+
+func normalizeGlyphLines(lines []string) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	lines = trimGlyphLinesRightAll(lines)
+
+	minLead := -1
+	for _, ln := range lines {
+		r := []rune(ln)
+		i := 0
+		for i < len(r) && r[i] == ' ' {
+			i++
+		}
+		if i >= len(r) {
+			continue
+		}
+		if minLead < 0 || i < minLead {
+			minLead = i
+		}
+	}
+	if minLead <= 0 {
+		return lines
+	}
+
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		r := []rune(ln)
+		if minLead >= len(r) {
+			out[i] = ""
+			continue
+		}
+		out[i] = string(r[minLead:])
 	}
 	return out
 }
