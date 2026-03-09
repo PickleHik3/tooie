@@ -67,6 +67,8 @@ func runCLI(args []string) int {
 		return runClockCommand(args[1:])
 	case "--cal", "cal":
 		return runCalCommand(args[1:])
+	case "--restart", "-restart", "restart":
+		return runRestartCommand(args[1:])
 	case "apps":
 		return runAppsCommand(args[1:])
 	case "help", "--help", "-h":
@@ -98,6 +100,9 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie --help")
 	fmt.Fprintln(w, "      Show this help screen.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --restart")
+	fmt.Fprintln(w, "      Force-stop and relaunch termux-launcher cleanly.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands")
 	fmt.Fprintln(w, "  tooie apps [--refresh]")
@@ -255,6 +260,7 @@ func runRestartCommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
 		return 1
 	}
+	fmt.Fprintln(os.Stdout, "tooie restart: force-stop + relaunch completed for com.termux")
 	return 0
 }
 
@@ -474,9 +480,9 @@ func restartLauncherApp() error {
 	}
 	if err := restartComponentLocally(component); err != nil {
 		if backendErr != nil {
-			return fmt.Errorf("backend restart failed: %v; local restart failed: %w", backendErr, err)
+			return fmt.Errorf("backend restart failed: %v; local restart failed: %w; true force-stop needs privileged backend execution (e.g. Shizuku/root)", backendErr, err)
 		}
-		return err
+		return fmt.Errorf("%w; true force-stop needs privileged backend execution (e.g. Shizuku/root)", err)
 	}
 	return nil
 }
@@ -497,13 +503,26 @@ func stopPackageViaBackend(base, token, pkg string) error {
 	if pkg == "" {
 		return errors.New("missing package")
 	}
-	if _, err := tooieExecCommand(base, token, "am force-stop "+pkg+" --user 0"); err == nil {
-		return nil
+	cmds := []string{
+		"/system/bin/cmd activity force-stop --user current " + pkg,
+		"cmd activity force-stop --user current " + pkg,
+		"/system/bin/am force-stop --user current " + pkg,
+		"/system/bin/am force-stop " + pkg,
+		"am force-stop " + pkg + " --user current",
+		"am force-stop " + pkg,
 	}
-	if _, err := tooieExecCommand(base, token, "am force-stop "+pkg); err == nil {
-		return nil
+	lastErr := ""
+	for _, cmd := range cmds {
+		if _, err := tooieExecCommand(base, token, cmd); err == nil {
+			return nil
+		} else {
+			lastErr = err.Error()
+		}
 	}
-	return fmt.Errorf("backend force-stop failed for %s", pkg)
+	if strings.TrimSpace(lastErr) == "" {
+		lastErr = "no backend command variant succeeded"
+	}
+	return fmt.Errorf("backend force-stop failed for %s: %s", pkg, lastErr)
 }
 
 func startComponentViaBackend(base, token, component string) error {
@@ -525,13 +544,17 @@ func restartComponentViaBackend(base, token, component string) error {
 	if component == "" {
 		return errors.New("missing component")
 	}
-	if _, err := tooieExecCommand(base, token, "am start -S -n "+component+" --user 0"); err == nil {
-		return nil
+	pkg, _, ok := splitComponent(component)
+	if !ok {
+		return errors.New("invalid component")
 	}
-	if _, err := tooieExecCommand(base, token, "am start -S -n "+component); err == nil {
-		return nil
+	if err := stopPackageViaBackend(base, token, pkg); err != nil {
+		return err
 	}
-	return fmt.Errorf("backend restart failed for %s", component)
+	if err := startComponentViaBackend(base, token, component); err != nil {
+		return err
+	}
+	return nil
 }
 
 func stopPackageLocally(pkg string) error {
@@ -539,16 +562,38 @@ func stopPackageLocally(pkg string) error {
 	if pkg == "" {
 		return errors.New("missing package")
 	}
-	if out, err := exec.Command("am", "force-stop", pkg, "--user", "0").CombinedOutput(); err == nil {
-		return nil
-	} else if len(bytes.TrimSpace(out)) > 0 {
-		_ = out
+	cmds := [][]string{
+		{"activity", "force-stop", "--user", "current", pkg},
+		{"force-stop", "--user", "current", pkg},
+		{"force-stop", pkg},
 	}
-	out, err := exec.Command("am", "force-stop", pkg).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("local am force-stop failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	lastErr := ""
+	for _, argv := range cmds {
+		out, err := exec.Command("cmd", argv...).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		lastErr = msg
 	}
-	return nil
+	for _, argv := range cmds[1:] {
+		out, err := exec.Command("am", argv...).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		lastErr = msg
+	}
+	if strings.TrimSpace(lastErr) == "" {
+		lastErr = "no local command variant succeeded"
+	}
+	return fmt.Errorf("local force-stop failed: %s", lastErr)
 }
 
 func startComponentLocally(component string) error {
@@ -573,14 +618,15 @@ func restartComponentLocally(component string) error {
 	if component == "" {
 		return errors.New("missing component")
 	}
-	if out, err := exec.Command("am", "start", "-S", "-n", component, "--user", "0").CombinedOutput(); err == nil {
-		return nil
-	} else if len(bytes.TrimSpace(out)) > 0 {
-		_ = out
+	pkg, _, ok := splitComponent(component)
+	if !ok {
+		return errors.New("invalid component")
 	}
-	out, err := exec.Command("am", "start", "-S", "-n", component).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("local am restart failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	if err := stopPackageLocally(pkg); err != nil {
+		return err
+	}
+	if err := startComponentLocally(component); err != nil {
+		return err
 	}
 	return nil
 }
