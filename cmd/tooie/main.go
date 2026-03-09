@@ -214,6 +214,7 @@ type model struct {
 	appSearchIndex   int
 	appSearchResults []launchableApp
 	systemInfo       systemInfo
+	clockOnly        bool
 }
 
 func initialModel() model {
@@ -287,6 +288,15 @@ func initialModel() model {
 	m.pinnedPackages = loadPinnedApps()
 	m.refreshAppSearchResults()
 	m.startHomeIntro()
+	return m
+}
+
+func initialClockModel() model {
+	m := initialModel()
+	m.clockOnly = true
+	m.page = pageHome
+	m.metricsPaused = true
+	m.lastStatus = "Clock mode"
 	return m
 }
 
@@ -404,6 +414,9 @@ func contains(items []string, want string) bool {
 }
 
 func (m model) Init() tea.Cmd {
+	if m.clockOnly {
+		return tickClockOnly()
+	}
 	cmds := []tea.Cmd{
 		tickClock(),
 		pollMetrics(),
@@ -415,6 +428,12 @@ func (m model) Init() tea.Cmd {
 		cmds = append(cmds, tickMetrics())
 	}
 	return tea.Batch(cmds...)
+}
+
+func tickClockOnly() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
 }
 
 func tickApply() tea.Cmd {
@@ -506,6 +525,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		now := time.Time(msg)
 		if m.clockLoc != nil {
 			now = now.In(m.clockLoc)
+		}
+		if m.clockOnly {
+			dt := now.Sub(m.lastTick).Seconds()
+			if dt <= 0 || dt > 2 {
+				dt = 0.25
+			}
+			m.lastTick = now
+			m.now = now
+			m.clockPhase += dt * 0.20
+			return m, tickClockOnly()
 		}
 		dt := now.Sub(m.lastTick).Seconds()
 		if dt <= 0 || dt > 1 {
@@ -680,6 +709,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadPreviewColors()
 		return m, nil
 	case tea.KeyMsg:
+		if m.clockOnly {
+			switch msg.String() {
+			case "q", "ctrl+c", "esc":
+				return m, tea.Quit
+			case "f":
+				m.cycleClockFont()
+				return m, nil
+			case "a":
+				m.cycleClockPattern()
+				return m, nil
+			}
+			return m, nil
+		}
 		if m.canSwitchPage() {
 			switch msg.String() {
 			case "tab", "right", "l":
@@ -970,6 +1012,9 @@ func (m model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
+	if m.clockOnly {
+		return m.renderClockOnlyView()
+	}
 
 	const outerPad = 1
 	innerW := max(20, m.width-(outerPad*2))
@@ -1023,6 +1068,36 @@ func (m model) View() string {
 		rendered += renderSixelOverlays(overlays)
 	}
 	return rendered
+}
+
+func (m model) renderClockOnlyView() string {
+	const outerPad = 1
+	usableW := max(24, m.width-(outerPad*2))
+	usableH := max(8, m.height-(outerPad*2))
+
+	glyphW, glyphH := clockGlyphMetrics(m.clockGlyphs)
+	if m.clockOnly {
+		glyphW, glyphH = clockGlyphMetricsTrimmedAllRight(m.clockGlyphs)
+	}
+	innerW := max(20, glyphW*2)
+	innerH := max(8, (glyphH*2)+1)
+	panelW := max(24, min(usableW, innerW+4))
+	panelH := max(8, min(usableH, innerH+2))
+
+	clockLines := m.renderDashboardVerticalClockTest(max(1, panelW-4), max(1, panelH-2))
+	clockBorder := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("outline", "#565f89"), 0.35)
+	body := framedPanel(panelW, panelH, clockBorder, strings.Join(clockLines, "\n"), "", "left", m.clockMeridiemLabel(), "right")
+	body = placeCenterBlockStyled(body, usableW)
+	baseHints := "f: font  a: anim  q: quit"
+	status := baseHints
+	if strings.TrimSpace(m.noticeText) != "" && !m.noticeUntil.IsZero() && !m.now.After(m.noticeUntil) {
+		status = m.noticeText + "  |  " + baseHints
+	}
+	hints := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), "#000000", 0.32))).
+		Render(status)
+	content := body + "\n" + placeCenterStyled(hints, usableW)
+	return lipgloss.NewStyle().Padding(outerPad, outerPad, outerPad, outerPad).Render(content)
 }
 
 func (m model) homeHintsLine(width int) string {
@@ -1117,6 +1192,14 @@ func placeCenterStyled(text string, width int) string {
 	left := (width - w) / 2
 	right := width - w - left
 	return strings.Repeat(" ", left) + text + strings.Repeat(" ", right)
+}
+
+func placeCenterBlockStyled(text string, width int) string {
+	lines := strings.Split(text, "\n")
+	for i := range lines {
+		lines[i] = placeCenterStyled(lines[i], width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderMain(usableW, contentH int) string {
@@ -2299,6 +2382,18 @@ func (m *model) renderDashboardVerticalClockTest(width, height int) []string {
 		}
 		return applyVerticalCenter(lines, height)
 	}
+	if m.clockOnly {
+		d0 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(hh[0]), glyphs, width, height))
+		d1 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(hh[1]), glyphs, width, height))
+		d2 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(mm[0]), glyphs, width, height))
+		d3 := trimGlyphLinesRightAll(renderDashboardDigitGlyph(rune(mm[1]), glyphs, width, height))
+		fixedColW, _ := clockGlyphMetricsTrimmedAllRight(glyphs)
+
+		lines := renderClockOnlyGlyphGrid(width, height, d0, d1, d2, d3, fixedColW)
+		palette := boostPalette(m.clockPalette(), 0.18*introWeight(now, m.introUntil))
+		shadow := m.themeRoleColor("on_surface", "#565f89")
+		return applyClockPatternLinesStable(lines, palette, m.clockPhase, m.currentClockPattern(), m.themeRoleColor("primary", "#7aa2f7"), shadow)
+	}
 
 	outerPad := max(1, min(width, height)/20)
 	drawW := width - (outerPad * 2)
@@ -2337,17 +2432,11 @@ func (m *model) renderDashboardVerticalClockTest(width, height int) []string {
 	d1 := renderDashboardDigitGlyph(rune(hh[1]), glyphs, rightW-innerPadX, topH-innerPadY)
 	d2 := renderDashboardDigitGlyph(rune(mm[0]), glyphs, leftW-innerPadX, botH-innerPadY)
 	d3 := renderDashboardDigitGlyph(rune(mm[1]), glyphs, rightW-innerPadX, botH-innerPadY)
-
 	canvas := make([][]rune, height)
 	for y := 0; y < height; y++ {
 		canvas[y] = []rune(strings.Repeat(" ", width))
 	}
 
-	// 4 invisible quadrants:
-	// q1 top-left  -> bottom-right
-	// q2 top-right -> bottom-left
-	// q3 bottom-left -> top-right
-	// q4 bottom-right -> top-left
 	blitSlotAnchored(canvas, d0, outerPad, outerPad+fontLayout.topNudgeY, leftW, topH, "bottom-right", innerPadX, innerPadY)
 	blitSlotAnchored(canvas, d1, outerPad+leftW+gapX, outerPad+fontLayout.topNudgeY, rightW, topH, "bottom-left", innerPadX, innerPadY)
 	blitSlotAnchored(canvas, d2, outerPad, outerPad+topH+gapY+fontLayout.bottomNudge, leftW, botH, "top-right", innerPadX, innerPadY)
@@ -2360,6 +2449,80 @@ func (m *model) renderDashboardVerticalClockTest(width, height int) []string {
 	palette := boostPalette(m.clockPalette(), 0.18*introWeight(now, m.introUntil))
 	shadow := m.themeRoleColor("on_surface", "#565f89")
 	return applyClockPatternLinesStable(lines, palette, m.clockPhase, m.currentClockPattern(), m.themeRoleColor("primary", "#7aa2f7"), shadow)
+}
+
+func renderClockOnlyGlyphGrid(width, height int, d0, d1, d2, d3 []string, fixedColW int) []string {
+	if width < 1 || height < 1 {
+		return []string{""}
+	}
+	row1H := max(len(d0), len(d1))
+	row2H := max(len(d2), len(d3))
+	rowGap := 1
+	if row1H+rowGap+row2H > height {
+		rowGap = 0
+	}
+
+	col1W := max(maxLineRunes(d0), maxLineRunes(d2))
+	col2W := max(maxLineRunes(d1), maxLineRunes(d3))
+	if fixedColW > 0 {
+		col1W = max(col1W, fixedColW)
+		col2W = max(col2W, fixedColW)
+	}
+	colGap := 2
+	if col1W+colGap+col2W > width {
+		colGap = 1
+	}
+
+	contentW := col1W + colGap + col2W
+	contentH := row1H + rowGap + row2H
+	startX := max(0, (width-contentW+1)/2)
+	startY := max(0, (height-contentH)/2)
+
+	canvas := make([][]rune, height)
+	for y := 0; y < height; y++ {
+		canvas[y] = []rune(strings.Repeat(" ", width))
+	}
+
+	placeGlyphAligned(canvas, d0, startX, startY, col1W, "left")
+	placeGlyphAligned(canvas, d1, startX+col1W+colGap, startY, col2W, "right")
+	placeGlyphAligned(canvas, d2, startX, startY+row1H+rowGap, col1W, "left")
+	placeGlyphAligned(canvas, d3, startX+col1W+colGap, startY+row1H+rowGap, col2W, "right")
+
+	out := make([]string, 0, height)
+	for y := 0; y < height; y++ {
+		out = append(out, string(canvas[y]))
+	}
+	return out
+}
+
+func placeGlyphAligned(canvas [][]rune, glyph []string, x, y, colW int, align string) {
+	if len(canvas) == 0 || len(glyph) == 0 || colW <= 0 {
+		return
+	}
+	baseX := x
+	gw := maxLineRunes(glyph)
+	switch align {
+	case "right":
+		baseX = x + max(0, colW-gw)
+	case "center":
+		baseX = x + max(0, (colW-gw)/2)
+	}
+	for gy, line := range glyph {
+		yy := y + gy
+		if yy < 0 || yy >= len(canvas) {
+			continue
+		}
+		r := []rune(line)
+		for gx, ch := range r {
+			xx := baseX + gx
+			if xx < 0 || xx >= len(canvas[yy]) {
+				continue
+			}
+			if ch != ' ' {
+				canvas[yy][xx] = ch
+			}
+		}
+	}
 }
 
 func renderDashboardDigitGlyph(d rune, glyphs map[rune][]string, w, h int) []string {
@@ -2395,6 +2558,69 @@ func clockGlyphMetrics(glyphs map[rune][]string) (int, int) {
 		maxH = 8
 	}
 	return maxW, maxH
+}
+
+func clockGlyphMetricsTrimmedAllRight(glyphs map[rune][]string) (int, int) {
+	if len(glyphs) == 0 {
+		return 11, 8
+	}
+	maxW := 0
+	maxH := 0
+	for d := '0'; d <= '9'; d++ {
+		g := buildClockLinesWithSpacing(string(d), glyphs, 0)
+		if len(g) == 0 {
+			continue
+		}
+		g = trimGlyphLinesRightAll(g)
+		if w := maxLineRunes(g); w > maxW {
+			maxW = w
+		}
+		if len(g) > maxH {
+			maxH = len(g)
+		}
+	}
+	if maxW < 1 {
+		maxW = 11
+	}
+	if maxH < 1 {
+		maxH = 8
+	}
+	return maxW, maxH
+}
+
+func trimGlyphLinesRightAll(lines []string) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = strings.TrimRight(ln, " ")
+	}
+	return out
+}
+
+func clockOnlyRightTrimCols(fontName string) int {
+	if strings.EqualFold(strings.TrimSpace(fontName), "edges") {
+		return 2
+	}
+	return 1
+}
+
+func trimGlyphLinesRight(lines []string, cols int) []string {
+	if cols <= 0 || len(lines) == 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		r := []rune(ln)
+		trimmed := 0
+		for len(r) > 0 && trimmed < cols && r[len(r)-1] == ' ' {
+			r = r[:len(r)-1]
+			trimmed++
+		}
+		out[i] = string(r)
+	}
+	return out
 }
 
 func desiredClockPanelWidth(usableW, topH, glyphW, glyphH int) int {
@@ -3825,12 +4051,12 @@ func maxLineRunes(lines []string) int {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCLI(os.Args[1:]))
+	}
 	if err := ensureTooieSupportScripts(); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie error: failed to prepare support scripts: %v\n", err)
 		os.Exit(1)
-	}
-	if len(os.Args) > 1 {
-		os.Exit(runCLI(os.Args[1:]))
 	}
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen(), tea.WithFPS(60))
 	_, err := p.Run()
@@ -3838,4 +4064,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "tooie error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runClockTUI() int {
+	p := tea.NewProgram(initialClockModel(), tea.WithAltScreen(), tea.WithFPS(24))
+	_, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tooie --clock: %v\n", err)
+		return 1
+	}
+	return 0
 }

@@ -59,26 +59,11 @@ func runCLI(args []string) int {
 	if len(args) == 0 {
 		return 0
 	}
-	if isRestartCLIArgs(args) {
-		if err := restartLauncherApp(); err != nil {
-			fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
-			return 1
-		}
-		return 0
-	}
 	switch strings.TrimSpace(args[0]) {
+	case "--clock", "clock":
+		return runClockCommand(args[1:])
 	case "apps":
 		return runAppsCommand(args[1:])
-	case "launch":
-		return runLaunchCommand(args[1:])
-	case "restart":
-		return runRestartCommand(args[1:])
-	case "exec":
-		return runExecCommand(args[1:])
-	case "icon":
-		return runIconCommand(args[1:])
-	case "icons":
-		return runIconsCommand(args[1:])
 	case "help", "--help", "-h":
 		printCLIUsage(os.Stdout)
 		return 0
@@ -91,43 +76,26 @@ func runCLI(args []string) int {
 
 func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "Tooie")
-	fmt.Fprintln(w, "  Command center for the Termux launcher and Tooie TUI.")
+	fmt.Fprintln(w, "  Termux dashboard and utilities.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage")
 	fmt.Fprintln(w, "  tooie")
 	fmt.Fprintln(w, "      Start the Tooie TUI.")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --clock")
+	fmt.Fprintln(w, "      Start low-CPU clock-only mode.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie --help")
 	fmt.Fprintln(w, "      Show this help screen.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie --restart")
-	fmt.Fprintln(w, "  tooie restart")
-	fmt.Fprintln(w, "      Force-stop and relaunch termux-launcher cleanly.")
-	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands")
-	fmt.Fprintln(w, "  tooie apps [--refresh] [--ttl=10m]")
-	fmt.Fprintln(w, "      List launchable Android apps, using the Tooie cache when valid.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie launch <package-or-component> [--refresh] [--ttl=10m]")
-	fmt.Fprintln(w, "      Launch an Android app by package name or explicit component.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie exec <command>")
-	fmt.Fprintln(w, "      Run a command through the Tooie backend /v1/exec endpoint.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie icon <package>")
-	fmt.Fprintln(w, "      Fetch and cache the real app icon for a package.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie icons refresh [--pinned]")
-	fmt.Fprintln(w, "      Refresh cached icons. Use --pinned to limit refresh to pinned apps.")
+	fmt.Fprintln(w, "  tooie apps [--refresh]")
+	fmt.Fprintln(w, "      List launchable Android apps. Use --refresh to bypass cache.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Examples")
 	fmt.Fprintln(w, "  tooie apps")
 	fmt.Fprintln(w, "  tooie apps --refresh")
-	fmt.Fprintln(w, "  tooie launch com.termux")
-	fmt.Fprintln(w, "  tooie launch com.termux/.app.TermuxActivity")
-	fmt.Fprintln(w, "  tooie icon com.termux")
-	fmt.Fprintln(w, "  tooie icons refresh --pinned")
-	fmt.Fprintln(w, "  tooie --restart")
+	fmt.Fprintln(w, "  tooie --clock")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Paths")
 	fmt.Fprintln(w, "  Apps cache:   ~/.cache/tooie/apps.json")
@@ -135,7 +103,6 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  Pinned apps:  ~/.config/tooie/pinned-apps.json")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Notes")
-	fmt.Fprintln(w, "  Backend actions prefer the configured Tooie endpoint and fall back locally when possible.")
 	fmt.Fprintln(w, "  App discovery merges local launcher activity resolution with Tooie backend metadata when available.")
 }
 
@@ -155,13 +122,16 @@ func runAppsCommand(args []string) int {
 	fs := flag.NewFlagSet("apps", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	refresh := fs.Bool("refresh", false, "")
-	ttl := fs.Duration("ttl", defaultAppsCacheTTL, "")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie apps: %v\n", err)
 		return 2
 	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "tooie apps: unexpected arguments")
+		return 2
+	}
 
-	apps, cached, err := getLaunchableApps(*ttl, *refresh)
+	apps, cached, err := getLaunchableApps(defaultAppsCacheTTL, *refresh)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tooie apps: %v\n", err)
 		return 1
@@ -179,6 +149,20 @@ func runAppsCommand(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runClockCommand(args []string) int {
+	fs := flag.NewFlagSet("clock", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie --clock: %v\n", err)
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "tooie --clock: unexpected arguments")
+		return 2
+	}
+	return runClockTUI()
 }
 
 func runLaunchCommand(args []string) int {
