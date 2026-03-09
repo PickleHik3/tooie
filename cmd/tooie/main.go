@@ -110,6 +110,7 @@ type fontClockLayout struct {
 type persistedClockSettings struct {
 	Font    string `json:"font,omitempty"`
 	Pattern string `json:"pattern,omitempty"`
+	CalFont string `json:"cal_font,omitempty"`
 }
 
 type backup struct {
@@ -215,6 +216,11 @@ type model struct {
 	appSearchResults []launchableApp
 	systemInfo       systemInfo
 	clockOnly        bool
+	miniShowClock    bool
+	miniShowCal      bool
+	calFontDefs      []clockFontDef
+	calFontIdx       int
+	calGlyphs        map[int][]string
 }
 
 func initialModel() model {
@@ -292,11 +298,87 @@ func initialModel() model {
 }
 
 func initialClockModel() model {
-	m := initialModel()
-	m.clockOnly = true
-	m.page = pageHome
-	m.metricsPaused = true
-	m.lastStatus = "Clock mode"
+	m := initialMiniModel(true, false)
+	return m
+}
+
+func initialCalModel() model {
+	return initialMiniModel(false, true)
+}
+
+func initialClockCalModel() model {
+	return initialMiniModel(true, true)
+}
+
+func initialMiniModel(showClock, showCal bool) model {
+	now := time.Now()
+	clockLoc := detectClockLocation()
+	if clockLoc != nil {
+		now = now.In(clockLoc)
+	}
+	fontDefs := discoverClockFonts()
+	savedClock := loadClockSettings()
+	clockFontIdx := 0
+	if len(fontDefs) == 0 {
+		clockFontIdx = -1
+	} else if strings.TrimSpace(savedClock.Font) != "" {
+		for i, fd := range fontDefs {
+			if strings.EqualFold(strings.TrimSpace(fd.Name), strings.TrimSpace(savedClock.Font)) {
+				clockFontIdx = i
+				break
+			}
+		}
+	}
+	calDefs := discoverCalendarFonts()
+	calFontIdx := 0
+	if len(calDefs) == 0 {
+		calFontIdx = -1
+	} else if strings.TrimSpace(savedClock.CalFont) != "" {
+		for i, fd := range calDefs {
+			if strings.EqualFold(strings.TrimSpace(fd.Name), strings.TrimSpace(savedClock.CalFont)) {
+				calFontIdx = i
+				break
+			}
+		}
+	}
+	if !showClock && !showCal {
+		showClock = true
+	}
+	m := model{
+		page:          pageHome,
+		now:           now,
+		lastTick:      now,
+		uptimeText:    "--",
+		mode:          defaultMode,
+		palette:       defaultPalette,
+		stylePreset:   defaultPreset,
+		themeSource:   defaultSource,
+		presetFamily:  presetFamilyOrder[0],
+		presetVariant: presetVariantsByFamily[presetFamilyOrder[0]][0],
+		lastStatus:    "Ready",
+		barSpring:     harmonica.NewSpring(harmonica.FPS(20), 4.6, 0.90),
+		clockFontDefs: fontDefs,
+		clockFontIdx:  clockFontIdx,
+		clockPatterns: []string{"wave", "stripes", "pulse", "solid", "outline", "sweep", "neon", "calm", "shimmer"},
+		clockLoc:      clockLoc,
+		clockOnly:     true,
+		miniShowClock: showClock,
+		miniShowCal:   showCal,
+		calFontDefs:   calDefs,
+		calFontIdx:    calFontIdx,
+	}
+	if strings.TrimSpace(savedClock.Pattern) != "" {
+		for i, p := range m.clockPatterns {
+			if strings.EqualFold(strings.TrimSpace(p), strings.TrimSpace(savedClock.Pattern)) {
+				m.patternIndex = i
+				break
+			}
+		}
+	}
+	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
+	m.calGlyphs = loadCalendarGlyphSet(m.calFontDefs, m.calFontIdx)
+	m.loadThemeStateFromBackups()
+	m.loadPreviewColors()
 	return m
 }
 
@@ -714,10 +796,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "q", "ctrl+c", "esc":
 				return m, tea.Quit
 			case "f":
-				m.cycleClockFont()
+				if m.miniShowClock {
+					m.cycleClockFont()
+				}
 				return m, nil
 			case "a":
-				m.cycleClockPattern()
+				if m.miniShowClock {
+					m.cycleClockPattern()
+				}
+				return m, nil
+			case "d":
+				if m.miniShowCal {
+					m.cycleCalendarFont()
+				}
 				return m, nil
 			}
 			return m, nil
@@ -1013,6 +1104,12 @@ func (m model) View() string {
 		return "Loading..."
 	}
 	if m.clockOnly {
+		if m.miniShowClock && m.miniShowCal {
+			return m.renderClockCalendarView()
+		}
+		if m.miniShowCal {
+			return m.renderCalOnlyView()
+		}
 		return m.renderClockOnlyView()
 	}
 
@@ -1083,12 +1180,19 @@ func (m model) renderClockOnlyView() string {
 	innerH := max(8, (glyphH*2)+1)
 	panelW := max(24, min(usableW, innerW+4))
 	panelH := max(8, min(usableH, innerH+2))
+	if panelH%2 == 0 {
+		if panelH < usableH {
+			panelH++
+		} else if panelH > 8 {
+			panelH--
+		}
+	}
 
 	clockLines := m.renderDashboardVerticalClockTest(max(1, panelW-4), max(1, panelH-2))
 	clockBorder := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("outline", "#565f89"), 0.35)
 	body := framedPanel(panelW, panelH, clockBorder, strings.Join(clockLines, "\n"), "", "left", m.clockMeridiemLabel(), "right")
 	body = placeCenterBlockStyled(body, usableW)
-	baseHints := "f: font  a: anim  q: quit"
+	baseHints := m.miniHintsText()
 	status := baseHints
 	if strings.TrimSpace(m.noticeText) != "" && !m.noticeUntil.IsZero() && !m.now.After(m.noticeUntil) {
 		status = m.noticeText + "  |  " + baseHints
@@ -1098,6 +1202,267 @@ func (m model) renderClockOnlyView() string {
 		Render(status)
 	content := body + "\n" + placeCenterStyled(hints, usableW)
 	return lipgloss.NewStyle().Padding(outerPad, outerPad, outerPad, outerPad).Render(content)
+}
+
+func (m model) renderCalOnlyView() string {
+	const outerPad = 1
+	usableW := max(24, m.width-(outerPad*2))
+	usableH := max(8, m.height-(outerPad*2))
+	panelW := max(24, min(usableW, 44))
+	panelH := max(8, min(usableH, 20))
+	if panelH%2 == 0 {
+		if panelH < usableH {
+			panelH++
+		} else if panelH > 8 {
+			panelH--
+		}
+	}
+	body := m.renderCalendarStack(panelW, panelH)
+	body = placeCenterBlockStyled(body, usableW)
+	baseHints := m.miniHintsText()
+	status := baseHints
+	if strings.TrimSpace(m.noticeText) != "" && !m.noticeUntil.IsZero() && !m.now.After(m.noticeUntil) {
+		status = m.noticeText + "  |  " + baseHints
+	}
+	hints := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), "#000000", 0.32))).
+		Render(status)
+	content := body + "\n" + placeCenterStyled(hints, usableW)
+	return lipgloss.NewStyle().Padding(outerPad, outerPad, outerPad, outerPad).Render(content)
+}
+
+func (m model) renderClockCalendarView() string {
+	const outerPad = 1
+	usableW := max(48, m.width-(outerPad*2))
+	usableH := max(10, m.height-(outerPad*2))
+
+	clockW := max(24, min(44, usableW/2))
+	calW := max(24, min(44, usableW-clockW-2))
+	if clockW+calW+2 > usableW {
+		calW = max(24, usableW-clockW-2)
+	}
+	rowH := max(8, min(usableH, 20))
+	if rowH%2 == 0 {
+		if rowH < usableH {
+			rowH++
+		} else if rowH > 8 {
+			rowH--
+		}
+	}
+
+	clockLines := m.renderDashboardVerticalClockTest(max(1, clockW-4), max(1, rowH-2))
+	clockBorder := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("outline", "#565f89"), 0.35)
+	clockPanel := framedPanel(clockW, rowH, clockBorder, strings.Join(clockLines, "\n"), "", "left", m.clockMeridiemLabel(), "right")
+	calPanel := m.renderCalendarStack(calW, rowH)
+	clockPanel, calPanel = equalizeBlockHeights(clockPanel, calPanel)
+	row := lipgloss.JoinHorizontal(lipgloss.Top, clockPanel, "  ", calPanel)
+	row = placeCenterBlockStyled(row, usableW)
+
+	baseHints := m.miniHintsText()
+	status := baseHints
+	if strings.TrimSpace(m.noticeText) != "" && !m.noticeUntil.IsZero() && !m.now.After(m.noticeUntil) {
+		status = m.noticeText + "  |  " + baseHints
+	}
+	hints := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), "#000000", 0.32))).
+		Render(status)
+	content := row + "\n" + placeCenterStyled(hints, usableW)
+	return lipgloss.NewStyle().Padding(outerPad, outerPad, outerPad, outerPad).Render(content)
+}
+
+func (m model) renderCalendarStack(w, h int) string {
+	if h < 8 {
+		return m.renderCalendarPanel(w, h)
+	}
+	topH := int(math.Round(float64(h) * 0.60))
+	if topH < 6 {
+		topH = 6
+	}
+	if topH > h-4 {
+		topH = h - 4
+	}
+	bottomH := h - topH
+	if bottomH < 3 {
+		bottomH = 3
+		topH = max(4, h-bottomH)
+	}
+	top := m.renderCalendarPanel(w, topH)
+	bottom := m.renderMonthCalendarPanel(w, bottomH)
+	return top + "\n" + bottom
+}
+
+func (m model) miniHintsText() string {
+	parts := []string{}
+	if m.miniShowClock {
+		parts = append(parts, "f: clock font", "a: anim")
+	}
+	if m.miniShowCal {
+		parts = append(parts, "d: date font")
+	}
+	parts = append(parts, "q: quit")
+	return strings.Join(parts, "  ")
+}
+
+func (m model) renderCalendarPanel(w, h int) string {
+	now := m.now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	dayLabel := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(m.themeRoleColor("secondary", "#94e2d5"))).
+		Render(now.Format("Monday"))
+	dateLines := m.renderCalendarDateLines(max(1, w-4), max(1, h-2), now.Day())
+	borderColor := blendHexColor(m.themeRoleColor("outline", "#565f89"), m.themeRoleColor("primary", "#89b4fa"), 0.40)
+	return framedPanel(w, h, borderColor, strings.Join(dateLines, "\n"), dayLabel, "left", "", "right")
+}
+
+func (m model) renderMonthCalendarPanel(w, h int) string {
+	now := m.now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	monthYear := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.themeRoleColor("tertiary", "#cba6f7"))).
+		Render(now.Format("January 2006"))
+	lines := m.renderMonthCalendarLines(max(1, w-4), max(1, h-2), now)
+	borderColor := blendHexColor(m.themeRoleColor("outline", "#565f89"), m.themeRoleColor("secondary", "#94e2d5"), 0.45)
+	return framedPanel(w, h, borderColor, strings.Join(lines, "\n"), "", "center", monthYear, "right")
+}
+
+func (m model) renderMonthCalendarLines(width, height int, now time.Time) []string {
+	if width < 1 || height < 1 {
+		return []string{""}
+	}
+	loc := now.Location()
+	year, month, today := now.Date()
+	first := time.Date(year, month, 1, 0, 0, 0, 0, loc)
+	daysInMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+	startCol := int(first.Weekday()) // Sunday=0
+
+	fgNormal := m.themeRoleColor("on_surface", "#cdd6f4")
+	fgMuted := m.themeRoleColor("outline", "#6c7086")
+	fgWeekend := blendHexColor(m.themeRoleColor("error", "#f38ba8"), fgNormal, 0.20)
+	hlBg := m.themeRoleColor("primary", "#89b4fa")
+	hlFg := ensureReadableTextColor(hlBg, m.themeRoleColor("on_primary", "#0b0f16"), m.themeRoleColor("on_surface", "#e6e2d5"))
+
+	colW := make([]int, 7)
+	base := width / 7
+	if base < 2 {
+		base = 2
+	}
+	rem := width - (base * 7)
+	for i := 0; i < 7; i++ {
+		colW[i] = base
+		if rem > 0 {
+			colW[i]++
+			rem--
+		}
+	}
+
+	weekday := []string{"S", "M", "T", "W", "T", "F", "S"}
+	headerCells := make([]string, 0, 7)
+	for i, lbl := range weekday {
+		hColor := fgNormal
+		if i == 5 || i == 6 {
+			hColor = fgWeekend
+		}
+		headerCells = append(headerCells, lipgloss.NewStyle().
+			Width(colW[i]).
+			Align(lipgloss.Center).
+			Bold(true).
+			Foreground(lipgloss.Color(hColor)).
+			Render(lbl))
+	}
+
+	weeks := make([]string, 0, 7)
+	weeks = append(weeks, strings.Join(headerCells, ""))
+	day := 1
+	for week := 0; week < 6; week++ {
+		cells := make([]string, 0, 7)
+		for col := 0; col < 7; col++ {
+			idx := week*7 + col
+			if idx < startCol || day > daysInMonth {
+				cells = append(cells, lipgloss.NewStyle().
+					Width(colW[col]).
+					Align(lipgloss.Center).
+					Foreground(lipgloss.Color(fgMuted)).
+					Render(""))
+				continue
+			}
+			txt := fmt.Sprintf("%d", day)
+			dColor := fgNormal
+			if col == 5 || col == 6 {
+				dColor = fgWeekend
+			}
+			if day == today {
+				cells = append(cells, lipgloss.NewStyle().
+					Width(colW[col]).
+					Align(lipgloss.Center).
+					Bold(true).
+					Foreground(lipgloss.Color(hlFg)).
+					Background(lipgloss.Color(hlBg)).
+					Render(txt))
+			} else {
+				cells = append(cells, lipgloss.NewStyle().
+					Width(colW[col]).
+					Align(lipgloss.Center).
+					Foreground(lipgloss.Color(dColor)).
+					Render(txt))
+			}
+			day++
+		}
+		weeks = append(weeks, strings.Join(cells, ""))
+		if day > daysInMonth {
+			for len(weeks) < 7 {
+				emptyCells := make([]string, 0, 7)
+				for col := 0; col < 7; col++ {
+					emptyCells = append(emptyCells, lipgloss.NewStyle().
+						Width(colW[col]).
+						Align(lipgloss.Center).
+						Foreground(lipgloss.Color(fgMuted)).
+						Render(""))
+				}
+				weeks = append(weeks, strings.Join(emptyCells, ""))
+			}
+			break
+		}
+	}
+	if len(weeks) > height {
+		return weeks[:height]
+	}
+	for len(weeks) < height {
+		weeks = append(weeks, strings.Repeat(" ", width))
+	}
+	return weeks
+}
+
+func (m model) renderCalendarDateLines(width, height, day int) []string {
+	if width < 1 || height < 1 {
+		return []string{""}
+	}
+	glyph := m.calGlyphs[day]
+	if len(glyph) == 0 {
+		lines := []string{centerText(fmt.Sprintf("%02d", day), width)}
+		return applyVerticalCenter(lines, height)
+	}
+	glyph = normalizeGlyphLines(glyph)
+	gw := maxLineRunes(glyph)
+	gh := len(glyph)
+	startX := max(0, (width-gw)/2)
+	startY := max(0, (height-gh)/2)
+	canvas := make([][]rune, height)
+	for y := 0; y < height; y++ {
+		canvas[y] = []rune(strings.Repeat(" ", width))
+	}
+	placeGlyphAligned(canvas, glyph, startX, startY, gw, "left")
+	lines := make([]string, 0, height)
+	for y := 0; y < height; y++ {
+		lines = append(lines, string(canvas[y]))
+	}
+	palette := boostPalette(m.clockPalette(), 0.18*introWeight(m.now, m.introUntil))
+	shadow := m.themeRoleColor("on_surface", "#565f89")
+	return applyClockPatternLinesStable(lines, palette, m.clockPhase, m.currentClockPattern(), m.themeRoleColor("error", "#f38ba8"), shadow)
 }
 
 func (m model) homeHintsLine(width int) string {
@@ -1200,6 +1565,47 @@ func placeCenterBlockStyled(text string, width int) string {
 		lines[i] = placeCenterStyled(lines[i], width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func forceBlockHeight(block string, h int, lineWidth int) string {
+	if h < 1 {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	pad := strings.Repeat(" ", max(0, lineWidth))
+	for len(lines) < h {
+		lines = append(lines, pad)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func equalizeBlockHeights(a, b string) (string, string) {
+	hA := lipgloss.Height(a)
+	hB := lipgloss.Height(b)
+	target := max(hA, hB)
+	a = forceBlockHeight(a, target, blockLineWidth(a))
+	b = forceBlockHeight(b, target, blockLineWidth(b))
+	for lipgloss.Height(a) < target {
+		a += "\n" + strings.Repeat(" ", max(0, blockLineWidth(a)))
+	}
+	for lipgloss.Height(b) < target {
+		b += "\n" + strings.Repeat(" ", max(0, blockLineWidth(b)))
+	}
+	return a, b
+}
+
+func blockLineWidth(block string) int {
+	lines := strings.Split(block, "\n")
+	w := 0
+	for _, ln := range lines {
+		if lw := lipgloss.Width(ln); lw > w {
+			w = lw
+		}
+	}
+	return w
 }
 
 func (m model) renderMain(usableW, contentH int) string {
@@ -2315,6 +2721,18 @@ func (m *model) cycleClockPattern() {
 	m.persistClockSettings()
 }
 
+func (m *model) cycleCalendarFont() {
+	if len(m.calFontDefs) == 0 {
+		return
+	}
+	m.calFontIdx = (m.calFontIdx + 1) % len(m.calFontDefs)
+	m.calGlyphs = loadCalendarGlyphSet(m.calFontDefs, m.calFontIdx)
+	if m.calFontIdx >= 0 && m.calFontIdx < len(m.calFontDefs) {
+		m.showHomeNotice("date font: "+m.calFontDefs[m.calFontIdx].Name, "font")
+	}
+	m.persistClockSettings()
+}
+
 func (m model) currentClockPattern() string {
 	if len(m.clockPatterns) == 0 {
 		return "wave"
@@ -3164,6 +3582,9 @@ func (m *model) persistClockSettings() {
 	if m.clockFontIdx >= 0 && m.clockFontIdx < len(m.clockFontDefs) {
 		out.Font = m.clockFontDefs[m.clockFontIdx].Name
 	}
+	if m.calFontIdx >= 0 && m.calFontIdx < len(m.calFontDefs) {
+		out.CalFont = m.calFontDefs[m.calFontIdx].Name
+	}
 	raw, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return
@@ -3222,6 +3643,42 @@ func discoverClockFonts() []clockFontDef {
 	return out
 }
 
+func discoverCalendarFonts() []clockFontDef {
+	candidates := []string{
+		filepath.Join(homeDir, ".config", "tooie", "fonts"),
+		filepath.Join(homeDir, "files", "tooie", "fonts"),
+	}
+	var out []clockFontDef
+	seen := map[string]bool{}
+	for _, dir := range candidates {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := strings.TrimSpace(e.Name())
+			if !strings.HasPrefix(strings.ToLower(name), "cal-") {
+				continue
+			}
+			fontPath := filepath.Join(dir, name)
+			if !hasCalendarTXTGlyphSet(fontPath) {
+				continue
+			}
+			key := fontPath
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, clockFontDef{Name: name, Dir: dir})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 func hasClockTXTGlyphSet(dir string) bool {
 	required := []string{"0.txt", "1.txt", "2.txt", "3.txt", "4.txt", "5.txt", "6.txt", "7.txt", "8.txt", "9.txt", "colon.txt"}
 	for _, f := range required {
@@ -3230,6 +3687,60 @@ func hasClockTXTGlyphSet(dir string) bool {
 		}
 	}
 	return true
+}
+
+func hasCalendarTXTGlyphSet(dir string) bool {
+	for d := 1; d <= 31; d++ {
+		plain := filepath.Join(dir, fmt.Sprintf("%d.txt", d))
+		padded := filepath.Join(dir, fmt.Sprintf("%02d.txt", d))
+		if _, err := os.Stat(plain); err != nil {
+			if _, err2 := os.Stat(padded); err2 != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func resolveCalendarGlyphFile(fontPath string, day int) string {
+	plain := filepath.Join(fontPath, fmt.Sprintf("%d.txt", day))
+	if _, err := os.Stat(plain); err == nil {
+		return plain
+	}
+	padded := filepath.Join(fontPath, fmt.Sprintf("%02d.txt", day))
+	if _, err := os.Stat(padded); err == nil {
+		return padded
+	}
+	return plain
+}
+
+func loadCalendarTextFont(fontDir, fontName string) map[int][]string {
+	fontPath := filepath.Join(fontDir, fontName)
+	out := make(map[int][]string)
+	for d := 1; d <= 31; d++ {
+		file := resolveCalendarGlyphFile(fontPath, d)
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil
+		}
+		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+			lines = lines[:len(lines)-1]
+		}
+		out[d] = lines
+	}
+	return out
+}
+
+func loadCalendarGlyphSet(fontDefs []clockFontDef, idx int) map[int][]string {
+	if len(fontDefs) == 0 {
+		return nil
+	}
+	if idx < 0 || idx >= len(fontDefs) {
+		idx = 0
+	}
+	fd := fontDefs[idx]
+	return loadCalendarTextFont(fd.Dir, fd.Name)
 }
 
 func loadClockTextFont(fontDir, fontName string) map[rune][]string {
@@ -4102,11 +4613,20 @@ func main() {
 	}
 }
 
-func runClockTUI() int {
-	p := tea.NewProgram(initialClockModel(), tea.WithAltScreen(), tea.WithFPS(24))
+func runMiniTUI(showClock, showCal bool) int {
+	var model model
+	switch {
+	case showClock && showCal:
+		model = initialClockCalModel()
+	case showCal:
+		model = initialCalModel()
+	default:
+		model = initialClockModel()
+	}
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithFPS(24))
 	_, err := p.Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tooie --clock: %v\n", err)
+		fmt.Fprintf(os.Stderr, "tooie mini mode: %v\n", err)
 		return 1
 	}
 	return 0

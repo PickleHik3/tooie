@@ -59,9 +59,14 @@ func runCLI(args []string) int {
 	if len(args) == 0 {
 		return 0
 	}
+	if showClock, showCal, ok := parseMiniModeFlags(args); ok {
+		return runMiniTUI(showClock, showCal)
+	}
 	switch strings.TrimSpace(args[0]) {
 	case "--clock", "clock":
 		return runClockCommand(args[1:])
+	case "--cal", "cal":
+		return runCalCommand(args[1:])
 	case "apps":
 		return runAppsCommand(args[1:])
 	case "help", "--help", "-h":
@@ -85,6 +90,12 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  tooie --clock")
 	fmt.Fprintln(w, "      Start low-CPU clock-only mode.")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --cal")
+	fmt.Fprintln(w, "      Start low-CPU calendar-only mode.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --clock --cal")
+	fmt.Fprintln(w, "      Start low-CPU clock + calendar mode.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie --help")
 	fmt.Fprintln(w, "      Show this help screen.")
 	fmt.Fprintln(w)
@@ -96,6 +107,8 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  tooie apps")
 	fmt.Fprintln(w, "  tooie apps --refresh")
 	fmt.Fprintln(w, "  tooie --clock")
+	fmt.Fprintln(w, "  tooie --cal")
+	fmt.Fprintln(w, "  tooie --clock --cal")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Paths")
 	fmt.Fprintln(w, "  Apps cache:   ~/.cache/tooie/apps.json")
@@ -162,7 +175,42 @@ func runClockCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "tooie --clock: unexpected arguments")
 		return 2
 	}
-	return runClockTUI()
+	return runMiniTUI(true, false)
+}
+
+func runCalCommand(args []string) int {
+	fs := flag.NewFlagSet("cal", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie --cal: %v\n", err)
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "tooie --cal: unexpected arguments")
+		return 2
+	}
+	return runMiniTUI(false, true)
+}
+
+func parseMiniModeFlags(args []string) (showClock bool, showCal bool, ok bool) {
+	if len(args) == 0 {
+		return false, false, false
+	}
+	for _, raw := range args {
+		arg := strings.TrimSpace(raw)
+		switch arg {
+		case "--clock":
+			showClock = true
+		case "--cal":
+			showCal = true
+		default:
+			return false, false, false
+		}
+	}
+	if !showClock && !showCal {
+		return false, false, false
+	}
+	return showClock, showCal, true
 }
 
 func runLaunchCommand(args []string) int {
