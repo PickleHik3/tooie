@@ -33,6 +33,15 @@ The TUI is split into 2 pages:
   </tr>
 </table>
 
+### `tooie --clock --cal`
+![tooie --clock --cal](docs/screenshots/Screenshot_20260309-073307.png)
+
+### `tooie --clock`
+![tooie --clock](docs/screenshots/Screenshot_20260309-073330.png)
+
+### `tooie --cal`
+![tooie --cal](docs/screenshots/Screenshot_20260309-073344.png)
+
 ## Install
 
 ```sh
@@ -56,14 +65,11 @@ chsh -s fish
 
 ```sh
 tooie --help
-tooie --restart
+tooie --clock
+tooie --cal
+tooie --clock --cal
 tooie apps
 tooie apps --refresh
-tooie launch com.termux
-tooie launch com.termux/.app.TermuxActivity
-tooie exec "am start -n com.termux/.app.TermuxActivity --user 0"
-tooie icon com.termux
-tooie icons refresh --pinned
 ```
 
 ## Installed Paths
@@ -99,10 +105,9 @@ It supports both `pkg` and `pacman`.
 ## CLI Notes
 
 - `tooie apps` caches launcher app discovery in `~/.cache/tooie/apps.json`.
-- `tooie icon <package>` caches backend-delivered icons in `~/.cache/tooie/icons/`.
-- `tooie icons refresh --pinned` refreshes pinned-app icons, preferring backend icon routes first.
-- `tooie launch` prefers the Tooie `/v1/exec` endpoint, then falls back to local `am start`.
-- `tooie --restart` force-stops and relaunches `termux-launcher`.
+- `tooie --clock` starts the low-CPU standalone clock widget.
+- `tooie --cal` starts the low-CPU standalone date/month calendar widget.
+- `tooie --clock --cal` starts the side-by-side clock + calendar widget view.
 
 ## Uninstall
 
