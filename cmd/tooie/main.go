@@ -31,15 +31,16 @@ var (
 )
 
 const (
-	defaultMode    = "dark"
+	defaultMode    = "auto"
 	defaultPalette = "default"
-	defaultPreset  = "default"
+	defaultPreset  = "balanced"
 	defaultSource  = "wallpaper"
 	pageTheme      = 0
 	pageHome       = 1
 )
 
-var stylePresets = []string{"default", "vivid", "playful", "energetic", "creative", "friendly", "positive"}
+var modePresets = []string{"auto", "dark", "light"}
+var stylePresets = []string{"balanced", "vivid", "mellow", "punchy"}
 var themeSources = []string{"wallpaper", "preset"}
 var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84"}
 var presetVariantsByFamily = map[string][]string{
@@ -341,8 +342,13 @@ func (m *model) loadThemeStateFromBackups() {
 }
 
 func (m *model) normalizeThemeSelection() {
+	m.mode = canonicalMode(m.mode)
+	m.stylePreset = canonicalStylePreset(m.stylePreset)
 	if !contains(themeSources, m.themeSource) {
 		m.themeSource = defaultSource
+	}
+	if !contains(modePresets, m.mode) {
+		m.mode = defaultMode
 	}
 	if !contains(stylePresets, m.stylePreset) {
 		m.stylePreset = defaultPreset
@@ -357,6 +363,34 @@ func (m *model) normalizeThemeSelection() {
 	}
 	if !contains(variants, m.presetVariant) {
 		m.presetVariant = variants[0]
+	}
+}
+
+func canonicalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "dark":
+		return "dark"
+	case "light":
+		return "light"
+	case "auto":
+		return "auto"
+	default:
+		return mode
+	}
+}
+
+func canonicalStylePreset(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "default", "balanced":
+		return "balanced"
+	case "vivid":
+		return "vivid"
+	case "mellow", "friendly", "positive":
+		return "mellow"
+	case "punchy", "playful", "energetic", "creative":
+		return "punchy"
+	default:
+		return name
 	}
 }
 
@@ -857,7 +891,7 @@ func (m model) settings() []settingItem {
 		)
 	} else {
 		items = append(items,
-			settingItem{Label: "Mode: " + m.mode, Target: "mode"},
+			settingItem{Label: "Mode: " + displayMode(m.mode), Target: "mode"},
 			settingItem{Label: "Style Preset: " + displayStylePreset(m.stylePreset), Target: "style_preset"},
 		)
 	}
@@ -888,11 +922,7 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		m.normalizeThemeSelection()
 		return m, nil
 	case "mode":
-		if m.mode == "dark" {
-			m.mode = "light"
-		} else {
-			m.mode = "dark"
-		}
+		m.mode = nextMode(m.mode)
 		return m, nil
 	case "style_preset":
 		m.stylePreset = nextStylePreset(m.stylePreset)
@@ -1179,7 +1209,7 @@ func (m model) detailsBlock(totalWidth int) string {
 		)
 	} else {
 		left = append(left,
-			"  mode: "+m.mode,
+			"  mode: "+displayMode(m.mode),
 			"  style preset: "+displayStylePreset(m.stylePreset),
 		)
 	}
@@ -1556,7 +1586,52 @@ func colorTargetLabel(target string) string {
 }
 
 func roleLabel(role string) string {
-	return strings.ReplaceAll(role, "_", " ")
+	switch role {
+	case "background":
+		return "bg"
+	case "on_background":
+		return "fg"
+	case "surface":
+		return "panel"
+	case "surface_dim":
+		return "panel dim"
+	case "surface_bright":
+		return "panel bright"
+	case "surface_container":
+		return "panel base"
+	case "surface_container_high":
+		return "panel raised"
+	case "surface_variant":
+		return "panel alt"
+	case "on_surface":
+		return "text"
+	case "on_surface_variant":
+		return "muted text"
+	case "outline":
+		return "border"
+	case "outline_variant":
+		return "border soft"
+	case "primary":
+		return "accent primary"
+	case "secondary":
+		return "accent secondary"
+	case "tertiary":
+		return "accent tertiary"
+	case "error":
+		return "accent error"
+	case "inverse_primary":
+		return "accent inverse"
+	case "primary_container":
+		return "accent primary bg"
+	case "secondary_container":
+		return "accent secondary bg"
+	case "tertiary_container":
+		return "accent tertiary bg"
+	case "error_container":
+		return "accent error bg"
+	default:
+		return strings.ReplaceAll(role, "_", " ")
+	}
 }
 
 func (m model) familyColorOptions(family string) []colorOption {
@@ -1964,6 +2039,19 @@ func nextStylePreset(cur string) string {
 	return stylePresets[0]
 }
 
+func nextMode(cur string) string {
+	if len(modePresets) == 0 {
+		return cur
+	}
+	cur = canonicalMode(cur)
+	for i, mode := range modePresets {
+		if mode == cur {
+			return modePresets[(i+1)%len(modePresets)]
+		}
+	}
+	return modePresets[0]
+}
+
 func (m model) themeActionLabel(previewOnly bool) string {
 	if m.themeSource == "preset" {
 		if previewOnly {
@@ -2015,11 +2103,35 @@ func nextPresetVariant(family, cur string) string {
 }
 
 func displayStylePreset(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "Default"
+	switch canonicalStylePreset(name) {
+	case "balanced":
+		return "Balanced"
+	case "vivid":
+		return "Vivid"
+	case "mellow":
+		return "Mellow"
+	case "punchy":
+		return "Punchy"
+	default:
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return "Balanced"
+		}
+		return strings.ToUpper(name[:1]) + name[1:]
 	}
-	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func displayMode(mode string) string {
+	switch canonicalMode(mode) {
+	case "auto":
+		return "Auto"
+	case "dark":
+		return "Dark"
+	case "light":
+		return "Light"
+	default:
+		return strings.TrimSpace(mode)
+	}
 }
 
 func displayThemeSource(source string) string {

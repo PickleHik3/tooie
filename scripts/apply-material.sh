@@ -12,7 +12,7 @@ TMUX_CONF="$HOME_DIR/.tmux.conf"
 PEACLOCK_CONFIG="$HOME_DIR/.config/peaclock/config"
 STARSHIP_CONFIG="$HOME_DIR/.config/starship.toml"
 
-MODE="dark"
+MODE="auto"
 SCHEME_TYPE="scheme-tonal-spot"
 WALLPAPER=""
 THEME_SOURCE="wallpaper"
@@ -22,7 +22,7 @@ MATUGEN_BIN="${MATUGEN_BIN:-}"
 TEXT_COLOR_OVERRIDE=""
 CURSOR_COLOR_OVERRIDE=""
 STATUS_PALETTE="default"
-STYLE_PRESET="default"
+STYLE_PRESET="balanced"
 ANSI_RED_OVERRIDE=""
 ANSI_GREEN_OVERRIDE=""
 ANSI_YELLOW_OVERRIDE=""
@@ -34,20 +34,20 @@ REUSE_BACKUP_ID=""
 
 usage() {
   cat <<'EOF'
-Usage: apply-material.sh [-m dark|light] [-t scheme-type] [-w wallpaper_path] [-b matugen_bin]
+Usage: apply-material.sh [-m auto|dark|light] [-t scheme-type] [-w wallpaper_path] [-b matugen_bin]
                          [--theme-source wallpaper|preset]
                          [--preset-family catppuccin|rose-pine|tokyo-night|synthwave-84]
                          [--preset-variant name]
                          [--text-color '#rrggbb'] [--cursor-color '#rrggbb']
                          [--status-palette default|vibrant]
-                         [--style-preset default|vivid|playful|energetic|creative|friendly|positive]
+                         [--style-preset balanced|vivid|mellow|punchy]
                          [--preview-only] [--reuse-backup backup_id]
                          [--ansi-red '#rrggbb'] [--ansi-green '#rrggbb']
                          [--ansi-yellow '#rrggbb'] [--ansi-blue '#rrggbb']
                          [--ansi-magenta '#rrggbb'] [--ansi-cyan '#rrggbb']
 
 Defaults:
-  mode: dark
+  mode: auto
   type: scheme-tonal-spot
   wallpaper: ~/.termux/background/background_portrait.jpeg
              (fallback: newest file in ~/.termux/background)
@@ -143,6 +143,26 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+canonical_style_preset() {
+  case "$1" in
+    balanced|default|"")
+      printf '%s\n' "balanced"
+      ;;
+    vivid)
+      printf '%s\n' "vivid"
+      ;;
+    mellow|friendly|positive)
+      printf '%s\n' "mellow"
+      ;;
+    punchy|playful|energetic|creative)
+      printf '%s\n' "punchy"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
 
 resolve_matugen_bin() {
   if [ -n "$MATUGEN_BIN" ] && [ -x "$MATUGEN_BIN" ]; then
@@ -304,10 +324,23 @@ case "$THEME_SOURCE" in
     ;;
 esac
 
+MODE="$(printf '%s' "$MODE" | tr 'A-Z' 'a-z')"
+STYLE_PRESET="$(canonical_style_preset "$(printf '%s' "$STYLE_PRESET" | tr 'A-Z' 'a-z')")"
+REQUESTED_MODE="$MODE"
+EFFECTIVE_MODE="$MODE"
+
+case "$MODE" in
+  auto|dark|light) ;;
+  *)
+    echo "Invalid mode: $MODE (use auto, dark, or light)" >&2
+    exit 1
+    ;;
+esac
+
 if [ "$THEME_SOURCE" = "preset" ]; then
   apply_preset_defaults
   load_preset_theme
-  MODE="$PRESET_MODE"
+  EFFECTIVE_MODE="$PRESET_MODE"
 else
   MATUGEN_BIN="$(resolve_matugen_bin || true)"
   if [ -z "$MATUGEN_BIN" ]; then
@@ -315,14 +348,6 @@ else
     exit 1
   fi
 fi
-
-case "$MODE" in
-  dark|light) ;;
-  *)
-    echo "Invalid mode: $MODE (use dark or light)" >&2
-    exit 1
-    ;;
-esac
 
 case "$STATUS_PALETTE" in
   default|vibrant) ;;
@@ -333,10 +358,10 @@ case "$STATUS_PALETTE" in
 esac
 
 case "$STYLE_PRESET" in
-  default|vivid|playful|energetic|creative|friendly|positive) ;;
+  balanced|vivid|mellow|punchy) ;;
   *)
     echo "Invalid style preset: $STYLE_PRESET" >&2
-    echo "Use one of: default, vivid, playful, energetic, creative, friendly, positive" >&2
+    echo "Use one of: balanced, vivid, mellow, punchy" >&2
     exit 1
     ;;
 esac
@@ -399,11 +424,19 @@ if [ -z "$REUSE_BACKUP_ID" ]; then
 fi
 
 JSON_FILE="$BACKUP_DIR/matugen.json"
+AUTO_DARK_JSON=""
+AUTO_LIGHT_JSON=""
 if [ -n "$REUSE_BACKUP_ID" ]; then
   write_progress "Reusing updated preview" 0.14
   if [ ! -f "$JSON_FILE" ]; then
     echo "Preview data missing: $JSON_FILE" >&2
     exit 1
+  fi
+  if [ "$MODE" = "auto" ] && [ -f "$BACKUP_DIR/meta.env" ]; then
+    REUSED_EFFECTIVE_MODE="$(sed -n 's/^effective_mode=//p' "$BACKUP_DIR/meta.env" | head -n 1)"
+    case "$REUSED_EFFECTIVE_MODE" in
+      dark|light) EFFECTIVE_MODE="$REUSED_EFFECTIVE_MODE" ;;
+    esac
   fi
 else
   if [ "$THEME_SOURCE" = "preset" ]; then
@@ -431,7 +464,14 @@ else
 EOF
   else
     write_progress "Extracting wallpaper roles" 0.14
-    "$MATUGEN_BIN" image "$WALLPAPER" -m "$MODE" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$JSON_FILE"
+    if [ "$MODE" = "auto" ]; then
+      AUTO_DARK_JSON="$BACKUP_DIR/matugen-auto-dark.json"
+      AUTO_LIGHT_JSON="$BACKUP_DIR/matugen-auto-light.json"
+      "$MATUGEN_BIN" image "$WALLPAPER" -m "dark" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$AUTO_DARK_JSON"
+      "$MATUGEN_BIN" image "$WALLPAPER" -m "light" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$AUTO_LIGHT_JSON"
+    else
+      "$MATUGEN_BIN" image "$WALLPAPER" -m "$EFFECTIVE_MODE" -t "$SCHEME_TYPE" --source-color-index 0 -j hex --dry-run > "$JSON_FILE"
+    fi
   fi
 fi
 write_progress "Deriving semantic palette" 0.28
@@ -439,6 +479,12 @@ write_progress "Deriving semantic palette" 0.28
 jq_color() {
   role="$1"
   jq -r --arg role "$role" '.colors[$role].default.color' "$JSON_FILE"
+}
+
+jq_color_from_file() {
+  src_file="$1"
+  role="$2"
+  jq -r --arg role "$role" '.colors[$role].default.color' "$src_file"
 }
 
 is_hex_color() {
@@ -567,6 +613,104 @@ role_color() {
   fi
 }
 
+min_contrast_set() {
+  fg="$(normalize_hex "$1")"
+  shift
+  min_ratio=""
+  for bg in "$@"; do
+    bg_n="$(normalize_hex "$bg")"
+    r="$(contrast_ratio "$fg" "$bg_n")"
+    if [ -z "$min_ratio" ] || awk -v a="$r" -v b="$min_ratio" 'BEGIN { exit !(a < b) }'; then
+      min_ratio="$r"
+    fi
+  done
+  printf '%s\n' "${min_ratio:-0}"
+}
+
+ensure_dual_contrast() {
+  fg="$1"
+  bg_primary="$2"
+  bg_guard="$3"
+  target="$4"
+  cand_a="$(ensure_contrast "$fg" "$bg_primary" "$target")"
+  cand_b="$(ensure_contrast "$fg" "$bg_guard" "$target")"
+  a_min="$(min_contrast_set "$cand_a" "$bg_primary" "$bg_guard")"
+  b_min="$(min_contrast_set "$cand_b" "$bg_primary" "$bg_guard")"
+  if awk -v a="$a_min" -v b="$b_min" 'BEGIN { exit !(a >= b) }'; then
+    printf '%s\n' "$cand_a"
+  else
+    printf '%s\n' "$cand_b"
+  fi
+}
+
+palette_readability_score() {
+  src_file="$1"
+  bg="$(normalize_hex "$(jq_color_from_file "$src_file" background)")"
+  bg_dim="$(normalize_hex "$(jq_color_from_file "$src_file" surface_dim)")"
+  bg_bright="$(normalize_hex "$(jq_color_from_file "$src_file" surface_bright)")"
+  fg="$(normalize_hex "$(jq_color_from_file "$src_file" on_background)")"
+  primary="$(normalize_hex "$(jq_color_from_file "$src_file" primary)")"
+  secondary="$(normalize_hex "$(jq_color_from_file "$src_file" secondary)")"
+  tertiary="$(normalize_hex "$(jq_color_from_file "$src_file" tertiary)")"
+  errc="$(normalize_hex "$(jq_color_from_file "$src_file" error)")"
+
+  fg_min="$(min_contrast_set "$fg" "$bg" "$bg_dim" "$bg_bright")"
+  p_min="$(min_contrast_set "$primary" "$bg" "$bg_dim" "$bg_bright")"
+  s_min="$(min_contrast_set "$secondary" "$bg" "$bg_dim" "$bg_bright")"
+  t_min="$(min_contrast_set "$tertiary" "$bg" "$bg_dim" "$bg_bright")"
+  e_min="$(min_contrast_set "$errc" "$bg" "$bg_dim" "$bg_bright")"
+
+  awk -v fg="$fg_min" -v p="$p_min" -v s="$s_min" -v t="$t_min" -v e="$e_min" '
+    BEGIN {
+      accent_min = p
+      if (s < accent_min) accent_min = s
+      if (t < accent_min) accent_min = t
+      if (e < accent_min) accent_min = e
+      # Favor strong text contrast, then accent resilience.
+      printf "%.4f\n", (fg * 2.0) + accent_min
+    }
+  '
+}
+
+wallpaper_luminance() {
+  img="$1"
+  [ -n "$img" ] || return 1
+  [ -f "$img" ] || return 1
+
+  if command -v magick >/dev/null 2>&1; then
+    magick "$img" -colorspace Gray -resize 1x1\! -format "%[fx:intensity]" info: 2>/dev/null | head -n 1
+    return 0
+  fi
+
+  if command -v convert >/dev/null 2>&1; then
+    convert "$img" -colorspace Gray -resize 1x1\! -format "%[fx:intensity]" info: 2>/dev/null | head -n 1
+    return 0
+  fi
+
+  return 1
+}
+
+if [ "$THEME_SOURCE" = "wallpaper" ] && [ "$MODE" = "auto" ] && [ -n "$AUTO_DARK_JSON" ] && [ -n "$AUTO_LIGHT_JSON" ]; then
+  dark_score="$(palette_readability_score "$AUTO_DARK_JSON")"
+  light_score="$(palette_readability_score "$AUTO_LIGHT_JSON")"
+  wall_luma="$(wallpaper_luminance "$WALLPAPER" || true)"
+
+  if [ -n "$wall_luma" ] && awk -v m="$wall_luma" 'BEGIN { exit !(m <= 0.42) }'; then
+    EFFECTIVE_MODE="dark"
+    JSON_FILE="$AUTO_DARK_JSON"
+  elif [ -n "$wall_luma" ] && awk -v m="$wall_luma" 'BEGIN { exit !(m >= 0.58) }'; then
+    EFFECTIVE_MODE="light"
+    JSON_FILE="$AUTO_LIGHT_JSON"
+  elif awk -v d="$dark_score" -v l="$light_score" 'BEGIN { exit !(d >= l) }'; then
+    EFFECTIVE_MODE="dark"
+    JSON_FILE="$AUTO_DARK_JSON"
+  else
+    EFFECTIVE_MODE="light"
+    JSON_FILE="$AUTO_LIGHT_JSON"
+  fi
+  cp "$JSON_FILE" "$BACKUP_DIR/matugen.json"
+fi
+
 if [ "$THEME_SOURCE" = "preset" ]; then
   BG="$(normalize_hex "$PRESET_BG")"
   C0="$(normalize_hex "$PRESET_SURFACE")"
@@ -589,7 +733,7 @@ if [ "$THEME_SOURCE" = "preset" ]; then
   EFFECTIVE_SECONDARY="$(ensure_contrast "$PRESET_SECONDARY" "$BG" 4.0)"
   EFFECTIVE_TERTIARY="$(ensure_contrast "$PRESET_TERTIARY" "$BG" 4.0)"
   EFFECTIVE_ERROR="$(ensure_contrast "$PRESET_ERROR" "$BG" 4.0)"
-  if [ "$MODE" = "dark" ]; then
+  if [ "$EFFECTIVE_MODE" = "dark" ]; then
     C8="$(ensure_contrast "$(mix_hex "$C0" "#ffffff" 0.18)" "$BG" 1.3)"
     C9="$(ensure_contrast "$(mix_hex "$C1" "#ffffff" 0.20)" "$BG" 4.0)"
     C10="$(ensure_contrast "$(mix_hex "$C2" "#ffffff" 0.18)" "$BG" 4.0)"
@@ -614,8 +758,8 @@ if [ "$THEME_SOURCE" = "preset" ]; then
   fi
   C20="$(ensure_contrast "$(mix_hex "$C0" "$C15" 0.24)" "$BG" 1.5)"
   C21="$(ensure_contrast "$(mix_hex "$C14" "$C0" 0.28)" "$BG" 1.4)"
-elif [ "$STYLE_PRESET" = "default" ]; then
-  if [ "$MODE" = "dark" ]; then
+elif [ "$STYLE_PRESET" = "balanced" ]; then
+  if [ "$EFFECTIVE_MODE" = "dark" ]; then
     FALLBACK_BG="#1a1b26"
     FALLBACK_FG="#c0caf5"
     BRIGHT_MIX="#ffffff"
@@ -667,25 +811,16 @@ elif [ "$STYLE_PRESET" = "default" ]; then
   EFFECTIVE_TERTIARY="$(ensure_contrast "$PURE_TERTIARY" "$BG" 4.0)"
   EFFECTIVE_ERROR="$(ensure_contrast "$PURE_ERROR" "$BG" 4.0)"
 else
-  if [ "$MODE" = "dark" ]; then
+  if [ "$EFFECTIVE_MODE" = "dark" ]; then
     case "$STYLE_PRESET" in
       vivid)
         ANCHOR_BG="#15171f"; ANCHOR_FG="#e5e9f0"; ANCHOR_RED="#ff6b7a"; ANCHOR_GREEN="#6fe3a1"; ANCHOR_YELLOW="#ffd166"; ANCHOR_BLUE="#5fb0ff"; ANCHOR_MAGENTA="#d28cff"; ANCHOR_CYAN="#4fe0d0"
         ;;
-      playful)
-        ANCHOR_BG="#171822"; ANCHOR_FG="#ebe7ff"; ANCHOR_RED="#ff7f96"; ANCHOR_GREEN="#7be495"; ANCHOR_YELLOW="#ffd166"; ANCHOR_BLUE="#7aa2ff"; ANCHOR_MAGENTA="#d792ff"; ANCHOR_CYAN="#66e3ff"
-        ;;
-      energetic)
-        ANCHOR_BG="#1a1612"; ANCHOR_FG="#f2e7de"; ANCHOR_RED="#ff6b5f"; ANCHOR_GREEN="#78d98b"; ANCHOR_YELLOW="#ffbf5a"; ANCHOR_BLUE="#5ba8ff"; ANCHOR_MAGENTA="#ff84c1"; ANCHOR_CYAN="#42d6c5"
-        ;;
-      creative)
-        ANCHOR_BG="#151820"; ANCHOR_FG="#e8edf7"; ANCHOR_RED="#ff7285"; ANCHOR_GREEN="#67d9a2"; ANCHOR_YELLOW="#ffc857"; ANCHOR_BLUE="#57a6ff"; ANCHOR_MAGENTA="#bb86ff"; ANCHOR_CYAN="#32d4ff"
-        ;;
-      friendly)
+      mellow)
         ANCHOR_BG="#17191c"; ANCHOR_FG="#e6ece9"; ANCHOR_RED="#f17c8f"; ANCHOR_GREEN="#78d1a2"; ANCHOR_YELLOW="#f3c96b"; ANCHOR_BLUE="#78aee8"; ANCHOR_MAGENTA="#c09de8"; ANCHOR_CYAN="#68d5d3"
         ;;
-      positive)
-        ANCHOR_BG="#151912"; ANCHOR_FG="#edf0df"; ANCHOR_RED="#ff7c6b"; ANCHOR_GREEN="#89db6a"; ANCHOR_YELLOW="#ffd95c"; ANCHOR_BLUE="#65a6ff"; ANCHOR_MAGENTA="#d29dff"; ANCHOR_CYAN="#59dbba"
+      punchy)
+        ANCHOR_BG="#1a1612"; ANCHOR_FG="#f2e7de"; ANCHOR_RED="#ff6b5f"; ANCHOR_GREEN="#78d98b"; ANCHOR_YELLOW="#ffbf5a"; ANCHOR_BLUE="#5ba8ff"; ANCHOR_MAGENTA="#ff84c1"; ANCHOR_CYAN="#42d6c5"
         ;;
       *)
         ANCHOR_BG="#15171f"; ANCHOR_FG="#e5e9f0"; ANCHOR_RED="#ff6b7a"; ANCHOR_GREEN="#6fe3a1"; ANCHOR_YELLOW="#ffd166"; ANCHOR_BLUE="#5fb0ff"; ANCHOR_MAGENTA="#d28cff"; ANCHOR_CYAN="#4fe0d0"
@@ -696,20 +831,11 @@ else
       vivid)
         ANCHOR_BG="#f3f5fb"; ANCHOR_FG="#243041"; ANCHOR_RED="#cf334f"; ANCHOR_GREEN="#16794a"; ANCHOR_YELLOW="#8f6300"; ANCHOR_BLUE="#005ac1"; ANCHOR_MAGENTA="#7d3aca"; ANCHOR_CYAN="#006a6a"
         ;;
-      playful)
-        ANCHOR_BG="#f7f3ff"; ANCHOR_FG="#3e3452"; ANCHOR_RED="#c73f68"; ANCHOR_GREEN="#297a49"; ANCHOR_YELLOW="#9a6700"; ANCHOR_BLUE="#375fd3"; ANCHOR_MAGENTA="#8d43d6"; ANCHOR_CYAN="#006f83"
-        ;;
-      energetic)
-        ANCHOR_BG="#fff5ec"; ANCHOR_FG="#432d1b"; ANCHOR_RED="#c63b26"; ANCHOR_GREEN="#2f7b44"; ANCHOR_YELLOW="#9f6200"; ANCHOR_BLUE="#0059b3"; ANCHOR_MAGENTA="#a03c89"; ANCHOR_CYAN="#006e64"
-        ;;
-      creative)
-        ANCHOR_BG="#f4f7ff"; ANCHOR_FG="#28354a"; ANCHOR_RED="#c73757"; ANCHOR_GREEN="#1f7b58"; ANCHOR_YELLOW="#8f6900"; ANCHOR_BLUE="#0057c8"; ANCHOR_MAGENTA="#6f45db"; ANCHOR_CYAN="#006d94"
-        ;;
-      friendly)
+      mellow)
         ANCHOR_BG="#f5f7f5"; ANCHOR_FG="#31403d"; ANCHOR_RED="#b85369"; ANCHOR_GREEN="#2f7457"; ANCHOR_YELLOW="#876a1e"; ANCHOR_BLUE="#466fa8"; ANCHOR_MAGENTA="#7f63aa"; ANCHOR_CYAN="#2f8080"
         ;;
-      positive)
-        ANCHOR_BG="#f8fbe9"; ANCHOR_FG="#33411f"; ANCHOR_RED="#c54b3c"; ANCHOR_GREEN="#3a7d1d"; ANCHOR_YELLOW="#906700"; ANCHOR_BLUE="#2d66c4"; ANCHOR_MAGENTA="#8f57c9"; ANCHOR_CYAN="#18766d"
+      punchy)
+        ANCHOR_BG="#fff5ec"; ANCHOR_FG="#432d1b"; ANCHOR_RED="#c63b26"; ANCHOR_GREEN="#2f7b44"; ANCHOR_YELLOW="#9f6200"; ANCHOR_BLUE="#0059b3"; ANCHOR_MAGENTA="#a03c89"; ANCHOR_CYAN="#006e64"
         ;;
       *)
         ANCHOR_BG="#f3f5fb"; ANCHOR_FG="#243041"; ANCHOR_RED="#cf334f"; ANCHOR_GREEN="#16794a"; ANCHOR_YELLOW="#8f6300"; ANCHOR_BLUE="#005ac1"; ANCHOR_MAGENTA="#7d3aca"; ANCHOR_CYAN="#006a6a"
@@ -722,25 +848,13 @@ else
       BG_T="0.28"; SURFACE_T="0.42"; FG_T="0.12"; MUTED_T="0.30"; OUTLINE_T="0.42"; PRIMARY_T="0.82"; SECONDARY_T="0.80"; TERTIARY_T="0.78"; ERROR_T="0.76"
       PRIMARY_TARGET="$ANCHOR_BLUE"; SECONDARY_TARGET="$ANCHOR_CYAN"; TERTIARY_TARGET="$ANCHOR_MAGENTA"
       ;;
-    playful)
-      BG_T="0.24"; SURFACE_T="0.38"; FG_T="0.12"; MUTED_T="0.28"; OUTLINE_T="0.40"; PRIMARY_T="0.84"; SECONDARY_T="0.78"; TERTIARY_T="0.86"; ERROR_T="0.74"
-      PRIMARY_TARGET="$ANCHOR_MAGENTA"; SECONDARY_TARGET="$ANCHOR_BLUE"; TERTIARY_TARGET="$ANCHOR_YELLOW"
-      ;;
-    energetic)
-      BG_T="0.34"; SURFACE_T="0.48"; FG_T="0.10"; MUTED_T="0.26"; OUTLINE_T="0.46"; PRIMARY_T="0.88"; SECONDARY_T="0.84"; TERTIARY_T="0.74"; ERROR_T="0.84"
-      PRIMARY_TARGET="$ANCHOR_YELLOW"; SECONDARY_TARGET="$ANCHOR_RED"; TERTIARY_TARGET="$ANCHOR_BLUE"
-      ;;
-    creative)
-      BG_T="0.30"; SURFACE_T="0.44"; FG_T="0.10"; MUTED_T="0.28"; OUTLINE_T="0.44"; PRIMARY_T="0.86"; SECONDARY_T="0.80"; TERTIARY_T="0.82"; ERROR_T="0.76"
-      PRIMARY_TARGET="$ANCHOR_MAGENTA"; SECONDARY_TARGET="$ANCHOR_BLUE"; TERTIARY_TARGET="$ANCHOR_CYAN"
-      ;;
-    friendly)
+    mellow)
       BG_T="0.26"; SURFACE_T="0.36"; FG_T="0.14"; MUTED_T="0.30"; OUTLINE_T="0.38"; PRIMARY_T="0.82"; SECONDARY_T="0.72"; TERTIARY_T="0.72"; ERROR_T="0.70"
       PRIMARY_TARGET="$ANCHOR_GREEN"; SECONDARY_TARGET="$ANCHOR_BLUE"; TERTIARY_TARGET="$ANCHOR_YELLOW"
       ;;
-    positive)
-      BG_T="0.30"; SURFACE_T="0.40"; FG_T="0.12"; MUTED_T="0.28"; OUTLINE_T="0.40"; PRIMARY_T="0.86"; SECONDARY_T="0.82"; TERTIARY_T="0.70"; ERROR_T="0.72"
-      PRIMARY_TARGET="$ANCHOR_GREEN"; SECONDARY_TARGET="$ANCHOR_YELLOW"; TERTIARY_TARGET="$ANCHOR_BLUE"
+    punchy)
+      BG_T="0.34"; SURFACE_T="0.48"; FG_T="0.10"; MUTED_T="0.26"; OUTLINE_T="0.46"; PRIMARY_T="0.88"; SECONDARY_T="0.84"; TERTIARY_T="0.74"; ERROR_T="0.84"
+      PRIMARY_TARGET="$ANCHOR_YELLOW"; SECONDARY_TARGET="$ANCHOR_RED"; TERTIARY_TARGET="$ANCHOR_BLUE"
       ;;
     *)
       BG_T="0.28"; SURFACE_T="0.42"; FG_T="0.12"; MUTED_T="0.30"; OUTLINE_T="0.42"; PRIMARY_T="0.82"; SECONDARY_T="0.80"; TERTIARY_T="0.78"; ERROR_T="0.76"
@@ -783,7 +897,7 @@ else
   C5="$(ensure_contrast "$(mix_hex "$TERTIARY_BASE" "$ANCHOR_MAGENTA" 0.78)" "$BG" 3.6)"
   C6="$(ensure_contrast "$(mix_hex "$SECONDARY_BASE" "$ANCHOR_CYAN" 0.78)" "$BG" 3.6)"
 
-  if [ "$MODE" = "dark" ]; then
+  if [ "$EFFECTIVE_MODE" = "dark" ]; then
     C8="$(ensure_contrast "$(mix_hex "$C0" "#ffffff" 0.20)" "$BG" 1.3)"
     C9="$(ensure_contrast "$(mix_hex "$C1" "#ffffff" 0.24)" "$BG" 4.0)"
     C10="$(ensure_contrast "$(mix_hex "$C2" "#ffffff" 0.24)" "$BG" 4.0)"
@@ -809,12 +923,23 @@ else
   C21="$(ensure_contrast "$(mix_hex "$C14" "$C0" 0.30)" "$BG" 1.4)"
 fi
 
+if [ "$EFFECTIVE_MODE" = "dark" ]; then
+  CONTRAST_GUARD_BG="$(role_color surface_bright "$(mix_hex "$BG" "#ffffff" 0.22)")"
+else
+  CONTRAST_GUARD_BG="$(role_color surface_dim "$(mix_hex "$BG" "#000000" 0.18)")"
+fi
+
+FG="$(ensure_dual_contrast "$FG" "$BG" "$CONTRAST_GUARD_BG" 7.0)"
+CURSOR="$(ensure_dual_contrast "$CURSOR" "$BG" "$CONTRAST_GUARD_BG" 4.5)"
+C7="$(ensure_dual_contrast "$C7" "$BG" "$CONTRAST_GUARD_BG" 6.0)"
+C15="$(ensure_dual_contrast "$C15" "$BG" "$CONTRAST_GUARD_BG" 4.5)"
+
 STATUS_LEFT_FG="$(ensure_contrast "$FG" "$C4" 4.5)"
 MODE_FG="$(ensure_contrast "$BG" "$C2" 4.5)"
 
 if [ -n "$TEXT_COLOR_OVERRIDE" ]; then
   if is_hex_color "$TEXT_COLOR_OVERRIDE"; then
-    FG="$(ensure_contrast "$TEXT_COLOR_OVERRIDE" "$BG" 7.0)"
+    FG="$(ensure_dual_contrast "$TEXT_COLOR_OVERRIDE" "$BG" "$CONTRAST_GUARD_BG" 7.0)"
   else
     echo "Invalid --text-color value: $TEXT_COLOR_OVERRIDE (expected #rrggbb)" >&2
     exit 1
@@ -823,7 +948,7 @@ fi
 
 if [ -n "$CURSOR_COLOR_OVERRIDE" ]; then
   if is_hex_color "$CURSOR_COLOR_OVERRIDE"; then
-    CURSOR="$(ensure_contrast "$CURSOR_COLOR_OVERRIDE" "$BG" 4.5)"
+    CURSOR="$(ensure_dual_contrast "$CURSOR_COLOR_OVERRIDE" "$BG" "$CONTRAST_GUARD_BG" 4.5)"
   else
     echo "Invalid --cursor-color value: $CURSOR_COLOR_OVERRIDE (expected #rrggbb)" >&2
     exit 1
@@ -903,7 +1028,8 @@ RAM_6="$STATE_RED"
     echo "preset_variant=$PRESET_VARIANT"
   fi
   echo "wallpaper=$WALLPAPER"
-  echo "mode=$MODE"
+  echo "mode=$REQUESTED_MODE"
+  echo "effective_mode=$EFFECTIVE_MODE"
   echo "type=$SCHEME_TYPE"
   echo "matugen_bin=$MATUGEN_BIN"
   echo "text_color_override=$TEXT_COLOR_OVERRIDE"
@@ -911,6 +1037,7 @@ RAM_6="$STATE_RED"
   echo "status_palette=$STATUS_PALETTE"
   echo "style_preset=$STYLE_PRESET"
   echo "effective_background=$EFFECTIVE_BACKGROUND"
+  echo "contrast_guard_background=$CONTRAST_GUARD_BG"
   echo "effective_surface=$EFFECTIVE_SURFACE"
   echo "effective_on_surface=$EFFECTIVE_ON_SURFACE"
   echo "effective_outline=$EFFECTIVE_OUTLINE"
@@ -948,7 +1075,8 @@ cat > "$TERMUX_TMP" <<EOF
 # theme source: $THEME_SOURCE
 # wallpaper: $WALLPAPER
 # preset: $PRESET_FAMILY:$PRESET_VARIANT
-# mode: $MODE
+# mode: $REQUESTED_MODE
+# effective_mode: $EFFECTIVE_MODE
 # type: $SCHEME_TYPE
 foreground=$FG
 background=$BG
