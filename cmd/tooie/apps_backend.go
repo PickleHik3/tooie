@@ -25,8 +25,8 @@ import (
 
 const defaultAppsCacheTTL = 10 * time.Minute
 const (
-	defaultLauncherPackage   = "com.termux"
-	defaultLauncherComponent = "com.termux/.app.TermuxActivity"
+	defaultLauncherPackage = "com.termux"
+	restartIntentAction    = "com.termux.app.restart"
 )
 
 type launchableApp struct {
@@ -102,7 +102,7 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "      Show this help screen.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie --restart")
-	fmt.Fprintln(w, "      Force-stop and relaunch termux-launcher cleanly.")
+	fmt.Fprintln(w, "      Trigger termux-launcher restart via broadcast intent.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands")
 	fmt.Fprintln(w, "  tooie apps [--refresh]")
@@ -260,7 +260,7 @@ func runRestartCommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, "tooie restart: force-stop + relaunch completed for com.termux")
+	fmt.Fprintln(os.Stdout, "tooie restart: broadcast restart intent sent for com.termux")
 	return 0
 }
 
@@ -276,7 +276,7 @@ func runExecCommand(args []string) int {
 	}
 	base, token, ok := readTooieEndpointToken()
 	if !ok {
-		fmt.Fprintln(os.Stderr, "tooie exec: tooie endpoint/token not configured")
+		fmt.Fprintln(os.Stderr, "tooie exec: launcherctl endpoint/token not configured")
 		return 1
 	}
 	out, err := tooieExecCommand(base, token, command)
@@ -465,168 +465,16 @@ func launchComponent(component string) error {
 }
 
 func restartLauncherApp() error {
-	component, err := resolveLauncherRestartComponent()
-	if err != nil {
-		return err
-	}
+	cmd := fmt.Sprintf("am broadcast -a %s -p %s", restartIntentAction, defaultLauncherPackage)
 	base, token, ok := readTooieEndpointToken()
-	var backendErr error
 	if ok {
-		if err := restartComponentViaBackend(base, token, component); err == nil {
-			return nil
-		} else {
-			backendErr = err
-		}
-	}
-	if err := restartComponentLocally(component); err != nil {
-		if backendErr != nil {
-			return fmt.Errorf("backend restart failed: %v; local restart failed: %w; true force-stop needs privileged backend execution (e.g. Shizuku/root)", backendErr, err)
-		}
-		return fmt.Errorf("%w; true force-stop needs privileged backend execution (e.g. Shizuku/root)", err)
-	}
-	return nil
-}
-
-func resolveLauncherRestartComponent() (string, error) {
-	component, err := resolveLaunchTarget(defaultLauncherPackage, defaultAppsCacheTTL, false)
-	if err == nil && strings.TrimSpace(component) != "" {
-		return component, nil
-	}
-	if strings.TrimSpace(defaultLauncherComponent) == "" {
-		return "", fmt.Errorf("launcher component not configured")
-	}
-	return defaultLauncherComponent, nil
-}
-
-func stopPackageViaBackend(base, token, pkg string) error {
-	pkg = strings.TrimSpace(pkg)
-	if pkg == "" {
-		return errors.New("missing package")
-	}
-	cmds := []string{
-		"/system/bin/cmd activity force-stop --user current " + pkg,
-		"cmd activity force-stop --user current " + pkg,
-		"/system/bin/am force-stop --user current " + pkg,
-		"/system/bin/am force-stop " + pkg,
-		"am force-stop " + pkg + " --user current",
-		"am force-stop " + pkg,
-	}
-	lastErr := ""
-	for _, cmd := range cmds {
 		if _, err := tooieExecCommand(base, token, cmd); err == nil {
 			return nil
-		} else {
-			lastErr = err.Error()
 		}
 	}
-	if strings.TrimSpace(lastErr) == "" {
-		lastErr = "no backend command variant succeeded"
-	}
-	return fmt.Errorf("backend force-stop failed for %s: %s", pkg, lastErr)
-}
-
-func startComponentViaBackend(base, token, component string) error {
-	component = strings.TrimSpace(component)
-	if component == "" {
-		return errors.New("missing component")
-	}
-	if _, err := tooieExecCommand(base, token, "am start -n "+component+" --user 0"); err == nil {
-		return nil
-	}
-	if _, err := tooieExecCommand(base, token, "am start -n "+component); err == nil {
-		return nil
-	}
-	return fmt.Errorf("backend launch failed for %s", component)
-}
-
-func restartComponentViaBackend(base, token, component string) error {
-	component = strings.TrimSpace(component)
-	if component == "" {
-		return errors.New("missing component")
-	}
-	pkg, _, ok := splitComponent(component)
-	if !ok {
-		return errors.New("invalid component")
-	}
-	if err := stopPackageViaBackend(base, token, pkg); err != nil {
-		return err
-	}
-	if err := startComponentViaBackend(base, token, component); err != nil {
-		return err
-	}
-	return nil
-}
-
-func stopPackageLocally(pkg string) error {
-	pkg = strings.TrimSpace(pkg)
-	if pkg == "" {
-		return errors.New("missing package")
-	}
-	cmds := [][]string{
-		{"activity", "force-stop", "--user", "current", pkg},
-		{"force-stop", "--user", "current", pkg},
-		{"force-stop", pkg},
-	}
-	lastErr := ""
-	for _, argv := range cmds {
-		out, err := exec.Command("cmd", argv...).CombinedOutput()
-		if err == nil {
-			return nil
-		}
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		lastErr = msg
-	}
-	for _, argv := range cmds[1:] {
-		out, err := exec.Command("am", argv...).CombinedOutput()
-		if err == nil {
-			return nil
-		}
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		lastErr = msg
-	}
-	if strings.TrimSpace(lastErr) == "" {
-		lastErr = "no local command variant succeeded"
-	}
-	return fmt.Errorf("local force-stop failed: %s", lastErr)
-}
-
-func startComponentLocally(component string) error {
-	component = strings.TrimSpace(component)
-	if component == "" {
-		return errors.New("missing component")
-	}
-	if out, err := exec.Command("am", "start", "-n", component, "--user", "0").CombinedOutput(); err == nil {
-		return nil
-	} else if len(bytes.TrimSpace(out)) > 0 {
-		_ = out
-	}
-	out, err := exec.Command("am", "start", "-n", component).CombinedOutput()
+	out, err := exec.Command("am", "broadcast", "-a", restartIntentAction, "-p", defaultLauncherPackage).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("local am launch failed: %w (%s)", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func restartComponentLocally(component string) error {
-	component = strings.TrimSpace(component)
-	if component == "" {
-		return errors.New("missing component")
-	}
-	pkg, _, ok := splitComponent(component)
-	if !ok {
-		return errors.New("invalid component")
-	}
-	if err := stopPackageLocally(pkg); err != nil {
-		return err
-	}
-	if err := startComponentLocally(component); err != nil {
-		return err
+		return fmt.Errorf("restart broadcast failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -634,7 +482,7 @@ func restartComponentLocally(component string) error {
 func fetchBackendAppMetadata() (map[string]backendAppMeta, error) {
 	base, token, ok := readTooieEndpointToken()
 	if !ok {
-		return nil, errors.New("tooie endpoint/token not configured")
+		return nil, errors.New("launcherctl endpoint/token not configured")
 	}
 	res, ok := tooieJSONRequest(base, token, "/v1/apps", 2*time.Second)
 	if !ok {
@@ -881,7 +729,7 @@ func ensureAppIconCachedForApp(app launchableApp, force bool) (string, error) {
 		return "", endpointErr
 	}
 	if !ok {
-		return "", errors.New("tooie endpoint/token not configured")
+		return "", errors.New("launcherctl endpoint/token not configured")
 	}
 	return "", err
 }

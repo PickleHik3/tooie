@@ -105,16 +105,6 @@ func TestIsRestartCLIArgs(t *testing.T) {
 	}
 }
 
-func TestResolveLauncherRestartComponentFallback(t *testing.T) {
-	got, err := resolveLauncherRestartComponent()
-	if err != nil {
-		t.Fatalf("resolveLauncherRestartComponent() error = %v", err)
-	}
-	if strings.TrimSpace(got) == "" {
-		t.Fatal("resolveLauncherRestartComponent() returned empty component")
-	}
-}
-
 func TestTrimTransparentImage(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 6, 6))
 	img.Set(2, 1, color.RGBA{255, 0, 0, 255})

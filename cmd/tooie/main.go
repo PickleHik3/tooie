@@ -3490,11 +3490,11 @@ func readTooieEndpointToken() (string, string, bool) {
 	if err != nil || strings.TrimSpace(home) == "" {
 		return "", "", false
 	}
-	endpointData, err := os.ReadFile(filepath.Join(home, ".tooie", "endpoint"))
+	endpointData, err := os.ReadFile(filepath.Join(home, ".launcherctl", "endpoint"))
 	if err != nil {
 		return "", "", false
 	}
-	tokenData, err := os.ReadFile(filepath.Join(home, ".tooie", "token"))
+	tokenData, err := os.ReadFile(filepath.Join(home, ".launcherctl", "token"))
 	if err != nil {
 		return "", "", false
 	}
