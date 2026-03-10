@@ -1,9 +1,20 @@
 {
   "execEnabled": true,
+  "help": "Set execEnabled=true and copy only needed entries from commandPrefixTemplates into allowedCommandPrefixes.",
   "allowedCommandPrefixes": [
     "id",
     "pm list packages",
     "cmd package list packages",
     "am start -S -n"
+  ],
+  "commandPrefixTemplates": [
+    "am broadcast -a com.termux.app.restart -p com.termux",
+    "am start -S -n com.termux/.app.TermuxActivity",
+    "am start -n",
+    "am force-stop",
+    "cmd package query-activities",
+    "cmd package list packages",
+    "pm list packages",
+    "id"
   ]
 }
