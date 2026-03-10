@@ -111,10 +111,10 @@ ensure_tooie_labels_cache() {
   [ "$age" -lt "$labels_ttl" ] 2>/dev/null && return 0
 
   refresh_labels() {
-    command -v tooie >/dev/null 2>&1 || return 0
+    command -v launcherctl >/dev/null 2>&1 || return 0
     command -v jq >/dev/null 2>&1 || return 0
     tmp_labels="$(mktemp "${TMPDIR:-/tmp}/status-tmux-labels.XXXXXX")"
-    if tooie apps 2>/dev/null | jq -r '.apps[]? | [.packageName, (.label // .packageName // "")] | @tsv' 2>/dev/null > "$tmp_labels" && [ -s "$tmp_labels" ]; then
+    if launcherctl apps 2>/dev/null | jq -r '.apps[]? | [.packageName, (.label // .packageName // "")] | @tsv' 2>/dev/null > "$tmp_labels" && [ -s "$tmp_labels" ]; then
       mv "$tmp_labels" "$labels_file"
     else
       rm -f "$tmp_labels"
@@ -214,9 +214,9 @@ launch_entry() {
     android)
       component="$arg1"
       [ -n "$component" ] || exit 1
-      if command -v tooie >/dev/null 2>&1; then
-        tooie exec "am start -n $component --user 0" >/dev/null 2>&1 && return 0
-        tooie exec "am start -n $component" >/dev/null 2>&1 && return 0
+      if command -v launcherctl >/dev/null 2>&1; then
+        launcherctl exec "am start -n $component --user 0" >/dev/null 2>&1 && return 0
+        launcherctl exec "am start -n $component" >/dev/null 2>&1 && return 0
       fi
       am start -n "$component" --user 0 >/dev/null 2>&1 || am start -n "$component" >/dev/null 2>&1 || true
       ;;
@@ -290,7 +290,7 @@ labels_cache_ttl="${STATUS_TMUX_APPS_LABELS_TTL:-600}"
 
 apps_cache_file="${STATUS_TMUX_APPS_CACHE_FILE:-$cache_dir/launcher.apps}"
 app_names_file="${STATUS_TMUX_APP_NAMES_FILE:-$cache_dir/launcher.app_names}"
-labels_cache_file="${STATUS_TMUX_APPS_LABELS_FILE:-$cache_dir/tooie-labels.tsv}"
+labels_cache_file="${STATUS_TMUX_APPS_LABELS_FILE:-$cache_dir/launcherctl-labels.tsv}"
 android_merged_cache_file="${STATUS_TMUX_APPS_MERGED_FILE:-$cache_dir/android-merged.psv}"
 legacy_apps_cache_file="$HOME/.apps"
 legacy_app_names_file="$HOME/.app_names"

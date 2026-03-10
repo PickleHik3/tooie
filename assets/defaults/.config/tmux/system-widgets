@@ -56,11 +56,11 @@ json_get(){
 
 collect_backend_json(){
   want_bat="$1"
-  command -v tooie >/dev/null 2>&1 || return 1
+  command -v launcherctl >/dev/null 2>&1 || return 1
   if command -v timeout >/dev/null 2>&1; then
-    bjson="$(timeout "$BACKEND_TIMEOUT" tooie resources 2>/dev/null || true)"
+    bjson="$(timeout "$BACKEND_TIMEOUT" launcherctl resources 2>/dev/null || true)"
   else
-    bjson="$(tooie resources 2>/dev/null || true)"
+    bjson="$(launcherctl resources 2>/dev/null || true)"
   fi
   [ -n "$bjson" ] || return 1
 

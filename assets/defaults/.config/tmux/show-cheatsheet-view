@@ -170,11 +170,11 @@ if [ "$mode" = "narrow" ]; then
   emit_narrow_line "Session Cycle" "Alt + Up/Dn"
   emit_narrow_line "Apps Bar" "Alt + Enter"
   emit_narrow_line "Search" "Type / in terminal"
-  emit_narrow_line "Customize" "Run tooie"
+  emit_narrow_line "Customize" "Run launcherctl"
   emit_narrow_line "Copy Mode" "v select, y copy"
   printf '\n%sMisc%s\n' "$cyan" "$reset"
   emit_narrow_line "Reload" "Prefix + q"
-  emit_narrow_line "Search / Theme" "Type /, run tooie"
+  emit_narrow_line "Search / Theme" "Type /, run launcherctl"
 else
   left_top="$(mktemp)"
   right_top="$(mktemp)"
@@ -209,7 +209,7 @@ else
   emit_half_box "Apps" 5 \
     "Apps Bar" "Alt + Enter" \
     "Search" "Type / in terminal" \
-    "Customize" "Run tooie" \
+    "Customize" "Run launcherctl" \
     "" "" \
     "" "" >"$right_mid"
   join_pair "$left_mid" "$right_mid"

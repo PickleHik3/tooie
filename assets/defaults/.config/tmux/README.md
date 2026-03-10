@@ -18,7 +18,7 @@ Behavior:
 - Search Android + terminal entries in one list.
 - Show pinned app row at the top (`[1]..[9]`).
 - Launch pinned apps via `alt-1`..`alt-9`.
-- Android launch path is **Shizuku/Tooie first** (`tooie exec "am start ..."`), then local `am start` fallback.
+- Android launch path is **Shizuku/LauncherCtl first** (`launcherctl exec "am start ..."`), then local `am start` fallback.
 - Android app list is filtered to launcher-exposed apps only (`MAIN` + `LAUNCHER`) to avoid clutter from non-launcher packages/intents.
 
 ## Files
@@ -96,11 +96,11 @@ Required:
 - `fzf`
 
 Recommended:
-- `tooie` (Shizuku-backed launch/data)
-- `jq` (better Tooie app-label parsing)
+- `launcherctl` (Shizuku-backed launch/data)
+- `jq` (better LauncherCtl app-label parsing)
 - `termux-api` (`termux-battery-status`) for battery fallback
 
 ## Notes
 
 - If `~/.apps` / `~/.app_names` are missing, `search-apps` rebuilds launcher cache using `pm/cmd query-activities` with `MAIN+LAUNCHER`.
-- Terminal entries come from your config file; Android entries come from launcher cache (and are relabeled from `tooie apps` when available).
+- Terminal entries come from your config file; Android entries come from launcher cache (and are relabeled from `launcherctl apps` when available).
