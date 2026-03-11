@@ -71,6 +71,8 @@ func runCLI(args []string) int {
 		return runRestartCommand(args[1:])
 	case "apps":
 		return runAppsCommand(args[1:])
+	case "theme":
+		return runThemeCommand(args[1:])
 	case "help", "--help", "-h":
 		printCLIUsage(os.Stdout)
 		return 0
@@ -107,6 +109,10 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "Commands")
 	fmt.Fprintln(w, "  tooie apps [--refresh]")
 	fmt.Fprintln(w, "      List launchable Android apps. Use --refresh to bypass cache.")
+	fmt.Fprintln(w, "  tooie theme apply [flags]")
+	fmt.Fprintln(w, "      Apply theme using Go engine (compat flags from apply-material.sh).")
+	fmt.Fprintln(w, "  tooie theme compute [flags]")
+	fmt.Fprintln(w, "      Print computed theme payload as JSON.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Examples")
 	fmt.Fprintln(w, "  tooie apps")

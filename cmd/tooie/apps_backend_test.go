@@ -182,3 +182,44 @@ func TestRenderPinnedAppIconBadgeFallback(t *testing.T) {
 		t.Fatalf("badge fallback missing text: %q", got)
 	}
 }
+
+func TestApplyArgsPresetOmitsMode(t *testing.T) {
+	m := model{
+		themeSource:   "preset",
+		mode:          "mocha",
+		presetFamily:  "catppuccin",
+		presetVariant: "mocha",
+		palette:       "default",
+	}
+
+	args := m.applyArgs(false)
+	for i := range args {
+		if args[i] == "-m" || args[i] == "--mode" {
+			t.Fatalf("applyArgs() included wallpaper mode for preset source: %v", args)
+		}
+	}
+	if !reflect.DeepEqual(args, []string{
+		"--theme-source", "preset",
+		"--status-palette", "default",
+		"--preset-family", "catppuccin",
+		"--preset-variant", "mocha",
+	}) {
+		t.Fatalf("applyArgs() = %v", args)
+	}
+}
+
+func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
+	m := model{
+		themeSource:   "preset",
+		mode:          "mocha",
+		presetFamily:  "catppuccin",
+		presetVariant: "mocha",
+		stylePreset:   "balanced",
+	}
+
+	m.normalizeThemeSelection()
+
+	if m.mode != defaultMode {
+		t.Fatalf("mode = %q, want %q", m.mode, defaultMode)
+	}
+}

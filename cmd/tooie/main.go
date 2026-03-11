@@ -42,12 +42,15 @@ const (
 var modePresets = []string{"auto", "dark", "light"}
 var stylePresets = []string{"balanced", "vivid", "mellow", "punchy"}
 var themeSources = []string{"wallpaper", "preset"}
-var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84"}
+var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84", "dracula", "gruvbox", "nord"}
 var presetVariantsByFamily = map[string][]string{
 	"catppuccin":   {"latte", "frappe", "macchiato", "mocha"},
 	"rose-pine":    {"main", "moon", "dawn"},
 	"tokyo-night":  {"storm", "moon", "night", "day"},
 	"synthwave-84": {"default"},
+	"dracula":      {"default"},
+	"gruvbox":      {"dark", "light"},
+	"nord":         {"default"},
 }
 
 type settingItem struct {
@@ -2420,7 +2423,7 @@ func (m model) applyArgs(includeOverrides bool) []string {
 	if m.themeSource == "preset" {
 		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
 	} else {
-		args = append(args, "-m", m.mode, "-w", defaultWall, "--style-preset", m.stylePreset)
+		args = append(args, "-m", m.mode, "--style-preset", m.stylePreset)
 	}
 	if includeOverrides {
 		if strings.TrimSpace(m.textColor) != "" {
@@ -2499,7 +2502,46 @@ func runApplyCommand(args []string, label, cacheKey, reuseBackup string, preview
 }
 
 func (m model) applyCacheSignature() string {
-	return strings.Join(m.applyArgs(true), "\x1f")
+	parts := m.applyArgs(true)
+	if m.themeSource == "wallpaper" {
+		parts = append(parts, "wallpaper_fingerprint="+wallpaperCacheFingerprint())
+	}
+	return strings.Join(parts, "\x1f")
+}
+
+func wallpaperCacheFingerprint() string {
+	if st, err := os.Stat(defaultWall); err == nil {
+		return fmt.Sprintf("fixed:%s:%d:%d", defaultWall, st.ModTime().UnixNano(), st.Size())
+	}
+	bgDir := filepath.Dir(defaultWall)
+	entries, err := os.ReadDir(bgDir)
+	if err != nil {
+		return "none"
+	}
+	type fileEntry struct {
+		name    string
+		modTime time.Time
+		size    int64
+	}
+	var newest *fileEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		item := fileEntry{name: e.Name(), modTime: info.ModTime(), size: info.Size()}
+		if newest == nil || item.modTime.After(newest.modTime) || (item.modTime.Equal(newest.modTime) && item.name > newest.name) {
+			cp := item
+			newest = &cp
+		}
+	}
+	if newest == nil {
+		return "none"
+	}
+	return fmt.Sprintf("latest:%s:%d:%d", newest.name, newest.modTime.UnixNano(), newest.size)
 }
 
 func (m model) startApply(label string, includeOverrides bool, previewOnly bool) (tea.Model, tea.Cmd) {
@@ -2649,6 +2691,12 @@ func displayPresetFamily(family string) string {
 		return "Tokyo Night"
 	case "synthwave-84":
 		return "Synthwave 84"
+	case "dracula":
+		return "Dracula"
+	case "gruvbox":
+		return "Gruvbox"
+	case "nord":
+		return "Nord"
 	default:
 		return displayStylePreset(family)
 	}
@@ -2665,7 +2713,7 @@ func displayPresetVariant(variant string) string {
 
 func presetVariantMode(family, variant string) string {
 	switch family + ":" + variant {
-	case "catppuccin:latte", "rose-pine:dawn", "tokyo-night:day":
+	case "catppuccin:latte", "rose-pine:dawn", "tokyo-night:day", "gruvbox:light":
 		return "light"
 	default:
 		return "dark"
@@ -4509,7 +4557,6 @@ func (m model) renderApplyStatusBar(barW, filled int, text string) string {
 	emptyFg := m.themeRoleColor("on_surface", "#7f849c")
 	fillTextFg := ensureReadableTextColor(m.themeRoleColor("background", "#11131c"), m.themeRoleColor("on_primary", "#0b0f16"), m.themeRoleColor("primary", "#89b4fa"))
 	out := strings.Builder{}
-	out.WriteString("[")
 	for i := 0; i < barW; i++ {
 		ch := ' '
 		if idx := i - start; idx >= 0 && idx < len(textRunes) {
@@ -4537,7 +4584,6 @@ func (m model) renderApplyStatusBar(barW, filled int, text string) string {
 			Foreground(lipgloss.Color(emptyFg)).
 			Render(string(ch)))
 	}
-	out.WriteString("]")
 	return out.String()
 }
 
