@@ -36,3 +36,24 @@ func TestComputeContrastInvariants(t *testing.T) {
 		}
 	}
 }
+
+func TestComputeDarkModeForcesLightForegroundPolarity(t *testing.T) {
+	roles := map[string]string{
+		"background":    "#090a0c",
+		"on_background": "#101214",
+		"primary":       "#4f8dff",
+		"secondary":     "#31c6c9",
+		"tertiary":      "#cf63ff",
+		"error":         "#ef4444",
+	}
+	res, err := Compute(roles, Options{Mode: "dark", StatusPalette: "default", StylePreset: "balanced"})
+	if err != nil {
+		t.Fatalf("Compute() error: %v", err)
+	}
+	if relLuma(res.Foreground) <= relLuma(res.Background) {
+		t.Fatalf("expected light foreground on dark mode; fg=%s bg=%s", res.Foreground, res.Background)
+	}
+	if contrastRatio(res.Foreground, res.Background) < 7.0 {
+		t.Fatalf("foreground contrast below 7.0 after polarity guard: fg=%s bg=%s", res.Foreground, res.Background)
+	}
+}

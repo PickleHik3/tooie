@@ -150,6 +150,15 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	if IsHexColor(opts.CursorOverride) {
 		cursor = ensureDualContrast(opts.CursorOverride, bg, guard, 4.5)
 	}
+	// Polarity guard: avoid dark-on-dark or light-on-light text in explicit mode.
+	bgLuma := relLuma(bg)
+	fgLuma := relLuma(fg)
+	if mode == "dark" && fgLuma <= bgLuma {
+		fg = ensureDualContrast("#f2f2f8", bg, guard, 7.0)
+	}
+	if mode == "light" && fgLuma >= bgLuma {
+		fg = ensureDualContrast("#111118", bg, guard, 7.0)
+	}
 
 	c := map[int]string{}
 	c[0] = NormalizeHex(surface)

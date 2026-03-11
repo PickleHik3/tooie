@@ -108,3 +108,57 @@ func TestApplyThemeFilesCreatesBackupsAndIdempotentBlocks(t *testing.T) {
 		t.Fatalf("tmux block end duplicated: %s", body)
 	}
 }
+
+func TestDecideAutoModeDarkDominant(t *testing.T) {
+	mode, reason := decideAutoMode(autoDecisionMetrics{
+		MeanLuma:         0.22,
+		P10:              0.04,
+		P50:              0.18,
+		P90:              0.55,
+		DarkPixelRatio:   0.84,
+		BrightPixelRatio: 0.02,
+		EdgeWeightedLuma: 0.24,
+	}, 12.1, 12.4)
+	if mode != "dark" {
+		t.Fatalf("expected dark, got %q (%s)", mode, reason)
+	}
+	if reason != "dark-dominant" {
+		t.Fatalf("expected dark-dominant reason, got %q", reason)
+	}
+}
+
+func TestDecideAutoModeBrightDominant(t *testing.T) {
+	mode, reason := decideAutoMode(autoDecisionMetrics{
+		MeanLuma:         0.79,
+		P10:              0.42,
+		P50:              0.74,
+		P90:              0.95,
+		DarkPixelRatio:   0.10,
+		BrightPixelRatio: 0.48,
+		EdgeWeightedLuma: 0.76,
+	}, 12.8, 11.9)
+	if mode != "light" {
+		t.Fatalf("expected light, got %q (%s)", mode, reason)
+	}
+	if reason != "bright-dominant" {
+		t.Fatalf("expected bright-dominant reason, got %q", reason)
+	}
+}
+
+func TestDecideAutoModeMixedSceneBiasesDark(t *testing.T) {
+	mode, reason := decideAutoMode(autoDecisionMetrics{
+		MeanLuma:         0.50,
+		P10:              0.08,
+		P50:              0.50,
+		P90:              0.94,
+		DarkPixelRatio:   0.42,
+		BrightPixelRatio: 0.16,
+		EdgeWeightedLuma: 0.46,
+	}, 10.2, 10.3)
+	if mode != "dark" {
+		t.Fatalf("expected dark in mixed scene, got %q (%s)", mode, reason)
+	}
+	if !strings.HasPrefix(reason, "score-bias-") {
+		t.Fatalf("expected score-bias reason, got %q", reason)
+	}
+}

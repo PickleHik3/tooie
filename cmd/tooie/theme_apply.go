@@ -5,7 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -185,10 +190,21 @@ type computedPayload struct {
 	} `json:"status"`
 }
 
+type autoDecisionMetrics struct {
+	MeanLuma         float64
+	P10              float64
+	P50              float64
+	P90              float64
+	DarkPixelRatio   float64
+	BrightPixelRatio float64
+	EdgeWeightedLuma float64
+}
+
 func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload, []byte, error) {
 	var out computedPayload
 	var roles map[string]string
 	var matugenRaw []byte
+	autoMeta := map[string]string{}
 	effectiveMode := canonicalMode(cfg.Mode)
 	if cfg.ThemeSource == "preset" {
 		presetRoles, mode, err := itheme.BuildPresetRoles(cfg.PresetFamily, cfg.PresetVariant)
@@ -217,12 +233,13 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 			}
 		}
 		if len(matugenRaw) == 0 {
-			raw, mode, err := generateMatugenJSON(cfg, wallpaper, workDir)
+			raw, mode, meta, err := generateMatugenJSON(cfg, wallpaper, workDir)
 			if err != nil {
 				return out, nil, err
 			}
 			matugenRaw = raw
 			effectiveMode = mode
+			autoMeta = meta
 		}
 		parsed, err := itheme.ParseMatugenColors(matugenRaw)
 		if err != nil {
@@ -260,6 +277,9 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	out.Colors = computed.Colors
 	out.Meta = computed.Meta
 	out.Meta["status_palette"] = cfg.StatusPalette
+	for k, v := range autoMeta {
+		out.Meta[k] = v
+	}
 	out.Status.Separator = computed.Status.Separator
 	out.Status.Weather = computed.Status.Weather
 	out.Status.Charging = computed.Status.Charging
@@ -269,47 +289,58 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	return out, matugenRaw, nil
 }
 
-func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byte, string, error) {
+func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byte, string, map[string]string, error) {
 	_ = writeApplyProgress("Generating dynamic palette", 0.14)
+	meta := map[string]string{}
 	mode := canonicalMode(cfg.Mode)
+	schemeCandidates := []string{cfg.SchemeType}
+	if strings.TrimSpace(cfg.SchemeType) == "" || strings.TrimSpace(cfg.SchemeType) == "scheme-tonal-spot" {
+		schemeCandidates = []string{"scheme-expressive", "scheme-tonal-spot"}
+	}
 	if mode == "auto" {
-		darkRaw, err := runMatugenImage(cfg.MatugenBin, wallpaper, "dark", cfg.SchemeType)
+		darkRaw, darkScheme, err := runMatugenImageCandidates(cfg.MatugenBin, wallpaper, "dark", schemeCandidates)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
-		lightRaw, err := runMatugenImage(cfg.MatugenBin, wallpaper, "light", cfg.SchemeType)
+		lightRaw, lightScheme, err := runMatugenImageCandidates(cfg.MatugenBin, wallpaper, "light", schemeCandidates)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 		darkRoles, err := itheme.ParseMatugenColors(darkRaw)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 		lightRoles, err := itheme.ParseMatugenColors(lightRaw)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
-		luma := wallpaperLuma(wallpaper)
-		if luma >= 0 {
-			if luma <= 0.42 {
-				return darkRaw, "dark", nil
-			}
-			if luma >= 0.58 {
-				return lightRaw, "light", nil
-			}
-		}
+		metrics := analyzeWallpaperLuma(wallpaper)
 		ds := readabilityScore(darkRoles)
 		ls := readabilityScore(lightRoles)
-		if ds >= ls {
-			return darkRaw, "dark", nil
+		chosenMode, reason := decideAutoMode(metrics, ds, ls)
+		meta["auto_mean_luma"] = fmt.Sprintf("%.4f", metrics.MeanLuma)
+		meta["auto_p10"] = fmt.Sprintf("%.4f", metrics.P10)
+		meta["auto_p50"] = fmt.Sprintf("%.4f", metrics.P50)
+		meta["auto_p90"] = fmt.Sprintf("%.4f", metrics.P90)
+		meta["auto_dark_ratio"] = fmt.Sprintf("%.4f", metrics.DarkPixelRatio)
+		meta["auto_bright_ratio"] = fmt.Sprintf("%.4f", metrics.BrightPixelRatio)
+		meta["auto_edge_luma"] = fmt.Sprintf("%.4f", metrics.EdgeWeightedLuma)
+		meta["auto_decision_reason"] = reason
+		meta["auto_dark_score"] = fmt.Sprintf("%.4f", ds)
+		meta["auto_light_score"] = fmt.Sprintf("%.4f", ls)
+		if chosenMode == "dark" {
+			meta["auto_selected_scheme"] = darkScheme
+			return darkRaw, "dark", meta, nil
 		}
-		return lightRaw, "light", nil
+		meta["auto_selected_scheme"] = lightScheme
+		return lightRaw, "light", meta, nil
 	}
-	raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, mode, cfg.SchemeType)
+	raw, selectedScheme, err := runMatugenImageCandidates(cfg.MatugenBin, wallpaper, mode, schemeCandidates)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return raw, mode, nil
+	meta["auto_selected_scheme"] = selectedScheme
+	return raw, mode, meta, nil
 }
 
 func readabilityScore(roles map[string]string) float64 {
@@ -348,6 +379,67 @@ func minFloat(v float64, more ...float64) float64 {
 		}
 	}
 	return m
+}
+
+func decideAutoMode(metrics autoDecisionMetrics, darkScore, lightScore float64) (string, string) {
+	darkDominant := (metrics.P50 < 0.38 && metrics.DarkPixelRatio > 0.55) || (metrics.MeanLuma < 0.42 && metrics.EdgeWeightedLuma < 0.48)
+	brightDominant := metrics.P50 > 0.62 && metrics.DarkPixelRatio < 0.35
+	if darkDominant {
+		return "dark", "dark-dominant"
+	}
+	if brightDominant {
+		return "light", "bright-dominant"
+	}
+	// Mixed scene tie-breaker: bias toward dark when scene has deep dark mass.
+	sceneBias := 0.35 * (metrics.DarkPixelRatio - metrics.BrightPixelRatio)
+	highlightPenalty := 0.18 * clamp01(metrics.BrightPixelRatio-0.12)
+	darkComposite := darkScore + sceneBias
+	lightComposite := lightScore - sceneBias - highlightPenalty
+	if darkComposite >= lightComposite {
+		return "dark", "score-bias-dark"
+	}
+	return "light", "score-bias-light"
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func runMatugenImageCandidates(bin, wallpaper, mode string, schemeCandidates []string) ([]byte, string, error) {
+	if len(schemeCandidates) == 0 {
+		schemeCandidates = []string{"scheme-tonal-spot"}
+	}
+	var lastErr error
+	for _, scheme := range schemeCandidates {
+		raw, err := runMatugenImage(bin, wallpaper, mode, scheme)
+		if err == nil {
+			return raw, scheme, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no matugen scheme candidates succeeded")
+	}
+	return nil, "", lastErr
+}
+
+func analyzeWallpaperLuma(path string) autoDecisionMetrics {
+	imgMetrics, ok := wallpaperImageMetrics(path)
+	if ok {
+		return imgMetrics
+	}
+	// Fallback for environments where decode fails.
+	l := wallpaperLuma(path)
+	if l < 0 {
+		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5}
+	}
+	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l}
 }
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
@@ -840,6 +932,120 @@ func wallpaperLuma(path string) float64 {
 	return -1
 }
 
+func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return autoDecisionMetrics{}, false
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return autoDecisionMetrics{}, false
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return autoDecisionMetrics{}, false
+	}
+	const target = 64
+	stepX := float64(w) / float64(target)
+	stepY := float64(h) / float64(target)
+	if stepX < 1 {
+		stepX = 1
+	}
+	if stepY < 1 {
+		stepY = 1
+	}
+
+	lumas := make([]float64, 0, target*target)
+	grid := make([][]float64, target)
+	for y := 0; y < target; y++ {
+		grid[y] = make([]float64, target)
+		sy := b.Min.Y + int((float64(y)+0.5)*stepY)
+		if sy >= b.Max.Y {
+			sy = b.Max.Y - 1
+		}
+		for x := 0; x < target; x++ {
+			sx := b.Min.X + int((float64(x)+0.5)*stepX)
+			if sx >= b.Max.X {
+				sx = b.Max.X - 1
+			}
+			r, g, bb, _ := img.At(sx, sy).RGBA()
+			// RGBA() returns 16-bit.
+			r8 := float64(r>>8) / 255.0
+			g8 := float64(g>>8) / 255.0
+			b8 := float64(bb>>8) / 255.0
+			l := 0.2126*r8 + 0.7152*g8 + 0.0722*b8
+			lumas = append(lumas, l)
+			grid[y][x] = l
+		}
+	}
+	if len(lumas) == 0 {
+		return autoDecisionMetrics{}, false
+	}
+	sum := 0.0
+	dark := 0
+	bright := 0
+	for _, l := range lumas {
+		sum += l
+		if l < 0.25 {
+			dark++
+		}
+		if l > 0.82 {
+			bright++
+		}
+	}
+	sort.Float64s(lumas)
+	mean := sum / float64(len(lumas))
+	p10 := percentileFromSorted(lumas, 0.10)
+	p50 := percentileFromSorted(lumas, 0.50)
+	p90 := percentileFromSorted(lumas, 0.90)
+
+	edgeWeight := 0.0
+	edgeSum := 0.0
+	for y := 1; y < target-1; y++ {
+		for x := 1; x < target-1; x++ {
+			gx := math.Abs(grid[y][x+1] - grid[y][x-1])
+			gy := math.Abs(grid[y+1][x] - grid[y-1][x])
+			grad := gx + gy
+			edgeWeight += grad
+			edgeSum += grad * grid[y][x]
+		}
+	}
+	edgeLuma := mean
+	if edgeWeight > 0 {
+		edgeLuma = edgeSum / edgeWeight
+	}
+	return autoDecisionMetrics{
+		MeanLuma:         mean,
+		P10:              p10,
+		P50:              p50,
+		P90:              p90,
+		DarkPixelRatio:   float64(dark) / float64(len(lumas)),
+		BrightPixelRatio: float64(bright) / float64(len(lumas)),
+		EdgeWeightedLuma: edgeLuma,
+	}, true
+}
+
+func percentileFromSorted(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if q <= 0 {
+		return sorted[0]
+	}
+	if q >= 1 {
+		return sorted[len(sorted)-1]
+	}
+	pos := q * float64(len(sorted)-1)
+	i := int(math.Floor(pos))
+	f := pos - float64(i)
+	if i >= len(sorted)-1 {
+		return sorted[len(sorted)-1]
+	}
+	return sorted[i]*(1-f) + sorted[i+1]*f
+}
+
 func getRoleOr(m map[string]string, key, fallback string) string {
 	if v := strings.TrimSpace(m[key]); v != "" {
 		return normalizeHexColor(v)
@@ -852,4 +1058,11 @@ func ternBool(v bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func ternf(ok bool, a, b float64) float64 {
+	if ok {
+		return a
+	}
+	return b
 }
