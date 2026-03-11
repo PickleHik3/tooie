@@ -70,6 +70,8 @@ tooie --cal
 tooie --clock --cal
 tooie apps
 tooie apps --refresh
+tooie theme compute --theme-source preset --preset-family catppuccin --preset-variant mocha
+tooie theme apply --theme-source wallpaper --mode auto --status-palette vibrant
 ```
 
 ## Installed Paths
@@ -105,6 +107,8 @@ It supports both `pkg` and `pacman`.
 ## CLI Notes
 
 - `tooie apps` caches launcher app discovery in `~/.cache/tooie/apps.json`.
+- `tooie theme apply` is the runtime theme engine for Termux, tmux, peaclock, and starship.
+- `~/.config/tooie/apply-material.sh` is a compatibility shim that forwards to `tooie theme apply`.
 - `tooie --clock` starts the low-CPU standalone clock widget.
 - `tooie --cal` starts the low-CPU standalone date/month calendar widget.
 - `tooie --clock --cal` starts the side-by-side clock + calendar widget view.

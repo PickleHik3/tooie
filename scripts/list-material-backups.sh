@@ -14,9 +14,19 @@ for d in "$BACKUP_ROOT"/*; do
   [ -d "$d" ] || continue
   bname="$(basename "$d")"
   if [ -f "$d/meta.env" ]; then
-    mode="$(sed -n 's/^mode=//p' "$d/meta.env" | head -n 1)"
+    source="$(sed -n 's/^theme_source=//p' "$d/meta.env" | head -n 1)"
+    mode="$(sed -n 's/^effective_mode=//p' "$d/meta.env" | head -n 1)"
+    palette="$(sed -n 's/^status_palette=//p' "$d/meta.env" | head -n 1)"
+    family="$(sed -n 's/^preset_family=//p' "$d/meta.env" | head -n 1)"
+    variant="$(sed -n 's/^preset_variant=//p' "$d/meta.env" | head -n 1)"
     wallpaper="$(sed -n 's/^wallpaper=//p' "$d/meta.env" | head -n 1)"
-    printf '%s  mode=%s  wallpaper=%s\n' "$bname" "${mode:-unknown}" "${wallpaper:-unknown}"
+    if [ -n "$family" ] || [ -n "$variant" ]; then
+      preset="${family:-unknown}:${variant:-unknown}"
+    else
+      preset="-"
+    fi
+    printf '%s  source=%s  mode=%s  palette=%s  preset=%s  wallpaper=%s\n' \
+      "$bname" "${source:-unknown}" "${mode:-unknown}" "${palette:-unknown}" "$preset" "${wallpaper:-unknown}"
   else
     printf '%s\n' "$bname"
   fi
