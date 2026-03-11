@@ -601,7 +601,7 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 		{"character", "vimcmd_symbol", fmt.Sprintf("\"[■](bold %s)\"", c[2])},
 		{"directory", "style", fmt.Sprintf("\"italic %s\"", c[4])},
 		{"directory", "repo_root_style", fmt.Sprintf("\"bold %s\"", c[2])},
-		{"cmd_duration", "format", fmt.Sprintf("\"[◄ \\$duration ](italic %s)\"", c[15])},
+		{"cmd_duration", "format", fmt.Sprintf("\"[◄ $duration ](italic %s)\"", c[15])},
 		{"git_branch", "symbol", fmt.Sprintf("\"[△](bold italic %s)\"", c[4])},
 		{"git_branch", "style", fmt.Sprintf("\"italic %s\"", c[4])},
 		{"git_status", "style", fmt.Sprintf("\"bold italic %s\"", c[2])},
