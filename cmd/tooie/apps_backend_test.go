@@ -214,12 +214,52 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 		mode:          "mocha",
 		presetFamily:  "catppuccin",
 		presetVariant: "mocha",
-		stylePreset:   "balanced",
+		profile:       "adaptive",
 	}
 
 	m.normalizeThemeSelection()
 
 	if m.mode != defaultMode {
 		t.Fatalf("mode = %q, want %q", m.mode, defaultMode)
+	}
+}
+
+func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
+	m := model{
+		themeSource: "wallpaper",
+		mode:        "auto",
+		profile:     "neon-night",
+		palette:     "vibrant",
+	}
+	args := m.applyArgs(false)
+	want := []string{
+		"--theme-source", "wallpaper",
+		"--status-palette", "vibrant",
+		"-m", "auto",
+		"--profile", "neon-night",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("applyArgs() = %v, want %v", args, want)
+	}
+}
+
+func TestANSIColorOptionsPreferSemanticChannel(t *testing.T) {
+	m := model{
+		selectedHexes: map[string]string{
+			"background":          "#101218",
+			"error":               "#ff5f5f",
+			"error_container":     "#93000a",
+			"secondary":           "#46d37b",
+			"secondary_container": "#1b6a3b",
+			"primary":             "#4f8dff",
+			"tertiary":            "#cf63ff",
+		},
+	}
+	opts := m.colorPickerOptions("ansi_red")
+	if len(opts) < 2 {
+		t.Fatalf("expected ansi red options beyond auto, got %v", opts)
+	}
+	if strings.ToLower(strings.TrimSpace(opts[1].Hex)) != "#ff5f5f" {
+		t.Fatalf("expected first semantic red option to be error color, got %#v", opts[1])
 	}
 }

@@ -20,7 +20,7 @@ func TestComputeContrastInvariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPresetRoles() error: %v", err)
 	}
-	res, err := Compute(roles, Options{Mode: "dark", StatusPalette: "default", StylePreset: "balanced"})
+	res, err := Compute(roles, Options{Mode: "dark", StatusPalette: "default", Profile: "adaptive"})
 	if err != nil {
 		t.Fatalf("Compute() error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestComputeDarkModeForcesLightForegroundPolarity(t *testing.T) {
 		"tertiary":      "#cf63ff",
 		"error":         "#ef4444",
 	}
-	res, err := Compute(roles, Options{Mode: "dark", StatusPalette: "default", StylePreset: "balanced"})
+	res, err := Compute(roles, Options{Mode: "dark", StatusPalette: "default", Profile: "adaptive"})
 	if err != nil {
 		t.Fatalf("Compute() error: %v", err)
 	}

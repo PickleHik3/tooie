@@ -33,14 +33,14 @@ var (
 const (
 	defaultMode    = "auto"
 	defaultPalette = "default"
-	defaultPreset  = "balanced"
+	defaultProfile = "adaptive"
 	defaultSource  = "wallpaper"
 	pageTheme      = 0
 	pageHome       = 1
 )
 
 var modePresets = []string{"auto", "dark", "light"}
-var stylePresets = []string{"balanced", "vivid", "mellow", "punchy"}
+var profilePresets = []string{"adaptive", "soft-pastel", "studio-dark", "neon-night", "warm-retro", "vivid-noir", "arctic-calm"}
 var themeSources = []string{"wallpaper", "preset"}
 var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84", "dracula", "gruvbox", "nord"}
 var presetVariantsByFamily = map[string][]string{
@@ -178,7 +178,7 @@ type model struct {
 	customIndex      int
 	mode             string
 	palette          string
-	stylePreset      string
+	profile          string
 	themeSource      string
 	presetFamily     string
 	presetVariant    string
@@ -264,7 +264,7 @@ func initialModel() model {
 		uptimeText:    "--",
 		mode:          defaultMode,
 		palette:       defaultPalette,
-		stylePreset:   defaultPreset,
+		profile:       defaultProfile,
 		themeSource:   defaultSource,
 		presetFamily:  presetFamilyOrder[0],
 		presetVariant: presetVariantsByFamily[presetFamilyOrder[0]][0],
@@ -354,7 +354,7 @@ func initialMiniModel(showClock, showCal bool) model {
 		uptimeText:    "--",
 		mode:          defaultMode,
 		palette:       defaultPalette,
-		stylePreset:   defaultPreset,
+		profile:       defaultProfile,
 		themeSource:   defaultSource,
 		presetFamily:  presetFamilyOrder[0],
 		presetVariant: presetVariantsByFamily[presetFamilyOrder[0]][0],
@@ -400,8 +400,10 @@ func (m *model) loadThemeStateFromBackups() {
 	if v := strings.TrimSpace(meta["status_palette"]); v != "" {
 		m.palette = v
 	}
-	if v := strings.TrimSpace(meta["style_preset"]); v != "" {
-		m.stylePreset = v
+	if v := strings.TrimSpace(meta["profile"]); v != "" {
+		m.profile = v
+	} else if v := strings.TrimSpace(meta["style_preset"]); v != "" {
+		m.profile = canonicalProfile(v)
 	}
 	if v := strings.TrimSpace(meta["preset_family"]); v != "" {
 		m.presetFamily = v
@@ -438,15 +440,15 @@ func (m *model) loadThemeStateFromBackups() {
 
 func (m *model) normalizeThemeSelection() {
 	m.mode = canonicalMode(m.mode)
-	m.stylePreset = canonicalStylePreset(m.stylePreset)
+	m.profile = canonicalProfile(m.profile)
 	if !contains(themeSources, m.themeSource) {
 		m.themeSource = defaultSource
 	}
 	if !contains(modePresets, m.mode) {
 		m.mode = defaultMode
 	}
-	if !contains(stylePresets, m.stylePreset) {
-		m.stylePreset = defaultPreset
+	if !contains(profilePresets, m.profile) {
+		m.profile = defaultProfile
 	}
 	if !contains(presetFamilyOrder, m.presetFamily) {
 		m.presetFamily = presetFamilyOrder[0]
@@ -474,18 +476,28 @@ func canonicalMode(mode string) string {
 	}
 }
 
-func canonicalStylePreset(name string) string {
+func canonicalProfile(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "", "default", "balanced":
-		return "balanced"
-	case "vivid":
-		return "vivid"
-	case "mellow", "friendly", "positive":
-		return "mellow"
-	case "punchy", "playful", "energetic", "creative":
-		return "punchy"
+	case "", "adaptive":
+		return "adaptive"
+	case "soft-pastel", "studio-dark", "neon-night", "warm-retro", "vivid-noir", "arctic-calm":
+		return strings.ToLower(strings.TrimSpace(name))
+	case "catppuccin":
+		return "soft-pastel"
+	case "onedark":
+		return "studio-dark"
+	case "tokyonight":
+		return "neon-night"
+	case "gruvbox":
+		return "warm-retro"
+	case "dracula":
+		return "vivid-noir"
+	case "nord":
+		return "arctic-calm"
+	case "default", "balanced", "vivid", "mellow", "friendly", "positive", "punchy", "playful", "energetic", "creative":
+		return "adaptive"
 	default:
-		return name
+		return strings.ToLower(strings.TrimSpace(name))
 	}
 }
 
@@ -1018,7 +1030,7 @@ func (m model) settings() []settingItem {
 	items := []settingItem{
 		{Label: "Apply Theme", Target: "apply"},
 		{Label: "Update Colors", Target: "preview"},
-		{Label: "Theme Source: " + displayThemeSource(m.themeSource), Target: "theme_source"},
+		{Label: "Theme Strategy: " + displayThemeSource(m.themeSource), Target: "theme_source"},
 	}
 	if m.themeSource == "preset" {
 		items = append(items,
@@ -1027,8 +1039,8 @@ func (m model) settings() []settingItem {
 		)
 	} else {
 		items = append(items,
-			settingItem{Label: "Mode: " + displayMode(m.mode), Target: "mode"},
-			settingItem{Label: "Style Preset: " + displayStylePreset(m.stylePreset), Target: "style_preset"},
+			settingItem{Label: "Adaptation Mode: " + displayMode(m.mode), Target: "mode"},
+			settingItem{Label: "Dynamic Profile: " + displayProfile(m.profile), Target: "profile"},
 		)
 	}
 	items = append(items,
@@ -1060,8 +1072,8 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	case "mode":
 		m.mode = nextMode(m.mode)
 		return m, nil
-	case "style_preset":
-		m.stylePreset = nextStylePreset(m.stylePreset)
+	case "profile":
+		m.profile = nextProfile(m.profile)
 		return m, nil
 	case "preset_family":
 		m.presetFamily = nextPresetFamily(m.presetFamily)
@@ -1689,6 +1701,24 @@ func (m model) settingsBlock(limit int) string {
 		}
 		lines = append(lines, style.Render(prefix+s))
 	}
+	if len(lines) < limit {
+		lines = append(lines, "")
+	}
+	if m.themeSource == "preset" {
+		if len(lines) < limit {
+			lines = append(lines, "  Exact preset palette;")
+		}
+		if len(lines) < limit {
+			lines = append(lines, "  wallpaper is ignored.")
+		}
+	} else {
+		if len(lines) < limit {
+			lines = append(lines, "  Wallpaper-derived palette,")
+		}
+		if len(lines) < limit {
+			lines = append(lines, "  then shaped by profile.")
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -1697,7 +1727,7 @@ func (m model) detailsBlock(totalWidth int) string {
 		headerChip("Details", "10"),
 		"",
 		headerChip("Current Theme", "8"),
-		"  source: " + displayThemeSource(m.themeSource),
+		"  strategy: " + displayThemeSource(m.themeSource),
 		"  status palette: " + m.palette,
 	}
 	if m.themeSource == "preset" {
@@ -1709,7 +1739,7 @@ func (m model) detailsBlock(totalWidth int) string {
 	} else {
 		left = append(left,
 			"  mode: "+displayMode(m.mode),
-			"  style preset: "+displayStylePreset(m.stylePreset),
+			"  profile: "+displayProfile(m.profile),
 		)
 	}
 
@@ -1912,8 +1942,10 @@ func (m model) interactionBlock(limit int) string {
 					line += " {" + v + "}"
 				}
 				if b.Meta["theme_source"] != "preset" {
-					if v, ok := b.Meta["style_preset"]; ok && v != "" {
+					if v, ok := b.Meta["profile"]; ok && v != "" {
 						line += " (" + v + ")"
+					} else if v, ok := b.Meta["style_preset"]; ok && v != "" {
+						line += " (" + canonicalProfile(v) + ")"
 					}
 				}
 				lines = append(lines, line)
@@ -1986,11 +2018,7 @@ func headerChip(text, color string) string {
 func (m model) colorPickerOptions(target string) []colorOption {
 	opts := []colorOption{{Label: "Auto", Hex: ""}}
 	if strings.HasPrefix(target, "ansi_") {
-		family := strings.TrimPrefix(target, "ansi_")
-		familyOpts := m.familyColorOptions(family)
-		if len(familyOpts) > 0 {
-			return append(opts, familyOpts...)
-		}
+		return append(opts, m.ansiColorOptions(target)...)
 	}
 	order := []string{"primary", "secondary", "tertiary", "error", "on_surface", "surface", "outline", "inverse_primary", "primary_container", "secondary_container", "tertiary_container", "error_container"}
 	seen := map[string]bool{}
@@ -2006,6 +2034,90 @@ func (m model) colorPickerOptions(target string) []colorOption {
 		})
 	}
 	return opts
+}
+
+func (m model) ansiColorOptions(target string) []colorOption {
+	type pair struct {
+		role  string
+		label string
+	}
+	priority := map[string][]pair{
+		"ansi_red": {
+			{"error", "error"},
+			{"error_container", "error bg"},
+			{"primary", "accent"},
+			{"tertiary", "accent alt"},
+		},
+		"ansi_green": {
+			{"secondary", "secondary"},
+			{"secondary_container", "secondary bg"},
+			{"primary", "accent"},
+			{"tertiary", "accent alt"},
+		},
+		"ansi_yellow": {
+			{"tertiary", "tertiary"},
+			{"tertiary_container", "tertiary bg"},
+			{"secondary", "secondary"},
+			{"primary", "primary"},
+		},
+		"ansi_blue": {
+			{"primary", "primary"},
+			{"inverse_primary", "inverse primary"},
+			{"secondary", "secondary"},
+			{"tertiary", "tertiary"},
+		},
+		"ansi_magenta": {
+			{"tertiary", "tertiary"},
+			{"error", "error"},
+			{"primary", "primary"},
+			{"secondary", "secondary"},
+		},
+		"ansi_cyan": {
+			{"secondary", "secondary"},
+			{"secondary_container", "secondary bg"},
+			{"primary", "primary"},
+			{"inverse_primary", "inverse primary"},
+		},
+	}
+
+	bg := strings.ToLower(strings.TrimSpace(m.selectedHexes["background"]))
+	if bg == "" {
+		bg = "#11131c"
+	}
+	seen := map[string]bool{}
+	out := make([]colorOption, 0, 16)
+	add := func(label, hex string) {
+		hex = strings.ToLower(strings.TrimSpace(hex))
+		if hex == "" || seen[hex] {
+			return
+		}
+		if contrastRatioHex(hex, bg) < 2.4 {
+			return
+		}
+		seen[hex] = true
+		out = append(out, colorOption{Label: label, Hex: hex})
+	}
+
+	for _, item := range priority[target] {
+		if hex := strings.TrimSpace(m.selectedHexes[item.role]); hex != "" {
+			add(item.label, hex)
+		}
+	}
+	// Build channel-specific derived tones so picker stays meaningful even when extracted roles are sparse.
+	for _, item := range priority[target] {
+		base := strings.TrimSpace(m.selectedHexes[item.role])
+		if base == "" {
+			continue
+		}
+		add(item.label+" vivid", blendHexColor(base, "#ffffff", 0.12))
+		add(item.label+" deep", blendHexColor(base, "#000000", 0.16))
+	}
+
+	family := strings.TrimPrefix(target, "ansi_")
+	for _, opt := range m.familyColorOptions(family) {
+		add(opt.Label, opt.Hex)
+	}
+	return out
 }
 
 func (m model) colorOptionIndexForHex(target, hex string) int {
@@ -2053,7 +2165,7 @@ func (m model) colorPickerBlock(limit int) string {
 		label := "auto"
 		if opt.Hex != "" {
 			swatch := lipgloss.NewStyle().Background(lipgloss.Color(opt.Hex)).Render("  ")
-			label = swatch
+			label = swatch + " " + opt.Label
 		}
 		lines = append(lines, style.Render(prefix+label))
 	}
@@ -2423,7 +2535,7 @@ func (m model) applyArgs(includeOverrides bool) []string {
 	if m.themeSource == "preset" {
 		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
 	} else {
-		args = append(args, "-m", m.mode, "--style-preset", m.stylePreset)
+		args = append(args, "-m", m.mode, "--profile", m.profile)
 	}
 	if includeOverrides {
 		if strings.TrimSpace(m.textColor) != "" {
@@ -2565,16 +2677,16 @@ func (m model) startApply(label string, includeOverrides bool, previewOnly bool)
 	return m, tea.Batch(tickApply(), runApplyCommand(args, label, cacheKey, reuseBackup, previewOnly))
 }
 
-func nextStylePreset(cur string) string {
-	if len(stylePresets) == 0 {
+func nextProfile(cur string) string {
+	if len(profilePresets) == 0 {
 		return cur
 	}
-	for i, p := range stylePresets {
+	for i, p := range profilePresets {
 		if p == cur {
-			return stylePresets[(i+1)%len(stylePresets)]
+			return profilePresets[(i+1)%len(profilePresets)]
 		}
 	}
-	return stylePresets[0]
+	return profilePresets[0]
 }
 
 func nextMode(cur string) string {
@@ -2640,20 +2752,26 @@ func nextPresetVariant(family, cur string) string {
 	return variants[0]
 }
 
-func displayStylePreset(name string) string {
-	switch canonicalStylePreset(name) {
-	case "balanced":
-		return "Balanced"
-	case "vivid":
-		return "Vivid"
-	case "mellow":
-		return "Mellow"
-	case "punchy":
-		return "Punchy"
+func displayProfile(name string) string {
+	switch canonicalProfile(name) {
+	case "adaptive":
+		return "Auto"
+	case "soft-pastel":
+		return "Soft Pastel"
+	case "studio-dark":
+		return "Studio Dark"
+	case "neon-night":
+		return "Neon Night"
+	case "warm-retro":
+		return "Warm Retro"
+	case "vivid-noir":
+		return "Vivid Noir"
+	case "arctic-calm":
+		return "Arctic Calm"
 	default:
 		name = strings.TrimSpace(name)
-		if name == "" {
-			return "Balanced"
+		if name == "" || name == "default" {
+			return "Auto"
 		}
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
@@ -2675,9 +2793,9 @@ func displayMode(mode string) string {
 func displayThemeSource(source string) string {
 	switch strings.TrimSpace(source) {
 	case "preset":
-		return "Preset"
+		return "Fixed Preset"
 	default:
-		return "Wallpaper"
+		return "Dynamic (Wallpaper)"
 	}
 }
 
@@ -2698,7 +2816,7 @@ func displayPresetFamily(family string) string {
 	case "nord":
 		return "Nord"
 	default:
-		return displayStylePreset(family)
+		return displayProfile(family)
 	}
 }
 
@@ -2707,7 +2825,7 @@ func displayPresetVariant(variant string) string {
 	case "default":
 		return "Default"
 	default:
-		return displayStylePreset(variant)
+		return displayProfile(variant)
 	}
 }
 

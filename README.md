@@ -15,7 +15,7 @@ The TUI is split into 2 pages:
 - First page includes the clock, live system stats and an android app launcher.
   - Pressing `/` brings up app search. From there you can press `Ctrl+p` to pin the highlighted app to the home screen.
   - Pinned apps can be launched directly by pressing their respective number keys `1-7`.
-- Second page includes color scheme controls. It uses `matugen` to generate color palettes from the terminal background situated at `~/.termux/background/`. Optionally, you can override some of the extracted colors and specify various pre-defined styles as well as preset themes.
+- Second page includes color scheme controls. It uses `matugen` to generate color palettes from the terminal background situated at `~/.termux/background/`. Optionally, you can override extracted colors and choose adaptive or curated profiles (Catppuccin/OneDark/TokyoNight/Gruvbox/Dracula/Nord), as well as fixed preset themes.
 
 ## Screenshots
 

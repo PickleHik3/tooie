@@ -33,7 +33,7 @@ type themeApplyConfig struct {
 	PresetVariant string
 	MatugenBin    string
 	StatusPalette string
-	StylePreset   string
+	Profile       string
 	TextColor     string
 	CursorColor   string
 	PreviewOnly   bool
@@ -127,7 +127,9 @@ func runThemeApplyCommand(args []string) int {
 	meta["text_color_override"] = strings.TrimSpace(cfg.TextColor)
 	meta["cursor_color_override"] = strings.TrimSpace(cfg.CursorColor)
 	meta["status_palette"] = cfg.StatusPalette
-	meta["style_preset"] = canonicalStylePreset(cfg.StylePreset)
+	if cfg.ThemeSource != "preset" {
+		meta["profile"] = canonicalProfile(cfg.Profile)
+	}
 	meta["ansi_red_override"] = strings.TrimSpace(cfg.AnsiRed)
 	meta["ansi_green_override"] = strings.TrimSpace(cfg.AnsiGreen)
 	meta["ansi_yellow_override"] = strings.TrimSpace(cfg.AnsiYellow)
@@ -198,6 +200,8 @@ type autoDecisionMetrics struct {
 	DarkPixelRatio   float64
 	BrightPixelRatio float64
 	EdgeWeightedLuma float64
+	MeanSat          float64
+	P90Sat           float64
 }
 
 func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload, []byte, error) {
@@ -259,7 +263,7 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	computed, err := itheme.Compute(roles, itheme.Options{
 		Source:         itheme.Source(cfg.ThemeSource),
 		Mode:           effectiveMode,
-		StylePreset:    cfg.StylePreset,
+		Profile:        cfg.Profile,
 		StatusPalette:  cfg.StatusPalette,
 		TextOverride:   cfg.TextColor,
 		CursorOverride: cfg.CursorColor,
@@ -293,54 +297,43 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	_ = writeApplyProgress("Generating dynamic palette", 0.14)
 	meta := map[string]string{}
 	mode := canonicalMode(cfg.Mode)
-	schemeCandidates := []string{cfg.SchemeType}
-	if strings.TrimSpace(cfg.SchemeType) == "" || strings.TrimSpace(cfg.SchemeType) == "scheme-tonal-spot" {
-		schemeCandidates = []string{"scheme-expressive", "scheme-tonal-spot"}
-	}
-	if mode == "auto" {
-		darkRaw, darkScheme, err := runMatugenImageCandidates(cfg.MatugenBin, wallpaper, "dark", schemeCandidates)
-		if err != nil {
-			return nil, "", nil, err
-		}
-		lightRaw, lightScheme, err := runMatugenImageCandidates(cfg.MatugenBin, wallpaper, "light", schemeCandidates)
-		if err != nil {
-			return nil, "", nil, err
-		}
-		darkRoles, err := itheme.ParseMatugenColors(darkRaw)
-		if err != nil {
-			return nil, "", nil, err
-		}
-		lightRoles, err := itheme.ParseMatugenColors(lightRaw)
-		if err != nil {
-			return nil, "", nil, err
-		}
-		metrics := analyzeWallpaperLuma(wallpaper)
-		ds := readabilityScore(darkRoles)
-		ls := readabilityScore(lightRoles)
-		chosenMode, reason := decideAutoMode(metrics, ds, ls)
-		meta["auto_mean_luma"] = fmt.Sprintf("%.4f", metrics.MeanLuma)
-		meta["auto_p10"] = fmt.Sprintf("%.4f", metrics.P10)
-		meta["auto_p50"] = fmt.Sprintf("%.4f", metrics.P50)
-		meta["auto_p90"] = fmt.Sprintf("%.4f", metrics.P90)
-		meta["auto_dark_ratio"] = fmt.Sprintf("%.4f", metrics.DarkPixelRatio)
-		meta["auto_bright_ratio"] = fmt.Sprintf("%.4f", metrics.BrightPixelRatio)
-		meta["auto_edge_luma"] = fmt.Sprintf("%.4f", metrics.EdgeWeightedLuma)
-		meta["auto_decision_reason"] = reason
-		meta["auto_dark_score"] = fmt.Sprintf("%.4f", ds)
-		meta["auto_light_score"] = fmt.Sprintf("%.4f", ls)
-		if chosenMode == "dark" {
-			meta["auto_selected_scheme"] = darkScheme
-			return darkRaw, "dark", meta, nil
-		}
-		meta["auto_selected_scheme"] = lightScheme
-		return lightRaw, "light", meta, nil
-	}
-	raw, selectedScheme, err := runMatugenImageCandidates(cfg.MatugenBin, wallpaper, mode, schemeCandidates)
+	metrics := analyzeWallpaperLuma(wallpaper)
+	candidates, err := collectMatugenCandidates(cfg, wallpaper, mode, metrics)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	meta["auto_selected_scheme"] = selectedScheme
-	return raw, mode, meta, nil
+	if len(candidates) == 0 {
+		return nil, "", nil, fmt.Errorf("no matugen candidates evaluated")
+	}
+	best := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.Score > best.Score {
+			best = c
+		}
+	}
+
+	meta["auto_mean_luma"] = fmt.Sprintf("%.4f", metrics.MeanLuma)
+	meta["auto_p10"] = fmt.Sprintf("%.4f", metrics.P10)
+	meta["auto_p50"] = fmt.Sprintf("%.4f", metrics.P50)
+	meta["auto_p90"] = fmt.Sprintf("%.4f", metrics.P90)
+	meta["auto_dark_ratio"] = fmt.Sprintf("%.4f", metrics.DarkPixelRatio)
+	meta["auto_bright_ratio"] = fmt.Sprintf("%.4f", metrics.BrightPixelRatio)
+	meta["auto_edge_luma"] = fmt.Sprintf("%.4f", metrics.EdgeWeightedLuma)
+	meta["auto_mean_sat"] = fmt.Sprintf("%.4f", metrics.MeanSat)
+	meta["auto_p90_sat"] = fmt.Sprintf("%.4f", metrics.P90Sat)
+	meta["auto_candidate_count"] = fmt.Sprintf("%d", len(candidates))
+	sceneClass, modeGate := autoSceneDecision(metrics, mode)
+	meta["auto_scene_class"] = sceneClass
+	meta["auto_mode_gate"] = modeGate
+	meta["auto_decision_reason"] = "deep-score"
+	meta["auto_selected_scheme"] = best.Scheme
+	meta["auto_selected_source_index"] = fmt.Sprintf("%d", best.SourceIndex)
+	meta["auto_selected_score"] = fmt.Sprintf("%.4f", best.Score)
+	meta["auto_selected_readability"] = fmt.Sprintf("%.4f", best.Readability)
+	meta["auto_selected_ansi_delta"] = fmt.Sprintf("%.4f", ansiSeparationScore(best.Roles))
+	meta["auto_selected_scene_fit"] = fmt.Sprintf("%.4f", sceneFitScore(best.Mode, metrics))
+
+	return best.Raw, best.Mode, meta, nil
 }
 
 func readabilityScore(roles map[string]string) float64 {
@@ -381,24 +374,183 @@ func minFloat(v float64, more ...float64) float64 {
 	return m
 }
 
-func decideAutoMode(metrics autoDecisionMetrics, darkScore, lightScore float64) (string, string) {
-	darkDominant := (metrics.P50 < 0.38 && metrics.DarkPixelRatio > 0.55) || (metrics.MeanLuma < 0.42 && metrics.EdgeWeightedLuma < 0.48)
-	brightDominant := metrics.P50 > 0.62 && metrics.DarkPixelRatio < 0.35
-	if darkDominant {
-		return "dark", "dark-dominant"
+type matugenCandidate struct {
+	Raw         []byte
+	Mode        string
+	Scheme      string
+	SourceIndex int
+	Roles       map[string]string
+	Readability float64
+	Score       float64
+}
+
+func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metrics autoDecisionMetrics) ([]matugenCandidate, error) {
+	schemes := pickSchemeCandidates(cfg.SchemeType)
+	modes := autoCandidateModes(mode, metrics)
+	indices := []int{0, 1, 2, 3, 4}
+	candidates := make([]matugenCandidate, 0, len(modes)*len(schemes)*len(indices))
+	var lastErr error
+	for _, m := range modes {
+		for _, s := range schemes {
+			for _, idx := range indices {
+				raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, m, s, idx)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				roles, err := itheme.ParseMatugenColors(raw)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				readability := readabilityScore(roles)
+				c := matugenCandidate{
+					Raw:         raw,
+					Mode:        m,
+					Scheme:      s,
+					SourceIndex: idx,
+					Roles:       roles,
+					Readability: readability,
+				}
+				c.Score = scoreCandidate(c, metrics)
+				candidates = append(candidates, c)
+			}
+		}
 	}
-	if brightDominant {
-		return "light", "bright-dominant"
+	if len(candidates) == 0 {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("failed to evaluate any matugen candidates")
+		}
+		return nil, lastErr
 	}
-	// Mixed scene tie-breaker: bias toward dark when scene has deep dark mass.
-	sceneBias := 0.35 * (metrics.DarkPixelRatio - metrics.BrightPixelRatio)
-	highlightPenalty := 0.18 * clamp01(metrics.BrightPixelRatio-0.12)
-	darkComposite := darkScore + sceneBias
-	lightComposite := lightScore - sceneBias - highlightPenalty
-	if darkComposite >= lightComposite {
-		return "dark", "score-bias-dark"
+	return candidates, nil
+}
+
+func autoCandidateModes(mode string, metrics autoDecisionMetrics) []string {
+	if mode != "auto" {
+		return []string{mode}
 	}
-	return "light", "score-bias-light"
+	if darkDominantScene(metrics) {
+		return []string{"dark"}
+	}
+	if brightDominantScene(metrics) {
+		return []string{"light"}
+	}
+	return []string{"dark", "light"}
+}
+
+func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string) {
+	if mode != "auto" {
+		return mode, "explicit-" + mode
+	}
+	if darkDominantScene(metrics) {
+		return "dark", "forced-dark"
+	}
+	if brightDominantScene(metrics) {
+		return "bright", "forced-light"
+	}
+	return "mixed", "dual"
+}
+
+func pickSchemeCandidates(schemeType string) []string {
+	s := strings.TrimSpace(schemeType)
+	if s != "" {
+		return []string{s}
+	}
+	return []string{"scheme-expressive", "scheme-tonal-spot", "scheme-fidelity", "scheme-content"}
+}
+
+func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
+	bg := getRoleOr(c.Roles, "background", "#1a1b26")
+	fg := getRoleOr(c.Roles, "on_background", "#c0caf5")
+	fgContrast := contrastRatioHex(fg, bg)
+	if fgContrast < 4.5 {
+		return -1000 + fgContrast
+	}
+	accentMin := minFloat(
+		contrastRatioHex(getRoleOr(c.Roles, "primary", "#7aa2f7"), bg),
+		contrastRatioHex(getRoleOr(c.Roles, "secondary", "#7dcfff"), bg),
+		contrastRatioHex(getRoleOr(c.Roles, "tertiary", "#bb9af7"), bg),
+		contrastRatioHex(getRoleOr(c.Roles, "error", "#ff5f5f"), bg),
+	)
+	if accentMin < 3.0 {
+		return -800 + accentMin
+	}
+
+	sceneFit := sceneFitScore(c.Mode, metrics)
+	ansiSep := ansiSeparationScore(c.Roles)
+	modePenalty := 0.0
+	if darkDominantScene(metrics) && c.Mode == "light" {
+		modePenalty += 2.4
+	}
+	if brightDominantScene(metrics) && c.Mode == "dark" {
+		modePenalty += 2.0
+	}
+	sourcePenalty := 0.0
+	if c.SourceIndex > 0 {
+		sourcePenalty = 0.22 * float64(c.SourceIndex)
+		if metrics.P90Sat > 0.45 {
+			sourcePenalty *= 0.65
+		}
+	}
+	schemeBias := 0.0
+	switch c.Scheme {
+	case "scheme-expressive":
+		schemeBias = 0.22 + (0.35 * clamp01(metrics.P90Sat-0.32))
+	case "scheme-fidelity", "scheme-content":
+		schemeBias = 0.16 + (0.28 * clamp01(metrics.P90Sat-0.28))
+	case "scheme-tonal-spot":
+		schemeBias = 0.18 + (0.25 * clamp01(0.40-metrics.P90Sat))
+	}
+	return (c.Readability * 1.85) + (fgContrast * 0.9) + (accentMin * 0.85) + (ansiSep * 0.8) + sceneFit + schemeBias - sourcePenalty - modePenalty
+}
+
+func sceneFitScore(mode string, metrics autoDecisionMetrics) float64 {
+	darkMass := 0.55*metrics.DarkPixelRatio + 0.25*clamp01(0.52-metrics.P50) + 0.20*clamp01(0.50-metrics.EdgeWeightedLuma)
+	brightMass := 0.55*metrics.BrightPixelRatio + 0.25*clamp01(metrics.P50-0.48) + 0.20*clamp01(metrics.EdgeWeightedLuma-0.45)
+	if mode == "dark" {
+		return darkMass - (0.55 * brightMass)
+	}
+	return brightMass - (0.55 * darkMass)
+}
+
+func darkDominantScene(metrics autoDecisionMetrics) bool {
+	return (metrics.DarkPixelRatio > 0.45 && (metrics.P50 < 0.50 || metrics.MeanLuma < 0.48)) ||
+		(metrics.P50 < 0.40 && metrics.DarkPixelRatio > 0.52) ||
+		(metrics.MeanLuma < 0.43 && metrics.EdgeWeightedLuma < 0.50)
+}
+
+func brightDominantScene(metrics autoDecisionMetrics) bool {
+	return (metrics.BrightPixelRatio > 0.28 && (metrics.P50 > 0.56 || metrics.MeanLuma > 0.56)) ||
+		(metrics.P50 > 0.60 && metrics.DarkPixelRatio < 0.36) ||
+		(metrics.MeanLuma > 0.63 && metrics.BrightPixelRatio > 0.22)
+}
+
+func ansiSeparationScore(roles map[string]string) float64 {
+	accents := []string{
+		getRoleOr(roles, "error", "#ff5f5f"),
+		getRoleOr(roles, "secondary", "#7dcfff"),
+		getRoleOr(roles, "tertiary", "#bb9af7"),
+		getRoleOr(roles, "primary", "#7aa2f7"),
+	}
+	sum := 0.0
+	count := 0
+	for i := 0; i < len(accents); i++ {
+		ha := hueFromHex(accents[i])
+		for j := i + 1; j < len(accents); j++ {
+			hb := hueFromHex(accents[j])
+			d := math.Abs(ha - hb)
+			if d > 180 {
+				d = 360 - d
+			}
+			sum += d / 180.0
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
 }
 
 func clamp01(v float64) float64 {
@@ -411,24 +563,6 @@ func clamp01(v float64) float64 {
 	return v
 }
 
-func runMatugenImageCandidates(bin, wallpaper, mode string, schemeCandidates []string) ([]byte, string, error) {
-	if len(schemeCandidates) == 0 {
-		schemeCandidates = []string{"scheme-tonal-spot"}
-	}
-	var lastErr error
-	for _, scheme := range schemeCandidates {
-		raw, err := runMatugenImage(bin, wallpaper, mode, scheme)
-		if err == nil {
-			return raw, scheme, nil
-		}
-		lastErr = err
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no matugen scheme candidates succeeded")
-	}
-	return nil, "", lastErr
-}
-
 func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 	imgMetrics, ok := wallpaperImageMetrics(path)
 	if ok {
@@ -437,9 +571,9 @@ func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 	// Fallback for environments where decode fails.
 	l := wallpaperLuma(path)
 	if l < 0 {
-		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5}
+		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5, MeanSat: 0.35, P90Sat: 0.55}
 	}
-	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l}
+	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l, MeanSat: 0.40, P90Sat: 0.60}
 }
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
@@ -450,7 +584,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		PresetFamily:  "catppuccin",
 		PresetVariant: "mocha",
 		StatusPalette: "default",
-		StylePreset:   "balanced",
+		Profile:       "adaptive",
 	}
 	fs := flag.NewFlagSet("theme apply", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -466,7 +600,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.TextColor, "text-color", "", "")
 	fs.StringVar(&cfg.CursorColor, "cursor-color", "", "")
 	fs.StringVar(&cfg.StatusPalette, "status-palette", cfg.StatusPalette, "")
-	fs.StringVar(&cfg.StylePreset, "style-preset", cfg.StylePreset, "")
+	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "")
 	fs.BoolVar(&cfg.PreviewOnly, "preview-only", false, "")
 	fs.StringVar(&cfg.ReuseBackupID, "reuse-backup", "", "")
 	fs.StringVar(&cfg.AnsiRed, "ansi-red", "", "")
@@ -490,7 +624,10 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	if cfg.StatusPalette != "default" && cfg.StatusPalette != "vibrant" {
 		return cfg, fmt.Errorf("invalid status palette: %s", cfg.StatusPalette)
 	}
-	cfg.StylePreset = canonicalStylePreset(cfg.StylePreset)
+	cfg.Profile = canonicalProfile(cfg.Profile)
+	if !contains(profilePresets, cfg.Profile) {
+		return cfg, fmt.Errorf("invalid profile: %s", cfg.Profile)
+	}
 	for _, item := range []struct {
 		v    string
 		name string
@@ -614,24 +751,57 @@ color21=%s
 
 func renderTmuxBlock(payload computedPayload) string {
 	c := payload.Colors
-	statusLeftFG := ensureReadableTextColor(c[4], payload.Foreground, payload.Background)
-	modeFG := ensureReadableTextColor(c[2], payload.Background, payload.Foreground)
+	tmuxRamp := tmuxGradientRamp(payload)
+	sessionBG := avoidRedHue(blendHexColor(tmuxRamp[3], payload.Background, 0.18), tmuxRamp[5], getRoleOr(payload.Roles, "primary", payload.Colors[4]), payload.Foreground)
+	sessionFG := ensureReadableTextColor(sessionBG, payload.Foreground, "#ffffff")
+	prefixBG := nonBlackStatusColor(
+		avoidRedHue(
+			blendHexColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), "#000000", 0.24),
+			"#2b7fff",
+			"#8856ff",
+			payload.Foreground,
+		),
+		payload.Foreground,
+	)
+	prefixFG := ensureReadableTextColor(prefixBG, "#ffffff", "#000000")
+	copyBG := nonBlackStatusColor(
+		avoidRedHue(
+			blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#000000", 0.18),
+			"#00a86b",
+			"#00b8d9",
+			payload.Foreground,
+		),
+		payload.Foreground,
+	)
+	copyFG := ensureReadableTextColor(copyBG, "#ffffff", "#000000")
+	modeFG := ensureReadableTextColor(c[2], payload.Foreground, payload.Background)
+	windowInactiveBG := blendHexColor(tmuxRamp[4], payload.Background, 0.62)
+	windowInactiveFG := ensureReadableTextColor(windowInactiveBG, getRoleOr(payload.Roles, "on_surface_variant", c[14]), c[15])
+	windowActiveBG := tmuxRamp[7]
+	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, "#ffffff"), payload.Foreground)
 	statusPalette := strings.TrimSpace(payload.Meta["status_palette"])
 	if statusPalette == "" {
 		statusPalette = "default"
 	}
+	weatherColor := avoidRedHue(nonBlackStatusColor(tmuxRamp[20], payload.Foreground), tmuxRamp[14], tmuxRamp[12], payload.Foreground)
+	separatorColor := nonBlackStatusColor(tmuxRamp[11], payload.Foreground)
+	chargingColor := nonBlackStatusColor(tmuxRamp[12], payload.Foreground)
 	return fmt.Sprintf(`# >>> MATUGEN THEME START >>>
 # Generated by %s/theme apply
-set -g status-style "bg=%s,fg=%s"
-set -g status-left "#[fg=%s,bg=%s,bold] #S #[bg=%s,fg=%s] "
-set -g status-right "#{?client_prefix,PREFIX ,}#(\$HOME/.config/tmux/widget-battery) | #(\$HOME/.config/tmux/widget-cpu) | #(\$HOME/.config/tmux/widget-ram) | #(\$HOME/.config/tmux/widget-weather) "
-set -g window-status-format "#[fg=%s] #I:#W "
-set -g window-status-current-format "#[fg=%s,bold] #I:#W "
+set -g status-style "bg=default,fg=%s"
+set -g @status-left-style-session "#[fg=%s,bg=%s,bold]"
+set -g @status-left-style-prefix "#[fg=%s,bg=%s,bold]"
+set -g @status-left-style-copy "#[fg=%s,bg=%s,bold]"
+set -g status-left "#{?client_prefix,#{@status-left-style-prefix} PRFX ,#{?pane_in_mode,#{@status-left-style-copy} COPY ,#{@status-left-style-session} #{session_name} }}#[fg=%s,bg=default] "
+set -g status-right "#(\$HOME/.config/tmux/widget-battery) | #(\$HOME/.config/tmux/widget-cpu) | #(\$HOME/.config/tmux/widget-ram) | #(\$HOME/.config/tmux/widget-weather) "
+set -g window-status-separator ""
+set -g window-status-format "#[fg=%s,bg=%s] #I:#W "
+set -g window-status-current-format "#[fg=%s,bg=%s,bold] #I:#W "
 set -g pane-border-style "fg=%s"
 set -g pane-active-border-style "fg=%s"
-set -g message-style "bg=%s,fg=%s"
-set -g message-command-style "bg=%s,fg=%s"
-set -g mode-style "bg=%s,fg=%s"
+set -g message-style "bg=default,fg=%s"
+set -g message-command-style "bg=default,fg=%s"
+set -g mode-style "bg=default,fg=%s"
 setw -g clock-mode-colour "%s"
 set -g @status-tmux-palette "%s"
 set -g @status-tmux-color-separator "%s"
@@ -657,14 +827,81 @@ set -g @status-tmux-color-ram-5 "%s"
 set -g @status-tmux-color-ram-6 "%s"
 # <<< MATUGEN THEME END <<<
 `, tooieConfigDir,
-		payload.Background, payload.Foreground, statusLeftFG, payload.Roles["primary"], payload.Background, payload.Foreground,
-		c[14], payload.Roles["secondary"], c[14], payload.Roles["secondary"], payload.Background, payload.Roles["secondary"], payload.Background, payload.Roles["secondary"], payload.Roles["secondary"], modeFG, payload.Roles["secondary"],
+		payload.Foreground,
+		sessionFG, sessionBG,
+		prefixFG, prefixBG,
+		copyFG, copyBG,
+		payload.Foreground,
+		windowInactiveFG, windowInactiveBG, windowActiveFG, windowActiveBG,
+		payload.Foreground, payload.Foreground, payload.Foreground, payload.Foreground, modeFG, payload.Roles["secondary"],
 		statusPalette,
-		payload.Status.Separator, payload.Status.Weather, payload.Status.Charging,
-		payload.Status.Battery[0], payload.Status.Battery[1], payload.Status.Battery[2], payload.Status.Battery[3], payload.Status.Battery[4], payload.Status.Battery[5],
-		payload.Status.CPU[0], payload.Status.CPU[1], payload.Status.CPU[2], payload.Status.CPU[3], payload.Status.CPU[4], payload.Status.CPU[5],
-		payload.Status.RAM[0], payload.Status.RAM[1], payload.Status.RAM[2], payload.Status.RAM[3], payload.Status.RAM[4], payload.Status.RAM[5],
+		separatorColor, weatherColor, chargingColor,
+		tmuxRamp[2], tmuxRamp[3], tmuxRamp[4], tmuxRamp[5], tmuxRamp[6], tmuxRamp[7],
+		tmuxRamp[8], tmuxRamp[9], tmuxRamp[10], tmuxRamp[11], tmuxRamp[12], tmuxRamp[13],
+		tmuxRamp[14], tmuxRamp[15], tmuxRamp[16], tmuxRamp[17], tmuxRamp[18], tmuxRamp[19],
 	)
+}
+
+func tmuxGradientRamp(payload computedPayload) []string {
+	anchors := []string{
+		getRoleOr(payload.Roles, "error", payload.Colors[1]),
+		getRoleOr(payload.Roles, "secondary", payload.Colors[6]),
+		getRoleOr(payload.Roles, "primary", payload.Colors[4]),
+		getRoleOr(payload.Roles, "tertiary", payload.Colors[5]),
+		getRoleOr(payload.Roles, "secondary_fixed", payload.Colors[16]),
+	}
+	ramp := make([]string, 21)
+	for i := range ramp {
+		p := 0.0
+		if len(ramp) > 1 {
+			p = float64(i) / float64(len(ramp)-1)
+		}
+		raw := sampleGradientColor(anchors, p)
+		ramp[i] = nonBlackStatusColor(ensureReadableTextColor(payload.Background, raw, payload.Foreground), payload.Foreground)
+	}
+	return ramp
+}
+
+func nonBlackStatusColor(hex, fallback string) string {
+	hex = normalizeHexColor(hex)
+	if !itheme.IsHexColor(hex) {
+		return normalizeHexColor(fallback)
+	}
+	r, g, b := parseHexColor(hex)
+	if maxInt(r, maxInt(g, b)) < 96 {
+		// Avoid near-black status text on transparent bars.
+		return normalizeHexColor(blendHexColor(fallback, "#ffffff", 0.22))
+	}
+	return hex
+}
+
+func avoidRedHue(hex string, fallbacks ...string) string {
+	hex = normalizeHexColor(hex)
+	if itheme.IsHexColor(hex) {
+		h := hueFromHex(hex)
+		if !(h >= 345 || h < 20) {
+			return hex
+		}
+	}
+	for _, fb := range fallbacks {
+		fb = normalizeHexColor(fb)
+		if !itheme.IsHexColor(fb) {
+			continue
+		}
+		h := hueFromHex(fb)
+		if !(h >= 345 || h < 20) {
+			return fb
+		}
+	}
+	// Last resort: push toward a cool non-red accent.
+	return normalizeHexColor(blendHexColor("#56c8ff", "#9b7dff", 0.35))
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func renderPeaclockBlock(payload computedPayload) string {
@@ -904,12 +1141,12 @@ func resolveMatugen(given string) (string, error) {
 	return "", fmt.Errorf("matugen binary not found. Set --matugen-bin or install matugen")
 }
 
-func runMatugenImage(bin, wallpaper, mode, schemeType string) ([]byte, error) {
-	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType, "--source-color-index", "0", "-j", "hex", "--dry-run"}
+func runMatugenImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int) ([]byte, error) {
+	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex), "-j", "hex", "--dry-run"}
 	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("matugen failed for mode=%s: %v (%s)", mode, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("matugen failed for mode=%s scheme=%s idx=%d: %v (%s)", mode, schemeType, sourceColorIndex, err, strings.TrimSpace(string(out)))
 	}
 	return bytes.TrimSpace(out), nil
 }
@@ -958,6 +1195,7 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 	}
 
 	lumas := make([]float64, 0, target*target)
+	sats := make([]float64, 0, target*target)
 	grid := make([][]float64, target)
 	for y := 0; y < target; y++ {
 		grid[y] = make([]float64, target)
@@ -976,7 +1214,14 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 			g8 := float64(g>>8) / 255.0
 			b8 := float64(bb>>8) / 255.0
 			l := 0.2126*r8 + 0.7152*g8 + 0.0722*b8
+			maxv := math.Max(r8, math.Max(g8, b8))
+			minv := math.Min(r8, math.Min(g8, b8))
+			sat := 0.0
+			if maxv > 0 {
+				sat = (maxv - minv) / maxv
+			}
 			lumas = append(lumas, l)
+			sats = append(sats, sat)
 			grid[y][x] = l
 		}
 	}
@@ -996,10 +1241,17 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 		}
 	}
 	sort.Float64s(lumas)
+	sort.Float64s(sats)
 	mean := sum / float64(len(lumas))
+	satSum := 0.0
+	for _, s := range sats {
+		satSum += s
+	}
+	meanSat := satSum / float64(len(sats))
 	p10 := percentileFromSorted(lumas, 0.10)
 	p50 := percentileFromSorted(lumas, 0.50)
 	p90 := percentileFromSorted(lumas, 0.90)
+	p90Sat := percentileFromSorted(sats, 0.90)
 
 	edgeWeight := 0.0
 	edgeSum := 0.0
@@ -1024,6 +1276,8 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 		DarkPixelRatio:   float64(dark) / float64(len(lumas)),
 		BrightPixelRatio: float64(bright) / float64(len(lumas)),
 		EdgeWeightedLuma: edgeLuma,
+		MeanSat:          meanSat,
+		P90Sat:           p90Sat,
 	}, true
 }
 
@@ -1065,4 +1319,31 @@ func ternf(ok bool, a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+func hueFromHex(hex string) float64 {
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	delta := maxv - minv
+	if delta == 0 {
+		return 0
+	}
+	var h float64
+	switch maxv {
+	case rf:
+		h = math.Mod(((gf - bf) / delta), 6.0)
+	case gf:
+		h = ((bf-rf)/delta + 2.0)
+	default:
+		h = ((rf-gf)/delta + 4.0)
+	}
+	h *= 60.0
+	if h < 0 {
+		h += 360.0
+	}
+	return h
 }

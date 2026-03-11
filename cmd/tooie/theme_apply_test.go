@@ -49,6 +49,34 @@ func TestRenderTmuxBlockIncludesPaletteKey(t *testing.T) {
 	}
 }
 
+func TestRenderTmuxBlockTransparentStatusAndSessionBadge(t *testing.T) {
+	got := renderTmuxBlock(testThemePayload())
+	if !strings.Contains(got, `set -g status-style "bg=default,fg=`) {
+		t.Fatalf("expected transparent status-style, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-left-style-session "#[fg=`) || !strings.Contains(got, ",bg=") {
+		t.Fatalf("expected rectangular session badge with fg/bg, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-left "#{?client_prefix,#{@status-left-style-prefix} PRFX ,#{?pane_in_mode,#{@status-left-style-copy} COPY ,#{@status-left-style-session} #{session_name} }}`) {
+		t.Fatalf("expected status-left to switch between session/prefix/copy badges, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-separator ""`) {
+		t.Fatalf("expected rectangular window list with no separator, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, ",bg=") {
+		t.Fatalf("expected inactive window format with fg/bg colors, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-current-format "#[fg=`) || !strings.Contains(got, ",bg=") {
+		t.Fatalf("expected active window format with fg/bg colors, got: %s", got)
+	}
+	if !strings.Contains(got, "PRFX") || !strings.Contains(got, "COPY") {
+		t.Fatalf("expected status-left to include PRFX/COPY mode labels, got: %s", got)
+	}
+	if strings.Contains(got, "#{?client_prefix,PREFIX ,}") {
+		t.Fatalf("expected PREFIX marker removed from status-right, got: %s", got)
+	}
+}
+
 func TestApplyThemeFilesCreatesBackupsAndIdempotentBlocks(t *testing.T) {
 	tmp := t.TempDir()
 	oldHome, oldCfg := homeDir, tooieConfigDir
@@ -109,8 +137,8 @@ func TestApplyThemeFilesCreatesBackupsAndIdempotentBlocks(t *testing.T) {
 	}
 }
 
-func TestDecideAutoModeDarkDominant(t *testing.T) {
-	mode, reason := decideAutoMode(autoDecisionMetrics{
+func TestScoreCandidatePrefersDarkForDarkScene(t *testing.T) {
+	metrics := autoDecisionMetrics{
 		MeanLuma:         0.22,
 		P10:              0.04,
 		P50:              0.18,
@@ -118,47 +146,122 @@ func TestDecideAutoModeDarkDominant(t *testing.T) {
 		DarkPixelRatio:   0.84,
 		BrightPixelRatio: 0.02,
 		EdgeWeightedLuma: 0.24,
-	}, 12.1, 12.4)
-	if mode != "dark" {
-		t.Fatalf("expected dark, got %q (%s)", mode, reason)
+		MeanSat:          0.34,
+		P90Sat:           0.61,
 	}
-	if reason != "dark-dominant" {
-		t.Fatalf("expected dark-dominant reason, got %q", reason)
+	dark := matugenCandidate{
+		Mode:        "dark",
+		Scheme:      "scheme-expressive",
+		SourceIndex: 2,
+		Roles: map[string]string{
+			"background":    "#111218",
+			"on_background": "#e7e8f0",
+			"primary":       "#7aa2f7",
+			"secondary":     "#7dcfff",
+			"tertiary":      "#bb9af7",
+			"error":         "#f7768e",
+		},
+		Readability: 13.8,
+	}
+	light := dark
+	light.Roles = map[string]string{}
+	for k, v := range dark.Roles {
+		light.Roles[k] = v
+	}
+	light.Mode = "light"
+	light.Roles["background"] = "#eff1f5"
+	light.Roles["on_background"] = "#3a3f50"
+	if scoreCandidate(dark, metrics) <= scoreCandidate(light, metrics) {
+		t.Fatalf("expected dark candidate to win for dark scene")
 	}
 }
 
-func TestDecideAutoModeBrightDominant(t *testing.T) {
-	mode, reason := decideAutoMode(autoDecisionMetrics{
-		MeanLuma:         0.79,
-		P10:              0.42,
-		P50:              0.74,
-		P90:              0.95,
-		DarkPixelRatio:   0.10,
-		BrightPixelRatio: 0.48,
-		EdgeWeightedLuma: 0.76,
-	}, 12.8, 11.9)
-	if mode != "light" {
-		t.Fatalf("expected light, got %q (%s)", mode, reason)
+func TestScoreCandidatePenalizesLowContrast(t *testing.T) {
+	metrics := autoDecisionMetrics{MeanLuma: 0.40, P50: 0.40, DarkPixelRatio: 0.50, P90Sat: 0.5}
+	bad := matugenCandidate{
+		Mode:        "dark",
+		Scheme:      "scheme-tonal-spot",
+		SourceIndex: 0,
+		Roles: map[string]string{
+			"background":    "#1a1b26",
+			"on_background": "#222433",
+			"primary":       "#7aa2f7",
+			"secondary":     "#7dcfff",
+			"tertiary":      "#bb9af7",
+			"error":         "#f7768e",
+		},
+		Readability: 8.2,
 	}
-	if reason != "bright-dominant" {
-		t.Fatalf("expected bright-dominant reason, got %q", reason)
+	good := bad
+	good.Roles = map[string]string{}
+	for k, v := range bad.Roles {
+		good.Roles[k] = v
+	}
+	good.Roles["on_background"] = "#e7e8f0"
+	if scoreCandidate(bad, metrics) >= scoreCandidate(good, metrics) {
+		t.Fatalf("expected low-contrast candidate to be penalized")
 	}
 }
 
-func TestDecideAutoModeMixedSceneBiasesDark(t *testing.T) {
-	mode, reason := decideAutoMode(autoDecisionMetrics{
+func TestCanonicalProfileMapsLegacyStyles(t *testing.T) {
+	if got := canonicalProfile("balanced"); got != "adaptive" {
+		t.Fatalf("balanced should map to adaptive, got %q", got)
+	}
+	if got := canonicalProfile("mellow"); got != "adaptive" {
+		t.Fatalf("mellow should map to adaptive, got %q", got)
+	}
+	if got := canonicalProfile("tokyonight"); got != "neon-night" {
+		t.Fatalf("tokyonight should map to neon-night, got %q", got)
+	}
+}
+
+func TestDarkDominantSceneDetection(t *testing.T) {
+	m := autoDecisionMetrics{
+		MeanLuma:         0.30,
+		P50:              0.26,
+		DarkPixelRatio:   0.72,
+		EdgeWeightedLuma: 0.31,
+	}
+	if !darkDominantScene(m) {
+		t.Fatalf("expected dark dominant scene")
+	}
+}
+
+func TestNonBlackStatusColorPromotesNearBlack(t *testing.T) {
+	got := nonBlackStatusColor("#050505", "#c7c7b7")
+	if strings.EqualFold(strings.TrimSpace(got), "#050505") || strings.EqualFold(strings.TrimSpace(got), "#000000") {
+		t.Fatalf("expected non-black promoted status color, got %s", got)
+	}
+}
+
+func TestAvoidRedHueSwitchesToFallback(t *testing.T) {
+	got := avoidRedHue("#ff3333", "#4f8dff", "#56c8ff")
+	if strings.EqualFold(strings.TrimSpace(got), "#ff3333") {
+		t.Fatalf("expected red hue to be replaced, got %s", got)
+	}
+}
+
+func TestAutoCandidateModesForDarkScene(t *testing.T) {
+	modes := autoCandidateModes("auto", autoDecisionMetrics{
+		MeanLuma:         0.30,
+		P50:              0.26,
+		DarkPixelRatio:   0.72,
+		EdgeWeightedLuma: 0.31,
+	})
+	if len(modes) != 1 || modes[0] != "dark" {
+		t.Fatalf("expected forced dark mode candidates, got %v", modes)
+	}
+}
+
+func TestAutoCandidateModesForMixedScene(t *testing.T) {
+	modes := autoCandidateModes("auto", autoDecisionMetrics{
 		MeanLuma:         0.50,
-		P10:              0.08,
 		P50:              0.50,
-		P90:              0.94,
-		DarkPixelRatio:   0.42,
-		BrightPixelRatio: 0.16,
-		EdgeWeightedLuma: 0.46,
-	}, 10.2, 10.3)
-	if mode != "dark" {
-		t.Fatalf("expected dark in mixed scene, got %q (%s)", mode, reason)
-	}
-	if !strings.HasPrefix(reason, "score-bias-") {
-		t.Fatalf("expected score-bias reason, got %q", reason)
+		DarkPixelRatio:   0.35,
+		BrightPixelRatio: 0.20,
+		EdgeWeightedLuma: 0.50,
+	})
+	if len(modes) != 2 {
+		t.Fatalf("expected dual mode candidates, got %v", modes)
 	}
 }
