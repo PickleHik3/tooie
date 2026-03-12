@@ -12,21 +12,18 @@ end
 
 # Terminal capabilities for TUI apps
 set -gx COLORTERM truecolor
-set -gx TERMUX_VERSION $TERMUX_VERSION
-
-# Terminal identity for iTerm2 protocol and TUI app detection
-set -gx TERM_PROGRAM iTerm.app
-set -gx LC_TERMINAL iTerm2
 
 # Only set TERM outside tmux - let tmux control its own TERM
 if not set -q TMUX
     set -gx TERM xterm-256color
 end
 
-# Fix for some TUI apps that check locale
-if not set -q LANG
-    set -gx LANG en_US.UTF-8
-end
+# Locale: keep a single UTF-8 locale and avoid global overrides.
+set -gx LANG en_US.UTF-8
+set -gx LC_CTYPE en_US.UTF-8
+set -e LC_ALL
+set -e TERM_PROGRAM
+set -e LC_TERMINAL
 
 # ANDROID_API_LEVEL for compiling
 if not set -q ANDROID_API_LEVEL
@@ -45,14 +42,10 @@ if status is-interactive
     and not set -q TMUX
     and type -q tmux # Check if tmux exists to prevent crash loop
 
-    if set -q SSH_CONNECTION
-        # SSH session - acquire wake lock and attach to local 'main' session
-        termux-wake-lock
-        tmux attach -t main
-        termux-wake-unlock
-        exit
-    else
-        # Local session
+    # Skip tmux when connected over SSH; auto-start only for local shells.
+    if not set -q SSH_CONNECTION
+        and not set -q SSH_CLIENT
+        and not set -q SSH_TTY
         exec tmux new-session -A -s main
     end
 end
