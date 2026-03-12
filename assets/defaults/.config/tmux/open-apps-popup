@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 tmp_root="${XDG_RUNTIME_DIR:-${TMPDIR:-$HOME/.tmp}}"
 log_dir="$tmp_root/status-tmux"
-log_file="$log_dir/omni-debug.log"
+log_file="$log_dir/search-apps-debug.log"
 mkdir -p "$log_dir"
 
 log() {

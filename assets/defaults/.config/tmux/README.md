@@ -8,9 +8,9 @@ Portable tmux status widgets for Termux.
 - `widget-ram` (Shizuku backend first, local fallback)
 - `widget-battery`
 - `widget-weather`
-- `widget-apps` (opens popup omni bar)
+- `widget-apps` (opens popup app search)
 
-## Omni Apps Launcher
+## Apps Launcher
 
 `widget-apps` now opens a tmux popup (`open-apps-popup`) running `search-apps` with `fzf`.
 
@@ -28,7 +28,7 @@ Behavior:
 - `weather-cache` - weather fetch + cache
 - `helpers.sh` - tmux option helper
 - `open-apps-popup` - tmux popup opener
-- `search-apps` - fzf omni bar + launcher logic
+- `search-apps` - fzf app search + launcher logic
 - `show-cheatsheet-popup` - quick keybind reference popup
 - `show-cheatsheet-view` - popup content renderer
 - `apps-menu.conf.example` - optional custom entries (`android` + `terminal`)
@@ -79,7 +79,7 @@ cp ~/files/status-tmux/apps-menu.conf.example ~/.config/status-tmux/apps-menu.co
 set -g @status-tmux-apps-label 'Apps'
 set -g @status-tmux-apps-popup-width '85%'
 set -g @status-tmux-apps-popup-height '70%'
-set -g @status-tmux-apps-popup-title 'Omni Apps'
+set -g @status-tmux-apps-popup-title 'Apps'
 
 # CSV list used for auto-pin matching (package, label, or android:/terminal: prefixes)
 set -g @status-tmux-apps-pinned 'com.android.chrome,com.termux,terminal:codex'
