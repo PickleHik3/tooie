@@ -809,6 +809,11 @@ func renderTmuxBlock(payload computedPayload) string {
 		payload.Foreground,
 	)
 	attentionFG := ensureReadableTextColor(attentionBG, payload.Background, payload.Foreground)
+	paneBorderColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.62), payload.Foreground)
+	paneActiveBorderColor := nonBlackStatusColor(
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "primary", tmuxRamp[8]), payload.Foreground),
+		payload.Foreground,
+	)
 	statusPalette := strings.TrimSpace(payload.Meta["status_palette"])
 	if statusPalette == "" {
 		statusPalette = "default"
@@ -895,7 +900,7 @@ set -g @status-tmux-color-ram-6 "%s"
 		separatorColor, separatorColor, separatorColor,
 		windowInactiveFG, windowInactiveBG, windowActiveFG, windowActiveBG,
 		attentionFG, attentionBG, attentionFG, attentionBG,
-		payload.Foreground, payload.Foreground, payload.Foreground, payload.Foreground,
+		paneBorderColor, paneActiveBorderColor, payload.Foreground, payload.Foreground,
 		modeBG, modeFG,
 		matchBG, matchFG,
 		currentMatchBG, currentMatchFG,

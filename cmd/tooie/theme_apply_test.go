@@ -84,6 +84,21 @@ func TestRenderTmuxBlockTransparentStatusAndSessionBadge(t *testing.T) {
 	if !strings.Contains(got, `set -g window-status-activity-style "fg=`) || !strings.Contains(got, `set -g window-status-bell-style "fg=`) {
 		t.Fatalf("expected explicit bright styles for activity/bell windows, got: %s", got)
 	}
+	var paneBorderLine, paneActiveBorderLine string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, `set -g pane-border-style "fg=`) {
+			paneBorderLine = line
+		}
+		if strings.HasPrefix(line, `set -g pane-active-border-style "fg=`) {
+			paneActiveBorderLine = line
+		}
+	}
+	if paneBorderLine == "" || paneActiveBorderLine == "" {
+		t.Fatalf("expected pane border style lines, got: %s", got)
+	}
+	if paneBorderLine == strings.Replace(paneActiveBorderLine, "pane-active-border-style", "pane-border-style", 1) {
+		t.Fatalf("expected active pane border color to differ from inactive border, got: %s", got)
+	}
 	if !strings.Contains(got, "PRFX") || !strings.Contains(got, "COPY") {
 		t.Fatalf("expected status-left to include PRFX/COPY mode labels, got: %s", got)
 	}
