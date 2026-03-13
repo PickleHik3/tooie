@@ -8,6 +8,7 @@ LOCK_DIR="$CACHE_DIR/.lock"
 TTL_SECONDS="${STATUS_TMUX_WIDGET_TTL:-3}"
 LOCK_STALE_SECONDS=10
 BACKEND_TIMEOUT="${STATUS_TMUX_BACKEND_TIMEOUT:-1}"
+USE_TERMUX_API_BATTERY="${STATUS_TMUX_USE_TERMUX_API_BATTERY:-0}"
 SHOW_BATTERY="${STATUS_TMUX_SHOW_BATTERY:-on}"
 SHOW_CPU="${STATUS_TMUX_SHOW_CPU:-on}"
 SHOW_RAM="${STATUS_TMUX_SHOW_RAM:-on}"
@@ -103,17 +104,32 @@ collect_local_json(){
   mem_avail_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   mem_total_b=$((mem_total_kb * 1024)); mem_avail_b=$((mem_avail_kb * 1024)); mem_used_b=$((mem_total_b - mem_avail_b)); [ "$mem_used_b" -lt 0 ] && mem_used_b=0
   bat_level=0; bat_charging=false
-  if [ "$want_bat" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
-    if command -v timeout >/dev/null 2>&1; then bjson="$(timeout 1 termux-battery-status 2>/dev/null || true)"; else bjson="$(termux-battery-status 2>/dev/null || true)"; fi
-    if [ -n "$bjson" ]; then
-      if command -v jq >/dev/null 2>&1; then
-        bat_level="$(printf '%s' "$bjson" | jq -r '.percentage // .level // 0' 2>/dev/null || echo 0)"
-        status="$(printf '%s' "$bjson" | jq -r '.status // ""' 2>/dev/null || echo '')"
-      else
-        bat_level="$(printf '%s' "$bjson" | grep -o '"percentage"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//')"; [ -n "$bat_level" ] || bat_level=0
-        status="$(printf '%s' "$bjson" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  if [ "$want_bat" = "1" ]; then
+    # Prefer sysfs battery info to avoid noisy Termux:API socket failures from background tmux updates.
+    cap_file="/sys/class/power_supply/battery/capacity"
+    status_file="/sys/class/power_supply/battery/status"
+    if [ -r "$cap_file" ]; then
+      lvl="$(cat "$cap_file" 2>/dev/null || true)"
+      case "$lvl" in ''|*[!0-9]*) lvl="";; esac
+      if [ -n "$lvl" ]; then
+        bat_level="$lvl"
+        st="$(cat "$status_file" 2>/dev/null || true)"
+        case "$st" in [Cc][Hh][Aa][Rr][Gg][Ii][Nn][Gg]|[Ff][Uu][Ll][Ll]) bat_charging=true;; esac
       fi
-      case "$status" in CHARGING|FULL) bat_charging=true;; esac
+    fi
+
+    if [ "$bat_level" -eq 0 ] && [ "$USE_TERMUX_API_BATTERY" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
+      if command -v timeout >/dev/null 2>&1; then bjson="$(timeout 1 termux-battery-status 2>/dev/null || true)"; else bjson="$(termux-battery-status 2>/dev/null || true)"; fi
+      if [ -n "$bjson" ]; then
+        if command -v jq >/dev/null 2>&1; then
+          bat_level="$(printf '%s' "$bjson" | jq -r '.percentage // .level // 0' 2>/dev/null || echo 0)"
+          status="$(printf '%s' "$bjson" | jq -r '.status // ""' 2>/dev/null || echo '')"
+        else
+          bat_level="$(printf '%s' "$bjson" | grep -o '"percentage"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | sed 's/.*:[[:space:]]*//')"; [ -n "$bat_level" ] || bat_level=0
+          status="$(printf '%s' "$bjson" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+        fi
+        case "$status" in CHARGING|FULL) bat_charging=true;; esac
+      fi
     fi
   fi
   printf '{"cpuPercent":%s,"memUsedBytes":%s,"memTotalBytes":%s,"battery":{"levelPercent":%s,"charging":%s}}' "$cpu_pct" "$mem_used_b" "$mem_total_b" "$bat_level" "$bat_charging"

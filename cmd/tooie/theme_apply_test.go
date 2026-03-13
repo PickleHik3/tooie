@@ -69,6 +69,21 @@ func TestRenderTmuxBlockTransparentStatusAndSessionBadge(t *testing.T) {
 	if !strings.Contains(got, `set -g window-status-current-format "#[fg=`) || !strings.Contains(got, ",bg=") {
 		t.Fatalf("expected active window format with fg/bg colors, got: %s", got)
 	}
+	if !strings.Contains(got, `set -g mode-style "bg=`) || strings.Contains(got, `set -g mode-style "bg=default`) {
+		t.Fatalf("expected copy mode to use explicit highlight background, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tmux/widget-battery) #[fg=`) || !strings.Contains(got, `|#[default] #(\$HOME/.config/tmux/widget-cpu)`) {
+		t.Fatalf("expected status-right with subtle colored separators, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, `nounderscore`) {
+		t.Fatalf("expected inactive windows to avoid emphasis styles, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-current-format "#[fg=`) || !strings.Contains(got, `bold,noitalics,nounderscore`) {
+		t.Fatalf("expected active window to emphasize without underline, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-activity-style "fg=`) || !strings.Contains(got, `set -g window-status-bell-style "fg=`) {
+		t.Fatalf("expected explicit bright styles for activity/bell windows, got: %s", got)
+	}
 	if !strings.Contains(got, "PRFX") || !strings.Contains(got, "COPY") {
 		t.Fatalf("expected status-left to include PRFX/COPY mode labels, got: %s", got)
 	}

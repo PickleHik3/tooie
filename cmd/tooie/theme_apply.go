@@ -750,15 +750,22 @@ color21=%s
 }
 
 func renderTmuxBlock(payload computedPayload) string {
-	c := payload.Colors
 	tmuxRamp := tmuxGradientRamp(payload)
-	sessionBG := avoidRedHue(blendHexColor(tmuxRamp[3], payload.Background, 0.18), tmuxRamp[5], getRoleOr(payload.Roles, "primary", payload.Colors[4]), payload.Foreground)
+	sessionBG := nonBlackStatusColor(
+		avoidRedHue(
+			blendHexColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[16]), "#b889ff", 0.55),
+			tmuxRamp[16],
+			"#a678ff",
+			payload.Foreground,
+		),
+		payload.Foreground,
+	)
 	sessionFG := ensureReadableTextColor(sessionBG, payload.Foreground, "#ffffff")
 	prefixBG := nonBlackStatusColor(
 		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), "#000000", 0.24),
-			"#2b7fff",
-			"#8856ff",
+			blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffb347", 0.55),
+			"#ff6f61",
+			"#ffb347",
 			payload.Foreground,
 		),
 		payload.Foreground,
@@ -766,26 +773,73 @@ func renderTmuxBlock(payload computedPayload) string {
 	prefixFG := ensureReadableTextColor(prefixBG, "#ffffff", "#000000")
 	copyBG := nonBlackStatusColor(
 		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#000000", 0.18),
-			"#00a86b",
-			"#00b8d9",
+			blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#00d5ff", 0.42),
+			"#00c96b",
+			"#2dd4ff",
 			payload.Foreground,
 		),
 		payload.Foreground,
 	)
 	copyFG := ensureReadableTextColor(copyBG, "#ffffff", "#000000")
-	modeFG := ensureReadableTextColor(c[2], payload.Foreground, payload.Background)
-	windowInactiveBG := blendHexColor(tmuxRamp[4], payload.Background, 0.62)
-	windowInactiveFG := ensureReadableTextColor(windowInactiveBG, getRoleOr(payload.Roles, "on_surface_variant", c[14]), c[15])
-	windowActiveBG := tmuxRamp[7]
+	modeBG := nonBlackStatusColor(blendHexColor(copyBG, payload.Background, 0.15), copyBG)
+	modeFG := ensureReadableTextColor(modeBG, payload.Background, payload.Foreground)
+	matchBG := nonBlackStatusColor(blendHexColor(tmuxRamp[12], payload.Background, 0.25), modeBG)
+	matchFG := ensureReadableTextColor(matchBG, payload.Background, payload.Foreground)
+	currentMatchBG := nonBlackStatusColor(tmuxRamp[15], matchBG)
+	currentMatchFG := ensureReadableTextColor(currentMatchBG, payload.Background, payload.Foreground)
+	windowInactiveBG := blendHexColor(tmuxRamp[4], payload.Background, 0.90)
+	windowInactiveFG := ensureReadableTextColor(windowInactiveBG, getRoleOr(payload.Roles, "on_surface_variant", payload.Foreground), payload.Foreground)
+	windowActiveBG := nonBlackStatusColor(
+		avoidRedHue(
+			blendHexColor(getRoleOr(payload.Roles, "primary", tmuxRamp[8]), getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), 0.28),
+			tmuxRamp[9],
+			tmuxRamp[7],
+			payload.Foreground,
+		),
+		payload.Foreground,
+	)
 	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, "#ffffff"), payload.Foreground)
+	attentionBG := nonBlackStatusColor(
+		avoidRedHue(
+			blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffd166", 0.35),
+			"#ff7a59",
+			"#ffcc4d",
+			payload.Foreground,
+		),
+		payload.Foreground,
+	)
+	attentionFG := ensureReadableTextColor(attentionBG, payload.Background, payload.Foreground)
 	statusPalette := strings.TrimSpace(payload.Meta["status_palette"])
 	if statusPalette == "" {
 		statusPalette = "default"
 	}
-	weatherColor := avoidRedHue(nonBlackStatusColor(tmuxRamp[20], payload.Foreground), tmuxRamp[14], tmuxRamp[12], payload.Foreground)
-	separatorColor := nonBlackStatusColor(tmuxRamp[11], payload.Foreground)
-	chargingColor := nonBlackStatusColor(tmuxRamp[12], payload.Foreground)
+	weatherColor := ensureReadableTextColor(payload.Background, avoidRedHue(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), tmuxRamp[14], tmuxRamp[12], payload.Foreground), payload.Foreground)
+	separatorColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.48), payload.Foreground)
+	chargingColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), payload.Foreground)
+	batteryColors := []string{
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "error", payload.Colors[1]), payload.Foreground),
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffb84d", 0.42), payload.Foreground),
+		ensureReadableTextColor(payload.Background, "#d6b645", payload.Foreground),
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#b4d455", 0.35), payload.Foreground),
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), payload.Foreground),
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), 0.40), payload.Foreground),
+	}
+	cpuColors := []string{
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#66d18f", 0.45), payload.Foreground),
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), payload.Foreground),
+		ensureReadableTextColor(payload.Background, "#d6b645", payload.Foreground),
+		ensureReadableTextColor(payload.Background, "#e09b44", payload.Foreground),
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#e09b44", 0.28), payload.Foreground),
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "error", payload.Colors[1]), payload.Foreground),
+	}
+	ramColors := []string{
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), "#57b4ff", 0.28), payload.Foreground),
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), payload.Foreground),
+		ensureReadableTextColor(payload.Background, "#ca9cff", payload.Foreground),
+		ensureReadableTextColor(payload.Background, "#d6b645", payload.Foreground),
+		ensureReadableTextColor(payload.Background, blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#d6b645", 0.30), payload.Foreground),
+		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "error", payload.Colors[1]), payload.Foreground),
+	}
 	return fmt.Sprintf(`# >>> MATUGEN THEME START >>>
 # Generated by %s/theme apply
 set -g status-style "bg=default,fg=%s"
@@ -793,15 +847,21 @@ set -g @status-left-style-session "#[fg=%s,bg=%s,bold]"
 set -g @status-left-style-prefix "#[fg=%s,bg=%s,bold]"
 set -g @status-left-style-copy "#[fg=%s,bg=%s,bold]"
 set -g status-left "#{?client_prefix,#{@status-left-style-prefix} PRFX ,#{?pane_in_mode,#{@status-left-style-copy} COPY ,#{@status-left-style-session} #{session_name} }}#[fg=%s,bg=default] "
-set -g status-right "#(\$HOME/.config/tmux/widget-battery) | #(\$HOME/.config/tmux/widget-cpu) | #(\$HOME/.config/tmux/widget-ram) | #(\$HOME/.config/tmux/widget-weather) "
+set -g status-right "#(\$HOME/.config/tmux/widget-battery) #[fg=%s]|#[default] #(\$HOME/.config/tmux/widget-cpu) #[fg=%s]|#[default] #(\$HOME/.config/tmux/widget-ram) #[fg=%s]|#[default] #(\$HOME/.config/tmux/widget-weather)"
 set -g window-status-separator ""
-set -g window-status-format "#[fg=%s,bg=%s] #I:#W "
-set -g window-status-current-format "#[fg=%s,bg=%s,bold] #I:#W "
+set -g window-status-format "#[fg=%s,bg=%s,nobold,noitalics,nounderscore] #I "
+set -g window-status-current-format "#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W "
+set -g window-status-activity-style "fg=%s,bg=%s,bold"
+set -g window-status-bell-style "fg=%s,bg=%s,bold"
+setw -g monitor-activity on
+set -g visual-activity on
 set -g pane-border-style "fg=%s"
 set -g pane-active-border-style "fg=%s"
 set -g message-style "bg=default,fg=%s"
 set -g message-command-style "bg=default,fg=%s"
-set -g mode-style "bg=default,fg=%s"
+set -g mode-style "bg=%s,fg=%s"
+set -g copy-mode-match-style "bg=%s,fg=%s"
+set -g copy-mode-current-match-style "bg=%s,fg=%s,bold"
 setw -g clock-mode-colour "%s"
 set -g @status-tmux-palette "%s"
 set -g @status-tmux-color-separator "%s"
@@ -832,13 +892,19 @@ set -g @status-tmux-color-ram-6 "%s"
 		prefixFG, prefixBG,
 		copyFG, copyBG,
 		payload.Foreground,
+		separatorColor, separatorColor, separatorColor,
 		windowInactiveFG, windowInactiveBG, windowActiveFG, windowActiveBG,
-		payload.Foreground, payload.Foreground, payload.Foreground, payload.Foreground, modeFG, payload.Roles["secondary"],
+		attentionFG, attentionBG, attentionFG, attentionBG,
+		payload.Foreground, payload.Foreground, payload.Foreground, payload.Foreground,
+		modeBG, modeFG,
+		matchBG, matchFG,
+		currentMatchBG, currentMatchFG,
+		payload.Roles["secondary"],
 		statusPalette,
 		separatorColor, weatherColor, chargingColor,
-		tmuxRamp[2], tmuxRamp[3], tmuxRamp[4], tmuxRamp[5], tmuxRamp[6], tmuxRamp[7],
-		tmuxRamp[8], tmuxRamp[9], tmuxRamp[10], tmuxRamp[11], tmuxRamp[12], tmuxRamp[13],
-		tmuxRamp[14], tmuxRamp[15], tmuxRamp[16], tmuxRamp[17], tmuxRamp[18], tmuxRamp[19],
+		batteryColors[0], batteryColors[1], batteryColors[2], batteryColors[3], batteryColors[4], batteryColors[5],
+		cpuColors[0], cpuColors[1], cpuColors[2], cpuColors[3], cpuColors[4], cpuColors[5],
+		ramColors[0], ramColors[1], ramColors[2], ramColors[3], ramColors[4], ramColors[5],
 	)
 }
 
