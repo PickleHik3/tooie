@@ -37,6 +37,8 @@ const (
 	defaultSource  = "wallpaper"
 	pageTheme      = 0
 	pageHome       = 1
+	pageSettings   = 2
+	totalPages     = 3
 )
 
 var modePresets = []string{"auto", "dark", "light"}
@@ -114,6 +116,13 @@ type persistedClockSettings struct {
 	Font    string `json:"font,omitempty"`
 	Pattern string `json:"pattern,omitempty"`
 	CalFont string `json:"cal_font,omitempty"`
+}
+
+type persistedShellSettings struct {
+	WidgetBattery bool `json:"widget_battery"`
+	WidgetCPU     bool `json:"widget_cpu"`
+	WidgetRAM     bool `json:"widget_ram"`
+	WidgetWeather bool `json:"widget_weather"`
 }
 
 type backup struct {
@@ -218,6 +227,13 @@ type model struct {
 	appSearchIndex   int
 	appSearchResults []launchableApp
 	systemInfo       systemInfo
+	widgetBattery    bool
+	widgetCPU        bool
+	widgetRAM        bool
+	widgetWeather    bool
+	settingsPageIdx  int
+	showResetConfirm bool
+	resetConfirmIdx  int
 	clockOnly        bool
 	miniShowClock    bool
 	miniShowCal      bool
@@ -282,6 +298,10 @@ func initialModel() model {
 		clockFontIdx:  clockFontIdx,
 		clockPatterns: []string{"wave", "stripes", "pulse", "solid", "outline", "sweep", "neon", "calm", "shimmer"},
 		clockLoc:      clockLoc,
+		widgetBattery: true,
+		widgetCPU:     true,
+		widgetRAM:     true,
+		widgetWeather: true,
 	}
 	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
 	if strings.TrimSpace(savedClock.Pattern) != "" {
@@ -293,6 +313,7 @@ func initialModel() model {
 		}
 	}
 	m.loadThemeStateFromBackups()
+	m.loadShellSettings()
 	m.loadPreviewColors()
 	m.pinnedPackages = loadPinnedApps()
 	m.refreshAppSearchResults()
@@ -369,6 +390,10 @@ func initialMiniModel(showClock, showCal bool) model {
 		miniShowCal:   showCal,
 		calFontDefs:   calDefs,
 		calFontIdx:    calFontIdx,
+		widgetBattery: true,
+		widgetCPU:     true,
+		widgetRAM:     true,
+		widgetWeather: true,
 	}
 	if strings.TrimSpace(savedClock.Pattern) != "" {
 		for i, p := range m.clockPatterns {
@@ -381,6 +406,7 @@ func initialMiniModel(showClock, showCal bool) model {
 	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
 	m.calGlyphs = loadCalendarGlyphSet(m.calFontDefs, m.calFontIdx)
 	m.loadThemeStateFromBackups()
+	m.loadShellSettings()
 	m.loadPreviewColors()
 	return m
 }
@@ -463,6 +489,88 @@ func (m *model) normalizeThemeSelection() {
 	}
 }
 
+func defaultShellSettings() persistedShellSettings {
+	return persistedShellSettings{
+		WidgetBattery: true,
+		WidgetCPU:     true,
+		WidgetRAM:     true,
+		WidgetWeather: true,
+	}
+}
+
+func (m *model) loadShellSettings() {
+	settings, ok := loadPersistedShellSettings()
+	if !ok {
+		settings = loadShellSettingsFromBackups(m.backups)
+	}
+	m.applyShellSettings(settings)
+}
+
+func (m *model) applyShellSettings(settings persistedShellSettings) {
+	m.widgetBattery = settings.WidgetBattery
+	m.widgetCPU = settings.WidgetCPU
+	m.widgetRAM = settings.WidgetRAM
+	m.widgetWeather = settings.WidgetWeather
+}
+
+func (m model) currentShellSettings() persistedShellSettings {
+	return persistedShellSettings{
+		WidgetBattery: m.widgetBattery,
+		WidgetCPU:     m.widgetCPU,
+		WidgetRAM:     m.widgetRAM,
+		WidgetWeather: m.widgetWeather,
+	}
+}
+
+func loadShellSettingsFromBackups(backups []backup) persistedShellSettings {
+	out := defaultShellSettings()
+	if len(backups) == 0 {
+		return out
+	}
+	meta := backups[0].Meta
+	out.WidgetBattery = parseOnOffDefault(meta["widget_battery"], true)
+	out.WidgetCPU = parseOnOffDefault(meta["widget_cpu"], true)
+	out.WidgetRAM = parseOnOffDefault(meta["widget_ram"], true)
+	out.WidgetWeather = parseOnOffDefault(meta["widget_weather"], true)
+	return out
+}
+
+func loadPersistedShellSettings() (persistedShellSettings, bool) {
+	out := defaultShellSettings()
+	path := shellSettingsPath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return out, false
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, false
+	}
+	return out, true
+}
+
+func savePersistedShellSettings(settings persistedShellSettings) error {
+	path := shellSettingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o644)
+}
+
+func parseOnOffDefault(raw string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on", "enabled":
+		return true
+	case "0", "false", "no", "off", "disabled":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func canonicalMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "dark":
@@ -520,6 +628,7 @@ func (m model) Init() tea.Cmd {
 		loadHomeAppsCmd(false),
 		warmPinnedIconsCmd(m.pinnedPackages),
 		loadSystemInfoCmd(),
+		syncTmuxWidgetSettingsCmd(m.currentShellSettings()),
 	}
 	if !m.metricsPaused {
 		cmds = append(cmds, tickMetrics())
@@ -799,12 +908,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case statusMsg:
 		m.lastStatus = string(msg)
+		var post tea.Cmd
+		if strings.HasPrefix(m.lastStatus, "Bootstrap defaults restored.") {
+			m.applyShellSettings(defaultShellSettings())
+			if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
+				m.lastStatus = "Reset completed but failed to save settings: " + err.Error()
+			} else {
+				post = syncTmuxWidgetSettingsCmd(m.currentShellSettings())
+			}
+		}
 		m.backups = loadBackups()
 		if m.backupIndex >= len(m.backups) {
 			m.backupIndex = max(0, len(m.backups)-1)
 		}
 		m.loadPreviewColors()
-		return m, nil
+		return m, post
 	case tea.KeyMsg:
 		if m.clockOnly {
 			switch msg.String() {
@@ -831,7 +949,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.canSwitchPage() {
 			switch msg.String() {
 			case "tab", "right", "l":
-				m.page = (m.page + 1) % 2
+				m.page = nextPageIndex(m.page)
 				if m.page == pageHome {
 					m.startHomeIntro()
 					if m.metricsPaused {
@@ -841,7 +959,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "left", "h":
-				m.page = (m.page + 1) % 2
+				m.page = prevPageIndex(m.page)
 				if m.page == pageHome {
 					m.startHomeIntro()
 					if m.metricsPaused {
@@ -855,6 +973,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.page == pageHome {
 			return m.updateHomePage(msg)
+		}
+		if m.page == pageSettings {
+			return m.updateSettingsPage(msg)
 		}
 
 		if m.pickerTarget != "" {
@@ -1103,6 +1224,167 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) settingsPageItems() []settingItem {
+	return []settingItem{
+		{Label: "Battery Segment: " + onOffLabel(m.widgetBattery), Target: "widget_battery"},
+		{Label: "CPU Segment: " + onOffLabel(m.widgetCPU), Target: "widget_cpu"},
+		{Label: "RAM Segment: " + onOffLabel(m.widgetRAM), Target: "widget_ram"},
+		{Label: "Weather Segment: " + onOffLabel(m.widgetWeather), Target: "widget_weather"},
+		{Label: "Reset Bootstrap Configs...", Target: "reset_bootstrap"},
+	}
+}
+
+func onOffLabel(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
+}
+
+func onOffFlag(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
+}
+
+func tmuxStatusRightTemplate() string {
+	return "#($HOME/.config/tmux/run-system-widget all)#($HOME/.config/tmux/widget-weather)"
+}
+
+func (m model) updateSettingsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showResetConfirm {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			m.showResetConfirm = false
+			m.resetConfirmIdx = 0
+			return m, nil
+		case "left", "h", "up", "k":
+			m.resetConfirmIdx = 0
+			return m, nil
+		case "right", "l", "down", "j":
+			m.resetConfirmIdx = 1
+			return m, nil
+		case "enter":
+			if m.resetConfirmIdx == 1 {
+				m.showResetConfirm = false
+				m.resetConfirmIdx = 0
+				m.lastStatus = "Resetting bootstrap configs..."
+				return m, runResetBootstrapCmd()
+			}
+			m.showResetConfirm = false
+			m.resetConfirmIdx = 0
+			m.lastStatus = "Reset canceled"
+			return m, nil
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.settingsPageIdx > 0 {
+			m.settingsPageIdx--
+		}
+		return m, nil
+	case "down", "j":
+		if m.settingsPageIdx < len(m.settingsPageItems())-1 {
+			m.settingsPageIdx++
+		}
+		return m, nil
+	case "enter", " ":
+		return m.activateSettingsPageItem()
+	}
+	return m, nil
+}
+
+func (m model) activateSettingsPageItem() (tea.Model, tea.Cmd) {
+	items := m.settingsPageItems()
+	if m.settingsPageIdx < 0 || m.settingsPageIdx >= len(items) {
+		return m, nil
+	}
+	target := items[m.settingsPageIdx].Target
+	switch target {
+	case "widget_battery":
+		m.widgetBattery = !m.widgetBattery
+	case "widget_cpu":
+		m.widgetCPU = !m.widgetCPU
+	case "widget_ram":
+		m.widgetRAM = !m.widgetRAM
+	case "widget_weather":
+		m.widgetWeather = !m.widgetWeather
+	case "reset_bootstrap":
+		m.showResetConfirm = true
+		m.resetConfirmIdx = 0
+		return m, nil
+	default:
+		return m, nil
+	}
+	if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
+		m.lastStatus = "Failed to save settings: " + err.Error()
+		return m, nil
+	}
+	m.lastStatus = "Settings updated"
+	return m, syncTmuxWidgetSettingsCmd(m.currentShellSettings())
+}
+
+func syncTmuxWidgetSettingsCmd(settings persistedShellSettings) tea.Cmd {
+	return func() tea.Msg {
+		if _, err := exec.LookPath("tmux"); err != nil {
+			return nil
+		}
+		options := []struct {
+			key string
+			val bool
+		}{
+			{key: "@status-tmux-widget-battery", val: settings.WidgetBattery},
+			{key: "@status-tmux-widget-cpu", val: settings.WidgetCPU},
+			{key: "@status-tmux-widget-ram", val: settings.WidgetRAM},
+			{key: "@status-tmux-widget-weather", val: settings.WidgetWeather},
+		}
+		for _, item := range options {
+			_ = exec.Command("tmux", "set-option", "-g", item.key, onOffFlag(item.val)).Run()
+		}
+		_ = exec.Command("tmux", "set-option", "-g", "status-right", tmuxStatusRightTemplate()).Run()
+		_ = exec.Command("tmux", "refresh-client", "-S").Run()
+		return nil
+	}
+}
+
+func runResetBootstrapCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := ensureTooieSupportScripts(); err != nil {
+			return statusMsg("Reset unavailable: " + err.Error())
+		}
+		cmd := exec.Command(currentResetScriptPath())
+		out, err := cmd.CombinedOutput()
+		outText := strings.TrimSpace(string(out))
+		if err != nil {
+			if outText == "" {
+				return statusMsg("Reset failed: " + err.Error())
+			}
+			lines := strings.Split(outText, "\n")
+			last := strings.TrimSpace(lines[len(lines)-1])
+			if last == "" {
+				last = err.Error()
+			}
+			return statusMsg("Reset failed: " + last)
+		}
+		if outText == "" {
+			return statusMsg("Bootstrap configs reset completed")
+		}
+		lines := strings.Split(outText, "\n")
+		last := strings.TrimSpace(lines[len(lines)-1])
+		if last == "" {
+			last = "Bootstrap configs reset completed"
+		}
+		return statusMsg(last)
+	}
+}
+
 type statusMsg string
 type colorOption struct {
 	Label string
@@ -1140,6 +1422,8 @@ func (m model) View() string {
 	title := headerChip("Tooie", "12")
 	if m.page == pageTheme {
 		title = headerChip("Tooie / Theme", "12")
+	} else if m.page == pageSettings {
+		title = headerChip("Tooie / Settings", "12")
 	}
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	if strings.Contains(strings.ToLower(m.lastStatus), "failed") {
@@ -1631,10 +1915,17 @@ func blockLineWidth(block string) int {
 }
 
 func (m model) renderMain(usableW, contentH int) string {
-	if m.page == pageHome {
+	switch m.page {
+	case pageHome:
 		return m.renderHomePage(usableW, contentH)
+	case pageSettings:
+		return m.renderSettingsPage(usableW, contentH)
+	default:
+		return m.renderThemePage(usableW, contentH)
 	}
+}
 
+func (m model) renderThemePage(usableW, contentH int) string {
 	usableW = max(20, usableW)
 	contentH = max(4, contentH)
 	topRequired := max(8, len(m.settings())+2)
@@ -1668,6 +1959,16 @@ func (m model) renderMain(usableW, contentH int) string {
 
 	details := panelStyle(usableW, detailsH, "10").Render(m.detailsBlock(usableW - 4))
 	return topRow + "\n" + details
+}
+
+func (m model) renderSettingsPage(usableW, contentH int) string {
+	usableW = max(20, usableW)
+	contentH = max(4, contentH)
+	topH := max(8, min(14, contentH))
+	detailsH := max(3, contentH-topH)
+	top := panelStyle(usableW, topH, "12").Render(m.settingsPageBlock(topH - 2))
+	details := panelStyle(usableW, detailsH, "10").Render(m.settingsPageDetailsBlock(usableW - 4))
+	return top + "\n" + details
 }
 
 func (m model) interactionLineCount() int {
@@ -1720,6 +2021,93 @@ func (m model) settingsBlock(limit int) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m model) settingsPageBlock(limit int) string {
+	if m.showResetConfirm {
+		return m.resetConfirmBlock(limit)
+	}
+	lines := []string{headerChip("Settings", "12")}
+	items := m.settingsPageItems()
+	visible := max(1, limit-1)
+	start, end := listWindow(len(items), m.settingsPageIdx, visible)
+	for i := start; i < end; i++ {
+		label := items[i].Label
+		prefix := "  "
+		style := lipgloss.NewStyle()
+		if i == m.settingsPageIdx {
+			prefix = "▶ "
+			style = style.Foreground(lipgloss.Color("11")).Bold(true)
+		}
+		lines = append(lines, style.Render(prefix+label))
+	}
+	for len(lines) < limit {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) resetConfirmBlock(limit int) string {
+	lines := []string{
+		headerChip("Confirm Reset", "9"),
+		"  This will overwrite bootstrap-managed configs.",
+		"  A safety backup is created first.",
+		"",
+	}
+	cancelStyle := lipgloss.NewStyle()
+	confirmStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	cancelPrefix := "  "
+	confirmPrefix := "  "
+	if m.resetConfirmIdx == 0 {
+		cancelPrefix = "▶ "
+		cancelStyle = cancelStyle.Foreground(lipgloss.Color("11")).Bold(true)
+	}
+	if m.resetConfirmIdx == 1 {
+		confirmPrefix = "▶ "
+	}
+	lines = append(lines,
+		cancelStyle.Render(cancelPrefix+"Cancel"),
+		confirmStyle.Render(confirmPrefix+"Confirm Reset"),
+		"",
+		"  esc=cancel",
+	)
+	for len(lines) < limit {
+		lines = append(lines, "")
+	}
+	if len(lines) > limit {
+		lines = lines[:limit]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) settingsPageDetailsBlock(totalWidth int) string {
+	left := []string{
+		headerChip("Tmux Widgets", "8"),
+		"",
+		"  battery: " + onOffLabel(m.widgetBattery),
+		"  cpu: " + onOffLabel(m.widgetCPU),
+		"  ram: " + onOffLabel(m.widgetRAM),
+		"  weather: " + onOffLabel(m.widgetWeather),
+	}
+	right := []string{
+		headerChip("Hints", "11"),
+		"",
+		"  up/down: move",
+		"  enter/space: toggle",
+		"  tab/h/l: switch page",
+		"  reset runs configs-only restore",
+	}
+	if m.showResetConfirm {
+		right = []string{
+			headerChip("Reset Warning", "9"),
+			"",
+			"  overwrites fish/tmux/starship",
+			"  and other bootstrap-managed files",
+			"  keeps launcherctl endpoint/token",
+			"  backup saved in ~/.local/state/tooie/backups/",
+		}
+	}
+	return renderTwoColumns(left, right, totalWidth)
 }
 
 func (m model) detailsBlock(totalWidth int) string {
@@ -1870,14 +2258,18 @@ func (m model) homeSystemBlock(innerW, limit int) string {
 }
 
 func (m model) canSwitchPage() bool {
-	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch
+	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch && !m.showResetConfirm
 }
 
 func (m model) pageLabel() string {
-	if m.page == pageHome {
+	switch m.page {
+	case pageHome:
 		return "Tooie"
+	case pageSettings:
+		return "Settings"
+	default:
+		return "Theme"
 	}
-	return "Theme"
 }
 
 func (m model) interactionBorderColor() string {
@@ -2563,6 +2955,12 @@ func (m model) applyArgs(includeOverrides bool) []string {
 			args = append(args, "--ansi-cyan", strings.TrimSpace(m.ansiCyan))
 		}
 	}
+	args = append(args,
+		"--widget-battery", onOffFlag(m.widgetBattery),
+		"--widget-cpu", onOffFlag(m.widgetCPU),
+		"--widget-ram", onOffFlag(m.widgetRAM),
+		"--widget-weather", onOffFlag(m.widgetWeather),
+	)
 	return args
 }
 
@@ -2713,6 +3111,22 @@ func (m model) themeActionLabel(previewOnly bool) string {
 		return "Update colors"
 	}
 	return "Apply theme"
+}
+
+func nextPageIndex(cur int) int {
+	n := cur + 1
+	if n >= totalPages {
+		n = 0
+	}
+	return n
+}
+
+func prevPageIndex(cur int) int {
+	n := cur - 1
+	if n < 0 {
+		n = totalPages - 1
+	}
+	return n
 }
 
 func nextThemeSource(cur string) string {
@@ -3745,6 +4159,14 @@ func clockSettingsPath() string {
 		return "tooie-clock-settings.json"
 	}
 	return filepath.Join(home, ".config", "tooie", "clock-settings.json")
+}
+
+func shellSettingsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "tooie-shell-settings.json"
+	}
+	return filepath.Join(home, ".config", "tooie", "shell-settings.json")
 }
 
 func loadClockSettings() persistedClockSettings {

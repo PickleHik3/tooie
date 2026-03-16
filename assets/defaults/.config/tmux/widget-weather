@@ -2,16 +2,28 @@
 set -eu
 PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-wx="$("$SCRIPT_DIR/weather-cache" 2>/dev/null || true)"
+. "$SCRIPT_DIR/helpers.sh"
+
+show_weather="$(get_tmux_option '@status-tmux-widget-weather' 'on')"
+if ! is_on "$show_weather"; then
+  exit 0
+fi
+
+wx="$($SCRIPT_DIR/weather-cache 2>/dev/null || true)"
 [ -n "$wx" ] || wx="…"
 
-fg=""
-fallback_fg="blue"
-if command -v tmux >/dev/null 2>&1; then
-  fallback_fg="$(tmux show -gqv '@status-tmux-color-weather' 2>/dev/null || true)"
-  [ -n "$fallback_fg" ] || fallback_fg="blue"
+weather_color="$(get_tmux_option '@status-tmux-color-weather' 'blue')"
+[ -n "$weather_color" ] || weather_color="blue"
+[ "$weather_color" = "default" ] && weather_color="blue"
+
+sep_color="$(get_tmux_option '@status-tmux-color-separator' 'colour8')"
+show_battery="$(get_tmux_option '@status-tmux-widget-battery' 'on')"
+show_cpu="$(get_tmux_option '@status-tmux-widget-cpu' 'on')"
+show_ram="$(get_tmux_option '@status-tmux-widget-ram' 'on')"
+
+prefix=""
+if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram"; then
+  prefix="#[fg=${sep_color}] | #[default] "
 fi
-fg="$fallback_fg"
-[ -n "$fg" ] || fg="blue"
-[ "$fg" = "default" ] && fg="blue"
-printf '#[fg=%s]%s#[default]' "$fg" "$wx"
+
+printf '%s#[fg=%s]%s#[default]' "$prefix" "$weather_color" "$wx"

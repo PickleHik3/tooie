@@ -118,11 +118,13 @@ deploy_assets() {
 
   install_dir "$REPO_DIR/assets/defaults/.config/tmux" "$HOME_DIR/.config/tmux"
   install_dir "$REPO_DIR/fonts" "$TOOIE_DIR/fonts"
+  install_dir "$REPO_DIR/assets/defaults" "$TOOIE_DIR/bootstrap-defaults"
 
   install_file "$REPO_DIR/scripts/apply-material.sh" "$TOOIE_DIR/apply-material.sh"
   install_file "$REPO_DIR/scripts/restore-material.sh" "$TOOIE_DIR/restore-material.sh"
   install_file "$REPO_DIR/scripts/list-material-backups.sh" "$TOOIE_DIR/list-material-backups.sh"
-  chmod +x "$TOOIE_DIR/apply-material.sh" "$TOOIE_DIR/restore-material.sh" "$TOOIE_DIR/list-material-backups.sh"
+  install_file "$REPO_DIR/scripts/reset-bootstrap-defaults.sh" "$TOOIE_DIR/reset-bootstrap-defaults.sh"
+  chmod +x "$TOOIE_DIR/apply-material.sh" "$TOOIE_DIR/restore-material.sh" "$TOOIE_DIR/list-material-backups.sh" "$TOOIE_DIR/reset-bootstrap-defaults.sh"
 }
 
 post_setup() {

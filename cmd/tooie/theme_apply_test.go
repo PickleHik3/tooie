@@ -72,8 +72,18 @@ func TestRenderTmuxBlockTransparentStatusAndSessionBadge(t *testing.T) {
 	if !strings.Contains(got, `set -g mode-style "bg=`) || strings.Contains(got, `set -g mode-style "bg=default`) {
 		t.Fatalf("expected copy mode to use explicit highlight background, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tmux/widget-battery) #[fg=`) || !strings.Contains(got, `|#[default] #(\$HOME/.config/tmux/widget-cpu)`) {
-		t.Fatalf("expected status-right with subtle colored separators, got: %s", got)
+	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"`) {
+		t.Fatalf("expected canonical status-right widget pipeline, got: %s", got)
+	}
+	for _, key := range []string{
+		`set -g @status-tmux-widget-battery "on"`,
+		`set -g @status-tmux-widget-cpu "on"`,
+		`set -g @status-tmux-widget-ram "on"`,
+		`set -g @status-tmux-widget-weather "on"`,
+	} {
+		if !strings.Contains(got, key) {
+			t.Fatalf("expected renderTmuxBlock() to include %s, got: %s", key, got)
+		}
 	}
 	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, `nounderscore`) {
 		t.Fatalf("expected inactive windows to avoid emphasis styles, got: %s", got)
@@ -242,6 +252,36 @@ func TestCanonicalProfileMapsLegacyStyles(t *testing.T) {
 	}
 	if got := canonicalProfile("tokyonight"); got != "neon-night" {
 		t.Fatalf("tokyonight should map to neon-night, got %q", got)
+	}
+}
+
+func TestParseThemeApplyFlagsWidgetToggles(t *testing.T) {
+	cfg, err := parseThemeApplyFlags([]string{
+		"--widget-battery", "off",
+		"--widget-cpu", "1",
+		"--widget-ram", "false",
+		"--widget-weather", "on",
+	})
+	if err != nil {
+		t.Fatalf("parseThemeApplyFlags() error: %v", err)
+	}
+	if cfg.WidgetBattery {
+		t.Fatalf("widget battery should be off")
+	}
+	if !cfg.WidgetCPU {
+		t.Fatalf("widget cpu should be on")
+	}
+	if cfg.WidgetRAM {
+		t.Fatalf("widget ram should be off")
+	}
+	if !cfg.WidgetWeather {
+		t.Fatalf("widget weather should be on")
+	}
+}
+
+func TestParseThemeApplyFlagsRejectsInvalidWidgetToggle(t *testing.T) {
+	if _, err := parseThemeApplyFlags([]string{"--widget-weather", "maybe"}); err == nil {
+		t.Fatalf("expected invalid widget toggle value to fail")
 	}
 }
 

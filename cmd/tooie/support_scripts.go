@@ -25,6 +25,7 @@ func ensureTooieSupportScripts() error {
 		{path: installedApplyScriptPath(), repoRel: filepath.Join("scripts", "apply-material.sh")},
 		{path: installedRestoreScriptPath(), repoRel: filepath.Join("scripts", "restore-material.sh")},
 		{path: filepath.Join(tooieConfigDir, "list-material-backups.sh"), repoRel: filepath.Join("scripts", "list-material-backups.sh")},
+		{path: installedResetScriptPath(), repoRel: filepath.Join("scripts", "reset-bootstrap-defaults.sh")},
 	}
 	for _, script := range scripts {
 		if err := ensureSupportScript(script.path, script.repoRel); err != nil {
@@ -81,6 +82,14 @@ func currentApplyScriptPath() string {
 
 func currentRestoreScriptPath() string {
 	return installedRestoreScriptPath()
+}
+
+func installedResetScriptPath() string {
+	return filepath.Join(tooieConfigDir, "reset-bootstrap-defaults.sh")
+}
+
+func currentResetScriptPath() string {
+	return installedResetScriptPath()
 }
 
 func resolveRepoSupportPath(repoRel string) string {

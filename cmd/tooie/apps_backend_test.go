@@ -190,6 +190,10 @@ func TestApplyArgsPresetOmitsMode(t *testing.T) {
 		presetFamily:  "catppuccin",
 		presetVariant: "mocha",
 		palette:       "default",
+		widgetBattery: true,
+		widgetCPU:     true,
+		widgetRAM:     true,
+		widgetWeather: true,
 	}
 
 	args := m.applyArgs(false)
@@ -203,6 +207,10 @@ func TestApplyArgsPresetOmitsMode(t *testing.T) {
 		"--status-palette", "default",
 		"--preset-family", "catppuccin",
 		"--preset-variant", "mocha",
+		"--widget-battery", "on",
+		"--widget-cpu", "on",
+		"--widget-ram", "on",
+		"--widget-weather", "on",
 	}) {
 		t.Fatalf("applyArgs() = %v", args)
 	}
@@ -226,10 +234,14 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 
 func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
 	m := model{
-		themeSource: "wallpaper",
-		mode:        "auto",
-		profile:     "neon-night",
-		palette:     "vibrant",
+		themeSource:   "wallpaper",
+		mode:          "auto",
+		profile:       "neon-night",
+		palette:       "vibrant",
+		widgetBattery: false,
+		widgetCPU:     true,
+		widgetRAM:     false,
+		widgetWeather: true,
 	}
 	args := m.applyArgs(false)
 	want := []string{
@@ -237,6 +249,10 @@ func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
 		"--status-palette", "vibrant",
 		"-m", "auto",
 		"--profile", "neon-night",
+		"--widget-battery", "off",
+		"--widget-cpu", "on",
+		"--widget-ram", "off",
+		"--widget-weather", "on",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("applyArgs() = %v, want %v", args, want)

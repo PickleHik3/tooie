@@ -44,6 +44,10 @@ type themeApplyConfig struct {
 	AnsiBlue      string
 	AnsiMagenta   string
 	AnsiCyan      string
+	WidgetBattery bool
+	WidgetCPU     bool
+	WidgetRAM     bool
+	WidgetWeather bool
 }
 
 func runThemeCommand(args []string) int {
@@ -127,6 +131,10 @@ func runThemeApplyCommand(args []string) int {
 	meta["text_color_override"] = strings.TrimSpace(cfg.TextColor)
 	meta["cursor_color_override"] = strings.TrimSpace(cfg.CursorColor)
 	meta["status_palette"] = cfg.StatusPalette
+	meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
+	meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
+	meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
+	meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	if cfg.ThemeSource != "preset" {
 		meta["profile"] = canonicalProfile(cfg.Profile)
 	}
@@ -281,6 +289,10 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	out.Colors = computed.Colors
 	out.Meta = computed.Meta
 	out.Meta["status_palette"] = cfg.StatusPalette
+	out.Meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
+	out.Meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
+	out.Meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
+	out.Meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	for k, v := range autoMeta {
 		out.Meta[k] = v
 	}
@@ -585,7 +597,15 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		PresetVariant: "mocha",
 		StatusPalette: "default",
 		Profile:       "adaptive",
+		WidgetBattery: true,
+		WidgetCPU:     true,
+		WidgetRAM:     true,
+		WidgetWeather: true,
 	}
+	widgetBattery := "on"
+	widgetCPU := "on"
+	widgetRAM := "on"
+	widgetWeather := "on"
 	fs := flag.NewFlagSet("theme apply", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.Mode, "m", cfg.Mode, "")
@@ -609,6 +629,10 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.AnsiBlue, "ansi-blue", "", "")
 	fs.StringVar(&cfg.AnsiMagenta, "ansi-magenta", "", "")
 	fs.StringVar(&cfg.AnsiCyan, "ansi-cyan", "", "")
+	fs.StringVar(&widgetBattery, "widget-battery", widgetBattery, "")
+	fs.StringVar(&widgetCPU, "widget-cpu", widgetCPU, "")
+	fs.StringVar(&widgetRAM, "widget-ram", widgetRAM, "")
+	fs.StringVar(&widgetWeather, "widget-weather", widgetWeather, "")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
@@ -645,7 +669,35 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 			return cfg, fmt.Errorf("invalid %s value: %s (expected #rrggbb)", item.name, item.v)
 		}
 	}
+	var err error
+	cfg.WidgetBattery, err = parseOnOffValue(widgetBattery)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid --widget-battery value: %s", widgetBattery)
+	}
+	cfg.WidgetCPU, err = parseOnOffValue(widgetCPU)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid --widget-cpu value: %s", widgetCPU)
+	}
+	cfg.WidgetRAM, err = parseOnOffValue(widgetRAM)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid --widget-ram value: %s", widgetRAM)
+	}
+	cfg.WidgetWeather, err = parseOnOffValue(widgetWeather)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid --widget-weather value: %s", widgetWeather)
+	}
 	return cfg, nil
+}
+
+func parseOnOffValue(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on", "enabled":
+		return true, nil
+	case "0", "false", "no", "off", "disabled":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected one of on/off/true/false/1/0")
+	}
 }
 
 func applyThemeFiles(payload computedPayload, backupDir string) error {
@@ -818,6 +870,10 @@ func renderTmuxBlock(payload computedPayload) string {
 	if statusPalette == "" {
 		statusPalette = "default"
 	}
+	widgetBattery := onOffFlag(parseOnOffDefault(payload.Meta["widget_battery"], true))
+	widgetCPU := onOffFlag(parseOnOffDefault(payload.Meta["widget_cpu"], true))
+	widgetRAM := onOffFlag(parseOnOffDefault(payload.Meta["widget_ram"], true))
+	widgetWeather := onOffFlag(parseOnOffDefault(payload.Meta["widget_weather"], true))
 	weatherColor := ensureReadableTextColor(payload.Background, avoidRedHue(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), tmuxRamp[14], tmuxRamp[12], payload.Foreground), payload.Foreground)
 	separatorColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.48), payload.Foreground)
 	chargingColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), payload.Foreground)
@@ -852,7 +908,7 @@ set -g @status-left-style-session "#[fg=%s,bg=%s,bold]"
 set -g @status-left-style-prefix "#[fg=%s,bg=%s,bold]"
 set -g @status-left-style-copy "#[fg=%s,bg=%s,bold]"
 set -g status-left "#{?client_prefix,#{@status-left-style-prefix} PRFX ,#{?pane_in_mode,#{@status-left-style-copy} COPY ,#{@status-left-style-session} #{session_name} }}#[fg=%s,bg=default] "
-set -g status-right "#(\$HOME/.config/tmux/widget-battery) #[fg=%s]|#[default] #(\$HOME/.config/tmux/widget-cpu) #[fg=%s]|#[default] #(\$HOME/.config/tmux/widget-ram) #[fg=%s]|#[default] #(\$HOME/.config/tmux/widget-weather)"
+set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
 set -g window-status-separator ""
 set -g window-status-format "#[fg=%s,bg=%s,nobold,noitalics,nounderscore] #I "
 set -g window-status-current-format "#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W "
@@ -869,6 +925,10 @@ set -g copy-mode-match-style "bg=%s,fg=%s"
 set -g copy-mode-current-match-style "bg=%s,fg=%s,bold"
 setw -g clock-mode-colour "%s"
 set -g @status-tmux-palette "%s"
+set -g @status-tmux-widget-battery "%s"
+set -g @status-tmux-widget-cpu "%s"
+set -g @status-tmux-widget-ram "%s"
+set -g @status-tmux-widget-weather "%s"
 set -g @status-tmux-color-separator "%s"
 set -g @status-tmux-color-weather "%s"
 set -g @status-tmux-color-charging "%s"
@@ -897,7 +957,6 @@ set -g @status-tmux-color-ram-6 "%s"
 		prefixFG, prefixBG,
 		copyFG, copyBG,
 		payload.Foreground,
-		separatorColor, separatorColor, separatorColor,
 		windowInactiveFG, windowInactiveBG, windowActiveFG, windowActiveBG,
 		attentionFG, attentionBG, attentionFG, attentionBG,
 		paneBorderColor, paneActiveBorderColor, payload.Foreground, payload.Foreground,
@@ -906,6 +965,7 @@ set -g @status-tmux-color-ram-6 "%s"
 		currentMatchBG, currentMatchFG,
 		payload.Roles["secondary"],
 		statusPalette,
+		widgetBattery, widgetCPU, widgetRAM, widgetWeather,
 		separatorColor, weatherColor, chargingColor,
 		batteryColors[0], batteryColors[1], batteryColors[2], batteryColors[3], batteryColors[4], batteryColors[5],
 		cpuColors[0], cpuColors[1], cpuColors[2], cpuColors[3], cpuColors[4], cpuColors[5],
