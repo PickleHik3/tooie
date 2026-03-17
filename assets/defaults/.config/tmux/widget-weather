@@ -23,7 +23,7 @@ show_ram="$(get_tmux_option '@status-tmux-widget-ram' 'on')"
 
 prefix=""
 if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram"; then
-  prefix="#[fg=${sep_color}] | #[default] "
+  prefix="#[fg=${sep_color}] |#[default] "
 fi
 
 printf '%s#[fg=%s]%s#[default]' "$prefix" "$weather_color" "$wx"
