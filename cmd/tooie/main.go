@@ -35,10 +35,9 @@ const (
 	defaultPalette = "default"
 	defaultProfile = "adaptive"
 	defaultSource  = "wallpaper"
-	pageTheme      = 0
-	pageHome       = 1
-	pageSettings   = 2
-	totalPages     = 3
+	pageHome       = 0
+	pageTheme      = 1
+	totalPages     = 2
 )
 
 var modePresets = []string{"auto", "dark", "light"}
@@ -231,9 +230,6 @@ type model struct {
 	widgetCPU        bool
 	widgetRAM        bool
 	widgetWeather    bool
-	settingsPageIdx  int
-	showResetConfirm bool
-	resetConfirmIdx  int
 	clockOnly        bool
 	miniShowClock    bool
 	miniShowCal      bool
@@ -487,6 +483,7 @@ func (m *model) normalizeThemeSelection() {
 	if !contains(variants, m.presetVariant) {
 		m.presetVariant = variants[0]
 	}
+	m.clampMergedSettingIndex()
 }
 
 func defaultShellSettings() persistedShellSettings {
@@ -974,9 +971,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.page == pageHome {
 			return m.updateHomePage(msg)
 		}
-		if m.page == pageSettings {
-			return m.updateSettingsPage(msg)
-		}
 
 		if m.pickerTarget != "" {
 			switch msg.String() {
@@ -1115,7 +1109,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "down", "j":
-			if m.settingIndex < len(m.settings())-1 {
+			if m.settingIndex < len(m.mergedPageItems())-1 {
 				m.settingIndex++
 			}
 			return m, nil
@@ -1167,17 +1161,44 @@ func (m model) settings() []settingItem {
 	items = append(items,
 		settingItem{Label: "Customize Colors...", Target: "customize"},
 		settingItem{Label: "Backups...", Target: "backups"},
-		settingItem{Label: "Refresh Backups", Target: "refresh_backups"},
-		settingItem{Label: "Quit", Target: "quit"},
 	)
 	return items
+}
+
+func (m model) settingsPageItems() []settingItem {
+	return []settingItem{
+		{Label: "Battery: " + onOffLabel(m.widgetBattery), Target: "widget_battery"},
+		{Label: "CPU: " + onOffLabel(m.widgetCPU), Target: "widget_cpu"},
+		{Label: "RAM: " + onOffLabel(m.widgetRAM), Target: "widget_ram"},
+		{Label: "Weather: " + onOffLabel(m.widgetWeather), Target: "widget_weather"},
+	}
+}
+
+func (m model) mergedPageItems() []settingItem {
+	items := append([]settingItem{}, m.settings()...)
+	return append(items, m.settingsPageItems()...)
+}
+
+func (m *model) clampMergedSettingIndex() {
+	total := len(m.mergedPageItems())
+	if total == 0 {
+		m.settingIndex = 0
+		return
+	}
+	if m.settingIndex < 0 {
+		m.settingIndex = 0
+		return
+	}
+	if m.settingIndex >= total {
+		m.settingIndex = total - 1
+	}
 }
 
 func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	if m.applying {
 		return m, nil
 	}
-	items := m.settings()
+	items := m.mergedPageItems()
 	if m.settingIndex < 0 || m.settingIndex >= len(items) {
 		return m, nil
 	}
@@ -1210,28 +1231,21 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	case "backups":
 		m.showBackups = true
 		return m, nil
-	case "refresh_backups":
-		m.backups = loadBackups()
-		if m.backupIndex >= len(m.backups) {
-			m.backupIndex = max(0, len(m.backups)-1)
-		}
-		m.loadPreviewColors()
-		m.lastStatus = "Backups refreshed"
+	case "widget_battery":
+		m.widgetBattery = !m.widgetBattery
+	case "widget_cpu":
+		m.widgetCPU = !m.widgetCPU
+	case "widget_ram":
+		m.widgetRAM = !m.widgetRAM
+	case "widget_weather":
+		m.widgetWeather = !m.widgetWeather
+	}
+	if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
+		m.lastStatus = "Failed to save settings: " + err.Error()
 		return m, nil
-	case "quit":
-		return m, tea.Quit
 	}
-	return m, nil
-}
-
-func (m model) settingsPageItems() []settingItem {
-	return []settingItem{
-		{Label: "Battery Segment: " + onOffLabel(m.widgetBattery), Target: "widget_battery"},
-		{Label: "CPU Segment: " + onOffLabel(m.widgetCPU), Target: "widget_cpu"},
-		{Label: "RAM Segment: " + onOffLabel(m.widgetRAM), Target: "widget_ram"},
-		{Label: "Weather Segment: " + onOffLabel(m.widgetWeather), Target: "widget_weather"},
-		{Label: "Reset Bootstrap Configs...", Target: "reset_bootstrap"},
-	}
+	m.lastStatus = "Settings updated"
+	return m, syncTmuxWidgetSettingsCmd(m.currentShellSettings())
 }
 
 func onOffLabel(v bool) string {
@@ -1250,85 +1264,6 @@ func onOffFlag(v bool) string {
 
 func tmuxStatusRightTemplate() string {
 	return "#($HOME/.config/tmux/run-system-widget all)#($HOME/.config/tmux/widget-weather)"
-}
-
-func (m model) updateSettingsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.showResetConfirm {
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		case "esc":
-			m.showResetConfirm = false
-			m.resetConfirmIdx = 0
-			return m, nil
-		case "left", "h", "up", "k":
-			m.resetConfirmIdx = 0
-			return m, nil
-		case "right", "l", "down", "j":
-			m.resetConfirmIdx = 1
-			return m, nil
-		case "enter":
-			if m.resetConfirmIdx == 1 {
-				m.showResetConfirm = false
-				m.resetConfirmIdx = 0
-				m.lastStatus = "Resetting bootstrap configs..."
-				return m, runResetBootstrapCmd()
-			}
-			m.showResetConfirm = false
-			m.resetConfirmIdx = 0
-			m.lastStatus = "Reset canceled"
-			return m, nil
-		}
-		return m, nil
-	}
-
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "up", "k":
-		if m.settingsPageIdx > 0 {
-			m.settingsPageIdx--
-		}
-		return m, nil
-	case "down", "j":
-		if m.settingsPageIdx < len(m.settingsPageItems())-1 {
-			m.settingsPageIdx++
-		}
-		return m, nil
-	case "enter", " ":
-		return m.activateSettingsPageItem()
-	}
-	return m, nil
-}
-
-func (m model) activateSettingsPageItem() (tea.Model, tea.Cmd) {
-	items := m.settingsPageItems()
-	if m.settingsPageIdx < 0 || m.settingsPageIdx >= len(items) {
-		return m, nil
-	}
-	target := items[m.settingsPageIdx].Target
-	switch target {
-	case "widget_battery":
-		m.widgetBattery = !m.widgetBattery
-	case "widget_cpu":
-		m.widgetCPU = !m.widgetCPU
-	case "widget_ram":
-		m.widgetRAM = !m.widgetRAM
-	case "widget_weather":
-		m.widgetWeather = !m.widgetWeather
-	case "reset_bootstrap":
-		m.showResetConfirm = true
-		m.resetConfirmIdx = 0
-		return m, nil
-	default:
-		return m, nil
-	}
-	if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
-		m.lastStatus = "Failed to save settings: " + err.Error()
-		return m, nil
-	}
-	m.lastStatus = "Settings updated"
-	return m, syncTmuxWidgetSettingsCmd(m.currentShellSettings())
 }
 
 func syncTmuxWidgetSettingsCmd(settings persistedShellSettings) tea.Cmd {
@@ -1385,6 +1320,37 @@ func runResetBootstrapCmd() tea.Cmd {
 	}
 }
 
+func runSetupBtopCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := ensureTooieSupportScripts(); err != nil {
+			return statusMsg("Btop setup unavailable: " + err.Error())
+		}
+		cmd := exec.Command(currentBtopSetupScriptPath())
+		out, err := cmd.CombinedOutput()
+		outText := strings.TrimSpace(string(out))
+		if err != nil {
+			if outText == "" {
+				return statusMsg("Btop setup failed: " + err.Error())
+			}
+			lines := strings.Split(outText, "\n")
+			last := strings.TrimSpace(lines[len(lines)-1])
+			if last == "" {
+				last = err.Error()
+			}
+			return statusMsg("Btop setup failed: " + last)
+		}
+		if outText == "" {
+			return statusMsg("Btop setup complete")
+		}
+		lines := strings.Split(outText, "\n")
+		last := strings.TrimSpace(lines[len(lines)-1])
+		if last == "" {
+			last = "Btop setup complete"
+		}
+		return statusMsg(last)
+	}
+}
+
 type statusMsg string
 type colorOption struct {
 	Label string
@@ -1421,8 +1387,6 @@ func (m model) View() string {
 
 	title := headerChip("Tooie", "12")
 	if m.page == pageTheme {
-		title = headerChip("Tooie / Theme", "12")
-	} else if m.page == pageSettings {
 		title = headerChip("Tooie / Settings", "12")
 	}
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
@@ -1915,60 +1879,40 @@ func blockLineWidth(block string) int {
 }
 
 func (m model) renderMain(usableW, contentH int) string {
-	switch m.page {
-	case pageHome:
+	if m.page == pageHome {
 		return m.renderHomePage(usableW, contentH)
-	case pageSettings:
-		return m.renderSettingsPage(usableW, contentH)
-	default:
-		return m.renderThemePage(usableW, contentH)
 	}
+	return m.renderThemePage(usableW, contentH)
 }
 
 func (m model) renderThemePage(usableW, contentH int) string {
-	usableW = max(20, usableW)
-	contentH = max(4, contentH)
-	topRequired := max(8, len(m.settings())+2)
+	usableW = max(28, usableW)
+	contentH = max(10, contentH)
+
+	topMin := max(8, len(m.settings())+2)
 	if m.hasActiveOverlay() {
-		topRequired = max(topRequired, m.interactionLineCount()+2)
+		topMin = max(topMin, m.interactionLineCount()+2)
 	}
-	detailsMin := 2
-	topH := topRequired
-	if contentH-topH < detailsMin {
-		topH = max(3, contentH-detailsMin)
+	bottomMin := max(7, len(m.settingsPageItems())+3)
+	topH := topMin
+	if contentH-topH < bottomMin {
+		topH = max(6, contentH-bottomMin)
 	}
-	detailsH := max(detailsMin, contentH-topH)
+	bottomH := max(bottomMin, contentH-topH)
 
-	var topRow string
+	topRightContent := m.paletteBlock(topH - 2)
 	if m.hasActiveOverlay() {
-		leftW := int(float64(usableW) * 0.44)
-		if leftW < 28 {
-			leftW = 28
-		}
-		rightW := usableW - leftW
-		if rightW < 20 {
-			rightW = 20
-			leftW = usableW - rightW
-		}
-		left := panelStyle(leftW, topH, "12").Render(m.settingsBlock(topH - 2))
-		right := panelStyle(rightW, topH, m.interactionBorderColor()).Render(m.interactionBlock(topH - 2))
-		topRow = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	} else {
-		topRow = panelStyle(usableW, topH, "12").Render(m.settingsBlock(topH - 2))
+		topRightContent = m.interactionBlock(topH - 2)
 	}
+	topBody := renderTwoColumns(
+		strings.Split(m.settingsBlock(topH-2), "\n"),
+		strings.Split(topRightContent, "\n"),
+		usableW-4,
+	)
+	topRow := panelStyle(usableW, topH, "12").Render(topBody)
 
-	details := panelStyle(usableW, detailsH, "10").Render(m.detailsBlock(usableW - 4))
-	return topRow + "\n" + details
-}
-
-func (m model) renderSettingsPage(usableW, contentH int) string {
-	usableW = max(20, usableW)
-	contentH = max(4, contentH)
-	topH := max(8, min(14, contentH))
-	detailsH := max(3, contentH-topH)
-	top := panelStyle(usableW, topH, "12").Render(m.settingsPageBlock(topH - 2))
-	details := panelStyle(usableW, detailsH, "10").Render(m.settingsPageDetailsBlock(usableW - 4))
-	return top + "\n" + details
+	bottomRow := panelStyle(usableW, bottomH, "8").Render(m.settingsPageBlock(bottomH - 2))
+	return topRow + "\n" + bottomRow
 }
 
 func (m model) interactionLineCount() int {
@@ -1988,7 +1932,7 @@ func (m model) interactionLineCount() int {
 }
 
 func (m model) settingsBlock(limit int) string {
-	lines := []string{headerChip("Settings", "12")}
+	lines := []string{headerChip("Colors", "12")}
 	items := m.settings()
 	visible := max(1, limit-1)
 	start, end := listWindow(len(items), m.settingIndex, visible)
@@ -2024,18 +1968,19 @@ func (m model) settingsBlock(limit int) string {
 }
 
 func (m model) settingsPageBlock(limit int) string {
-	if m.showResetConfirm {
-		return m.resetConfirmBlock(limit)
-	}
-	lines := []string{headerChip("Settings", "12")}
+	lines := []string{headerChip("Status Bar", "8")}
 	items := m.settingsPageItems()
+	selected := m.settingIndex - len(m.settings())
+	if selected < 0 {
+		selected = 0
+	}
 	visible := max(1, limit-1)
-	start, end := listWindow(len(items), m.settingsPageIdx, visible)
+	start, end := listWindow(len(items), selected, visible)
 	for i := start; i < end; i++ {
 		label := items[i].Label
 		prefix := "  "
 		style := lipgloss.NewStyle()
-		if i == m.settingsPageIdx {
+		if len(m.settings())+i == m.settingIndex {
 			prefix = "▶ "
 			style = style.Foreground(lipgloss.Color("11")).Bold(true)
 		}
@@ -2047,30 +1992,8 @@ func (m model) settingsPageBlock(limit int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) resetConfirmBlock(limit int) string {
-	lines := []string{
-		headerChip("Confirm Reset", "9"),
-		"  This will overwrite bootstrap-managed configs.",
-		"  A safety backup is created first.",
-		"",
-	}
-	cancelStyle := lipgloss.NewStyle()
-	confirmStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	cancelPrefix := "  "
-	confirmPrefix := "  "
-	if m.resetConfirmIdx == 0 {
-		cancelPrefix = "▶ "
-		cancelStyle = cancelStyle.Foreground(lipgloss.Color("11")).Bold(true)
-	}
-	if m.resetConfirmIdx == 1 {
-		confirmPrefix = "▶ "
-	}
-	lines = append(lines,
-		cancelStyle.Render(cancelPrefix+"Cancel"),
-		confirmStyle.Render(confirmPrefix+"Confirm Reset"),
-		"",
-		"  esc=cancel",
-	)
+func (m model) paletteBlock(limit int) string {
+	lines := append([]string{}, m.palettePreviewLines()...)
 	for len(lines) < limit {
 		lines = append(lines, "")
 	}
@@ -2078,74 +2001,6 @@ func (m model) resetConfirmBlock(limit int) string {
 		lines = lines[:limit]
 	}
 	return strings.Join(lines, "\n")
-}
-
-func (m model) settingsPageDetailsBlock(totalWidth int) string {
-	left := []string{
-		headerChip("Tmux Widgets", "8"),
-		"",
-		"  battery: " + onOffLabel(m.widgetBattery),
-		"  cpu: " + onOffLabel(m.widgetCPU),
-		"  ram: " + onOffLabel(m.widgetRAM),
-		"  weather: " + onOffLabel(m.widgetWeather),
-	}
-	right := []string{
-		headerChip("Hints", "11"),
-		"",
-		"  up/down: move",
-		"  enter/space: toggle",
-		"  tab/h/l: switch page",
-		"  reset runs configs-only restore",
-	}
-	if m.showResetConfirm {
-		right = []string{
-			headerChip("Reset Warning", "9"),
-			"",
-			"  overwrites fish/tmux/starship",
-			"  and other bootstrap-managed files",
-			"  keeps launcherctl endpoint/token",
-			"  backup saved in ~/.local/state/tooie/backups/",
-		}
-	}
-	return renderTwoColumns(left, right, totalWidth)
-}
-
-func (m model) detailsBlock(totalWidth int) string {
-	left := []string{
-		headerChip("Details", "10"),
-		"",
-		headerChip("Current Theme", "8"),
-		"  strategy: " + displayThemeSource(m.themeSource),
-		"  status palette: " + m.palette,
-	}
-	if m.themeSource == "preset" {
-		left = append(left,
-			"  preset family: "+displayPresetFamily(m.presetFamily),
-			"  preset variant: "+displayPresetVariant(m.presetVariant),
-			"  preset mode: "+presetVariantMode(m.presetFamily, m.presetVariant),
-		)
-	} else {
-		left = append(left,
-			"  mode: "+displayMode(m.mode),
-			"  profile: "+displayProfile(m.profile),
-		)
-	}
-
-	if strings.TrimSpace(m.textColor) != "" {
-		left = append(left, "  text override: "+m.textColor)
-	} else {
-		left = append(left, "  text override: auto")
-	}
-	if strings.TrimSpace(m.cursorColor) != "" {
-		left = append(left, "  cursor override: "+m.cursorColor)
-	} else {
-		left = append(left, "  cursor override: auto")
-	}
-
-	right := []string{headerChip("Generated", "11"), ""}
-	right = append(right, m.palettePreviewLines()...)
-
-	return renderTwoColumns(left, right, totalWidth)
 }
 
 func (m model) renderHomePage(usableW, contentH int) string {
@@ -2258,18 +2113,14 @@ func (m model) homeSystemBlock(innerW, limit int) string {
 }
 
 func (m model) canSwitchPage() bool {
-	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch && !m.showResetConfirm
+	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch
 }
 
 func (m model) pageLabel() string {
-	switch m.page {
-	case pageHome:
+	if m.page == pageHome {
 		return "Tooie"
-	case pageSettings:
-		return "Settings"
-	default:
-		return "Theme"
 	}
+	return "Theme"
 }
 
 func (m model) interactionBorderColor() string {
@@ -2362,32 +2213,6 @@ func (m model) palettePreviewLines() []string {
 	}
 	if len(out) == 0 {
 		out = append(out, "  (no generated palette in selected backup)")
-	}
-	manual := []struct {
-		Label string
-		Hex   string
-	}{
-		{"text", m.textColor},
-		{"cursor", m.cursorColor},
-		{"ansi red", m.ansiRed},
-		{"ansi green", m.ansiGreen},
-		{"ansi yellow", m.ansiYellow},
-		{"ansi blue", m.ansiBlue},
-		{"ansi magenta", m.ansiMagenta},
-		{"ansi cyan", m.ansiCyan},
-	}
-	anyManual := false
-	for _, item := range manual {
-		if strings.TrimSpace(item.Hex) == "" {
-			continue
-		}
-		if !anyManual {
-			out = append(out, "", "  manual overrides")
-			anyManual = true
-		}
-		swFg := ensureReadableTextColor(item.Hex, "#111111", "#f5f5f8")
-		sw := lipgloss.NewStyle().Background(lipgloss.Color(item.Hex)).Foreground(lipgloss.Color(swFg)).Render("  ")
-		out = append(out, fmt.Sprintf("  %s %s %s", sw, item.Hex, item.Label))
 	}
 	return out
 }

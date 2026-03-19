@@ -2,47 +2,41 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestPageNavigationThreePages(t *testing.T) {
+func TestPageNavigationTwoPages(t *testing.T) {
 	m := model{page: pageHome}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	m1 := next.(model)
-	if m1.page != pageSettings {
-		t.Fatalf("page after right from home = %d, want %d", m1.page, pageSettings)
+	if m1.page != pageTheme {
+		t.Fatalf("page after right from home = %d, want %d", m1.page, pageTheme)
 	}
 
 	next, _ = m1.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	m2 := next.(model)
-	if m2.page != pageTheme {
-		t.Fatalf("page after right from settings = %d, want %d", m2.page, pageTheme)
+	if m2.page != pageHome {
+		t.Fatalf("page after right from theme = %d, want %d", m2.page, pageHome)
 	}
 
-	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	m3 := next.(model)
-	if m3.page != pageHome {
-		t.Fatalf("page after right from theme = %d, want %d", m3.page, pageHome)
-	}
-
-	next, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	m4 := next.(model)
-	if m4.page != pageTheme {
-		t.Fatalf("page after left from home = %d, want %d", m4.page, pageTheme)
+	if m3.page != pageTheme {
+		t.Fatalf("page after left from home = %d, want %d", m3.page, pageTheme)
 	}
 }
 
-func TestPageLabelIncludesSettings(t *testing.T) {
+func TestPageLabelIncludesTheme(t *testing.T) {
 	cases := []struct {
 		page int
 		want string
 	}{
 		{page: pageHome, want: "Tooie"},
 		{page: pageTheme, want: "Theme"},
-		{page: pageSettings, want: "Settings"},
 	}
 	for _, tc := range cases {
 		m := model{page: tc.page}
@@ -89,5 +83,77 @@ func TestPersistedShellSettingsRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(out, in) {
 		t.Fatalf("round trip = %#v, want %#v", out, in)
+	}
+}
+
+func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
+	m := model{
+		page:          pageTheme,
+		themeSource:   defaultSource,
+		mode:          defaultMode,
+		profile:       defaultProfile,
+		widgetBattery: true,
+		widgetCPU:     true,
+		widgetRAM:     false,
+		widgetWeather: true,
+		selectedHexes: map[string]string{
+			"primary":    "#aeb1f4",
+			"secondary":  "#a9cee2",
+			"tertiary":   "#e1a4d3",
+			"error":      "#fa8c87",
+			"surface":    "#1d2024",
+			"on_surface": "#e1e2e9",
+		},
+	}
+
+	got := m.renderThemePage(96, 18)
+	for _, want := range []string{
+		"Colors",
+		"Status Bar",
+		"Battery: on",
+		"Weather: on",
+		"#aeb1f4 primary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderThemePage() missing %q in:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Details", "Current Theme", "Setup Btop", "Reset Bootstrap"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("renderThemePage() unexpectedly contains %q in:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	m := model{
+		themeSource:   defaultSource,
+		mode:          defaultMode,
+		profile:       defaultProfile,
+		widgetBattery: true,
+		widgetCPU:     true,
+		widgetRAM:     false,
+		widgetWeather: true,
+	}
+	m.settingIndex = len(m.settings())
+
+	next, cmd := m.activateSetting()
+	got := next.(model)
+	if got.widgetBattery {
+		t.Fatalf("widget battery should toggle off")
+	}
+	if cmd == nil {
+		t.Fatalf("activateSetting() should return sync command for widget toggle")
+	}
+
+	settings, ok := loadPersistedShellSettings()
+	if !ok {
+		t.Fatalf("loadPersistedShellSettings() expected ok after widget toggle")
+	}
+	if settings.WidgetBattery {
+		t.Fatalf("persisted battery toggle should be off, got %#v", settings)
 	}
 }
