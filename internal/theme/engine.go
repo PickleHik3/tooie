@@ -18,6 +18,7 @@ const (
 type Options struct {
 	Source         Source
 	Mode           string
+	StyleFamily    string
 	Profile        string
 	StatusPalette  string
 	TextOverride   string
@@ -123,12 +124,15 @@ func BuildRolesJSON(roles map[string]string) ([]byte, error) {
 func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	roles := normalizeRoleMap(rolesInput)
 	mode := canonicalMode(opts.Mode)
-	profile := canonicalProfile(opts.Profile)
+	styleFamily := canonicalStyleFamily(opts.StyleFamily)
+	if styleFamily == "adaptive" && strings.TrimSpace(opts.StyleFamily) == "" {
+		styleFamily = canonicalStyleFamily(opts.Profile)
+	}
 	if mode == "" {
 		mode = "dark"
 	}
 	if opts.Source == SourceWallpaper {
-		roles = applyProfile(roles, profile, mode)
+		roles = applyStyleFamily(roles, styleFamily, mode)
 	}
 
 	bg := role(roles, "background", tern(mode == "dark", "#1a1b26", "#eff1f5"))
@@ -255,6 +259,8 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		"effective_tertiary":        roles["tertiary"],
 		"effective_error":           roles["error"],
 		"contrast_guard_background": NormalizeHex(guard),
+		"style_family":              styleFamily,
+		"style_family_version":      "1",
 	}
 
 	return Result{
@@ -280,7 +286,7 @@ func canonicalMode(v string) string {
 	}
 }
 
-func canonicalProfile(v string) string {
+func canonicalStyleFamily(v string) string {
 	switch strings.TrimSpace(strings.ToLower(v)) {
 	case "", "adaptive":
 		return "adaptive"
@@ -303,7 +309,11 @@ func canonicalProfile(v string) string {
 	}
 }
 
-func applyProfile(in map[string]string, profile, mode string) map[string]string {
+func canonicalProfile(v string) string {
+	return canonicalStyleFamily(v)
+}
+
+func applyStyleFamily(in map[string]string, styleFamily, mode string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
 		out[k] = NormalizeHex(v)
@@ -313,61 +323,107 @@ func applyProfile(in map[string]string, profile, mode string) map[string]string 
 	t := role(out, "tertiary", "#bb9af7")
 	e := role(out, "error", "#ff5f5f")
 	bg := role(out, "background", tern(mode == "dark", "#1a1b26", "#eff1f5"))
+	surface := role(out, "surface", blendHex(bg, tern(mode == "dark", "#000000", "#ffffff"), 0.10))
+	outline := role(out, "outline", blendHex(tern(mode == "dark", "#d8daf0", "#2a2c3d"), bg, 0.68))
 	fgAnchor := tern(mode == "dark", "#f5f5f8", "#111118")
-	switch profile {
+	switch styleFamily {
 	case "soft-pastel":
-		p = blendHex(p, "#89b4fa", 0.34)
-		s = blendHex(s, "#94e2d5", 0.30)
-		t = blendHex(t, "#cba6f7", 0.30)
-		e = blendHex(e, "#f38ba8", 0.32)
-		bg = blendHex(bg, tern(mode == "dark", "#1e1e2e", "#eff1f5"), 0.28)
+		p = blendHex(p, "#c6b6ff", 0.66)
+		s = blendHex(s, "#a7d9ff", 0.64)
+		t = blendHex(t, "#f0b8d8", 0.64)
+		e = blendHex(e, "#ff9db8", 0.58)
+		bg = blendHex(bg, tern(mode == "dark", "#2b2233", "#f8f1ff"), 0.58)
+		surface = blendHex(surface, tern(mode == "dark", "#34293f", "#f2e9fb"), 0.56)
+		outline = blendHex(outline, tern(mode == "dark", "#b8a9d0", "#8c79a8"), 0.52)
 	case "studio-dark":
-		p = blendHex(p, "#61afef", 0.36)
-		s = blendHex(s, "#56b6c2", 0.32)
-		t = blendHex(t, "#c678dd", 0.34)
-		e = blendHex(e, "#e06c75", 0.36)
-		bg = blendHex(bg, tern(mode == "dark", "#282c34", "#fafafa"), 0.24)
+		p = blendHex(p, "#7ea8d9", 0.58)
+		s = blendHex(s, "#78b7c8", 0.56)
+		t = blendHex(t, "#a58fc0", 0.54)
+		e = blendHex(e, "#d07d86", 0.56)
+		bg = blendHex(bg, tern(mode == "dark", "#1d232e", "#eef2f7"), 0.62)
+		surface = blendHex(surface, tern(mode == "dark", "#252d3a", "#e6ecf4"), 0.58)
+		outline = blendHex(outline, tern(mode == "dark", "#7f8fa6", "#5e6f87"), 0.54)
 	case "neon-night":
-		p = blendHex(p, "#7aa2f7", 0.40)
-		s = blendHex(s, "#7dcfff", 0.35)
-		t = blendHex(t, "#bb9af7", 0.36)
-		e = blendHex(e, "#f7768e", 0.38)
-		bg = blendHex(bg, tern(mode == "dark", "#1a1b26", "#e6e7ed"), 0.26)
+		p = blendHex(p, "#5ea2ff", 0.72)
+		s = blendHex(s, "#38e3ff", 0.70)
+		t = blendHex(t, "#d180ff", 0.70)
+		e = blendHex(e, "#ff6d93", 0.66)
+		bg = blendHex(bg, tern(mode == "dark", "#101226", "#e9ecff"), 0.68)
+		surface = blendHex(surface, tern(mode == "dark", "#171a31", "#dde3ff"), 0.64)
+		outline = blendHex(outline, tern(mode == "dark", "#6a79b8", "#5f6bb5"), 0.60)
 	case "warm-retro":
-		p = blendHex(p, "#458588", 0.44)
-		s = blendHex(s, "#689d6a", 0.42)
-		t = blendHex(t, "#b16286", 0.40)
-		e = blendHex(e, "#cc241d", 0.44)
-		bg = blendHex(bg, tern(mode == "dark", "#282828", "#fbf1c7"), 0.30)
+		p = blendHex(p, "#b98f5a", 0.68)
+		s = blendHex(s, "#8ea467", 0.66)
+		t = blendHex(t, "#c17374", 0.64)
+		e = blendHex(e, "#dc6e4e", 0.66)
+		bg = blendHex(bg, tern(mode == "dark", "#2b1f1a", "#f7e7cf"), 0.64)
+		surface = blendHex(surface, tern(mode == "dark", "#362821", "#ecdac1"), 0.60)
+		outline = blendHex(outline, tern(mode == "dark", "#b79b79", "#8f6f4f"), 0.56)
 	case "vivid-noir":
-		p = blendHex(p, "#bd93f9", 0.40)
-		s = blendHex(s, "#8be9fd", 0.38)
-		t = blendHex(t, "#ff79c6", 0.36)
-		e = blendHex(e, "#ff5555", 0.40)
-		bg = blendHex(bg, tern(mode == "dark", "#282a36", "#fffbeb"), 0.24)
+		p = blendHex(p, "#b58bff", 0.74)
+		s = blendHex(s, "#68e1ff", 0.72)
+		t = blendHex(t, "#ff69c7", 0.72)
+		e = blendHex(e, "#ff6262", 0.70)
+		bg = blendHex(bg, tern(mode == "dark", "#141119", "#fff6eb"), 0.70)
+		surface = blendHex(surface, tern(mode == "dark", "#1c1623", "#f6ecdf"), 0.66)
+		outline = blendHex(outline, tern(mode == "dark", "#8d78a9", "#8f6aa5"), 0.60)
 	case "arctic-calm":
-		p = blendHex(p, "#81a1c1", 0.42)
-		s = blendHex(s, "#88c0d0", 0.40)
-		t = blendHex(t, "#b48ead", 0.38)
-		e = blendHex(e, "#bf616a", 0.42)
-		bg = blendHex(bg, tern(mode == "dark", "#2e3440", "#eceff4"), 0.28)
+		p = blendHex(p, "#8ea5d6", 0.62)
+		s = blendHex(s, "#7dc0d2", 0.60)
+		t = blendHex(t, "#9ab2cb", 0.62)
+		e = blendHex(e, "#d08086", 0.58)
+		bg = blendHex(bg, tern(mode == "dark", "#1a2431", "#eaf2f8"), 0.64)
+		surface = blendHex(surface, tern(mode == "dark", "#223041", "#e1ebf4"), 0.62)
+		outline = blendHex(outline, tern(mode == "dark", "#8ea2bb", "#6f879f"), 0.58)
 	default: // adaptive
 		p = blendHex(p, "#4f8dff", 0.22)
 		s = blendHex(s, "#31c6c9", 0.24)
 		t = blendHex(t, "#cf63ff", 0.22)
 		e = blendHex(e, "#ff5f5f", 0.26)
+		surface = blendHex(surface, tern(mode == "dark", "#1f2230", "#f2f4f8"), 0.18)
+		outline = blendHex(outline, tern(mode == "dark", "#8a8fb0", "#6b718f"), 0.20)
 	}
 	// Keep accents from flattening against surfaces.
-	p = blendHex(blendHex(p, fgAnchor, 0.06), bg, 0.04)
-	s = blendHex(blendHex(s, fgAnchor, 0.06), bg, 0.04)
-	t = blendHex(blendHex(t, fgAnchor, 0.06), bg, 0.04)
-	e = blendHex(e, bg, 0.02)
+	accentLift := 0.06
+	accentSink := 0.04
+	if styleFamily != "adaptive" {
+		accentLift = 0.03
+		accentSink = 0.01
+	}
+	p = blendHex(blendHex(p, fgAnchor, accentLift), bg, accentSink)
+	s = blendHex(blendHex(s, fgAnchor, accentLift), bg, accentSink)
+	t = blendHex(blendHex(t, fgAnchor, accentLift), bg, accentSink)
+	e = blendHex(e, bg, 0.01)
+	surfaceContainer := blendHex(surface, bg, 0.22)
+	surfaceContainerHigh := blendHex(surface, fgAnchor, ternf(mode == "dark", 0.12, 0.08))
+	surfaceVariant := blendHex(surface, outline, 0.30)
+	outlineVariant := blendHex(outline, surface, 0.34)
+	out["surface"] = NormalizeHex(surface)
+	out["surface_container"] = NormalizeHex(surfaceContainer)
+	out["surface_container_high"] = NormalizeHex(surfaceContainerHigh)
+	out["surface_variant"] = NormalizeHex(surfaceVariant)
+	out["outline"] = NormalizeHex(outline)
+	out["outline_variant"] = NormalizeHex(outlineVariant)
+	out["primary_fixed"] = NormalizeHex(blendHex(p, fgAnchor, 0.16))
+	out["secondary_fixed"] = NormalizeHex(blendHex(s, fgAnchor, 0.14))
+	out["tertiary_fixed"] = NormalizeHex(blendHex(t, fgAnchor, 0.14))
+	out["primary_fixed_dim"] = NormalizeHex(blendHex(p, bg, 0.08))
+	out["secondary_fixed_dim"] = NormalizeHex(blendHex(s, bg, 0.08))
+	out["tertiary_fixed_dim"] = NormalizeHex(blendHex(t, bg, 0.08))
+	out["primary_container"] = NormalizeHex(blendHex(p, surface, 0.48))
+	out["secondary_container"] = NormalizeHex(blendHex(s, surface, 0.50))
+	out["tertiary_container"] = NormalizeHex(blendHex(t, surface, 0.52))
+	out["error_container"] = NormalizeHex(blendHex(e, surface, 0.54))
 	out["background"] = NormalizeHex(bg)
 	out["primary"] = NormalizeHex(p)
 	out["secondary"] = NormalizeHex(s)
 	out["tertiary"] = NormalizeHex(t)
 	out["error"] = NormalizeHex(e)
 	return out
+}
+
+func applyProfile(in map[string]string, profile, mode string) map[string]string {
+	return applyStyleFamily(in, profile, mode)
 }
 
 func normalizeRoleMap(in map[string]string) map[string]string {

@@ -266,7 +266,7 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 	}
 }
 
-func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
+func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 	m := model{
 		themeSource:   "wallpaper",
 		mode:          "auto",
@@ -283,7 +283,7 @@ func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
 		"--status-palette", "vibrant",
 		"--status-theme", "default",
 		"-m", "auto",
-		"--profile", "neon-night",
+		"--style-family", "neon-night",
 		"--widget-battery", "off",
 		"--widget-cpu", "on",
 		"--widget-ram", "off",

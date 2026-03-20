@@ -34,6 +34,7 @@ type themeApplyConfig struct {
 	MatugenBin    string
 	StatusPalette string
 	StatusTheme   string
+	StyleFamily   string
 	Profile       string
 	TextColor     string
 	CursorColor   string
@@ -138,7 +139,10 @@ func runThemeApplyCommand(args []string) int {
 	meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
 	meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	if cfg.ThemeSource != "preset" {
-		meta["profile"] = canonicalProfile(cfg.Profile)
+		family := canonicalProfile(cfg.StyleFamily)
+		meta["style_family"] = family
+		meta["style_family_version"] = "1"
+		meta["profile"] = family // backward compatibility for existing readers
 	}
 	meta["ansi_red_override"] = strings.TrimSpace(cfg.AnsiRed)
 	meta["ansi_green_override"] = strings.TrimSpace(cfg.AnsiGreen)
@@ -273,7 +277,8 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	computed, err := itheme.Compute(roles, itheme.Options{
 		Source:         itheme.Source(cfg.ThemeSource),
 		Mode:           effectiveMode,
-		Profile:        cfg.Profile,
+		StyleFamily:    cfg.StyleFamily,
+		Profile:        cfg.StyleFamily, // backwards compatibility in theme.Compute
 		StatusPalette:  cfg.StatusPalette,
 		TextOverride:   cfg.TextColor,
 		CursorOverride: cfg.CursorColor,
@@ -290,6 +295,14 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	out.Cursor = computed.Cursor
 	out.Colors = computed.Colors
 	out.Meta = computed.Meta
+	for role, hex := range out.Roles {
+		role = strings.TrimSpace(role)
+		hex = strings.TrimSpace(hex)
+		if role == "" || hex == "" {
+			continue
+		}
+		out.Meta["effective_role_"+role] = strings.ToLower(hex)
+	}
 	out.Meta["status_palette"] = cfg.StatusPalette
 	out.Meta["status_theme"] = cfg.StatusTheme
 	out.Meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
@@ -445,13 +458,8 @@ func autoCandidateModes(mode string, metrics autoDecisionMetrics) []string {
 	if mode != "auto" {
 		return []string{mode}
 	}
-	if darkDominantScene(metrics) {
-		return []string{"dark"}
-	}
-	if brightDominantScene(metrics) {
-		return []string{"light"}
-	}
-	return []string{"dark", "light"}
+	// Readability-first policy for terminal use: auto always resolves to dark candidates.
+	return []string{"dark"}
 }
 
 func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string) {
@@ -479,7 +487,7 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	bg := getRoleOr(c.Roles, "background", "#1a1b26")
 	fg := getRoleOr(c.Roles, "on_background", "#c0caf5")
 	fgContrast := contrastRatioHex(fg, bg)
-	if fgContrast < 4.5 {
+	if fgContrast < 7.0 {
 		return -1000 + fgContrast
 	}
 	accentMin := minFloat(
@@ -499,7 +507,7 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 		modePenalty += 2.4
 	}
 	if brightDominantScene(metrics) && c.Mode == "dark" {
-		modePenalty += 2.0
+		modePenalty += 0.65
 	}
 	sourcePenalty := 0.0
 	if c.SourceIndex > 0 {
@@ -600,6 +608,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		PresetVariant: "mocha",
 		StatusPalette: "default",
 		StatusTheme:   "default",
+		StyleFamily:   "adaptive",
 		Profile:       "adaptive",
 		WidgetBattery: true,
 		WidgetCPU:     true,
@@ -625,6 +634,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.CursorColor, "cursor-color", "", "")
 	fs.StringVar(&cfg.StatusPalette, "status-palette", cfg.StatusPalette, "")
 	fs.StringVar(&cfg.StatusTheme, "status-theme", cfg.StatusTheme, "")
+	fs.StringVar(&cfg.StyleFamily, "style-family", cfg.StyleFamily, "")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "")
 	fs.BoolVar(&cfg.PreviewOnly, "preview-only", false, "")
 	fs.StringVar(&cfg.ReuseBackupID, "reuse-backup", "", "")
@@ -657,9 +667,19 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	if cfg.StatusTheme == "" {
 		return cfg, fmt.Errorf("invalid status theme")
 	}
-	cfg.Profile = canonicalProfile(cfg.Profile)
-	if !contains(profilePresets, cfg.Profile) {
-		return cfg, fmt.Errorf("invalid profile: %s", cfg.Profile)
+	styleFamilySet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "style-family" {
+			styleFamilySet = true
+		}
+	})
+	if !styleFamilySet || strings.TrimSpace(cfg.StyleFamily) == "" {
+		cfg.StyleFamily = cfg.Profile
+	}
+	cfg.StyleFamily = canonicalProfile(cfg.StyleFamily)
+	cfg.Profile = cfg.StyleFamily // keep both fields normalized the same
+	if !contains(profilePresets, cfg.StyleFamily) {
+		return cfg, fmt.Errorf("invalid style family: %s", cfg.StyleFamily)
 	}
 	for _, item := range []struct {
 		v    string
@@ -913,9 +933,11 @@ func renderTmuxBlock(payload computedPayload) string {
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
 	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
 	errorBase := nonBlackStatusColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), payload.Foreground)
-	errorContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "error_container", attentionBG), payload.Foreground)
 	weatherColor := ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground)
 	separatorColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48)), payload.Foreground)
+	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
+	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
+	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
 	chargingColor := ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground)
 	batteryColors := []string{
 		ensureReadableTextColor(payload.Background, errorBase, payload.Foreground),
@@ -924,6 +946,28 @@ func renderTmuxBlock(payload computedPayload) string {
 		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
 		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
 		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+	}
+	for i, c := range batteryColors {
+		batteryColors[i] = ensureReadableTextColor(payload.Background, saturateHexColor(c, 0.34), payload.Foreground)
+	}
+	batteryFullColors := [4]string{}
+	batteryHalfColors := [4]string{}
+	batteryEmptyColors := [4]string{}
+	batAnchors := []string{
+		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(errorBase, "#ff4d4d", 0.55), 0.50), payload.Foreground),
+		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(errorBase, "#ff9f43", 0.66), 0.46), payload.Foreground),
+		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(tertiaryBase, "#ffd166", 0.74), 0.42), payload.Foreground),
+		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(secondaryBase, "#49d17d", 0.72), 0.40), payload.Foreground),
+	}
+	for i := 0; i < 4; i++ {
+		fullT := 0.06 + (0.88 * float64(i) / 3.0)
+		halfT := 0.18 + (0.88 * float64(i) / 3.0)
+		full := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground)
+		half := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground)
+		empty := ensureReadableTextColor(payload.Background, blendHexColor(full, surfaceHighest, 0.62), payload.Foreground)
+		batteryFullColors[i] = full
+		batteryHalfColors[i] = half
+		batteryEmptyColors[i] = empty
 	}
 	cpuColors := []string{
 		ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground),
@@ -941,7 +985,8 @@ func renderTmuxBlock(payload computedPayload) string {
 		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
 		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
 	}
-	batteryBG := nonBlackStatusColor(blendHexColor(errorContainer, surfaceHighest, 0.24), payload.Foreground)
+	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.12, 0.20)))
+	chargingBG := nonBlackStatusColor(blendHexColor(blendHexColor(secondaryBase, primaryBase, 0.35), tertiaryBase, 0.18), payload.Foreground)
 	cpuBG := nonBlackStatusColor(blendHexColor(secondaryContainer, surfaceHighest, 0.20), payload.Foreground)
 	ramBG := nonBlackStatusColor(blendHexColor(primaryContainer, surfaceHighest, 0.22), payload.Foreground)
 	weatherBG := nonBlackStatusColor(blendHexColor(tertiaryContainer, surfaceHighest, 0.18), payload.Foreground)
@@ -954,6 +999,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	leftEdgeStyle := edgeStyle
 	bgRight := "on"
 	leftGap := " "
+	leftSessionPad := "none"
 	rightGap := "space"
 	windowStatusFormat := fmt.Sprintf(`#[fg=%s,bg=%s,nobold,noitalics,nounderscore] #I `, windowInactiveFG, windowInactiveBG)
 	windowStatusCurrentFormat := fmt.Sprintf(`#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W `, windowActiveFG, windowActiveBG)
@@ -961,17 +1007,20 @@ func renderTmuxBlock(payload computedPayload) string {
 	case "rounded":
 		// One outer rounded capsule for the full window list, with active window inset as its own pill.
 		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag, #I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
-		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W #{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
+		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
 	case "rectangle":
 		edgeStyle = "flat"
 		leftEdgeStyle = "flat"
 		leftGap = " "
 		rightGap = "none"
+		leftSessionPad = "space"
 	default:
 		leftEdgeStyle = "flat"
 		bgRight = "off"
+		leftSessionPad = "space"
 	}
-	statusRule := strings.Repeat("─", 260)
+	statusRuleThin := strings.Repeat("─", 260)
+	statusRuleThick := strings.Repeat("━", 260)
 	return fmt.Sprintf(`# >>> MATUGEN THEME START >>>
 # Generated by %s/theme apply
 set -g status-style "bg=default,fg=%s"
@@ -983,9 +1032,10 @@ set -g @status-tmux-bg-right "%s"
 set -g @status-tmux-left-bg-session "%s"
 set -g @status-tmux-left-bg-prefix "%s"
 set -g @status-tmux-left-bg-copy "%s"
+set -g @status-tmux-left-session-pad "%s"
 set -g status-left " #(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
 set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
-set -g status-format[1] "#[fg=%s]%s"
+set -g status-format[1] "#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#[fg=%s]%s}}"
 set -g window-status-separator ""
 set -g window-status-format "%s"
 set -g window-status-current-format "%s"
@@ -1016,6 +1066,18 @@ set -g @status-tmux-color-battery-3 "%s"
 set -g @status-tmux-color-battery-4 "%s"
 set -g @status-tmux-color-battery-5 "%s"
 set -g @status-tmux-color-battery-6 "%s"
+set -g @status-tmux-color-battery-full-1 "%s"
+set -g @status-tmux-color-battery-full-2 "%s"
+set -g @status-tmux-color-battery-full-3 "%s"
+set -g @status-tmux-color-battery-full-4 "%s"
+set -g @status-tmux-color-battery-half-1 "%s"
+set -g @status-tmux-color-battery-half-2 "%s"
+set -g @status-tmux-color-battery-half-3 "%s"
+set -g @status-tmux-color-battery-half-4 "%s"
+set -g @status-tmux-color-battery-empty-1 "%s"
+set -g @status-tmux-color-battery-empty-2 "%s"
+set -g @status-tmux-color-battery-empty-3 "%s"
+set -g @status-tmux-color-battery-empty-4 "%s"
 set -g @status-tmux-color-cpu-1 "%s"
 set -g @status-tmux-color-cpu-2 "%s"
 set -g @status-tmux-color-cpu-3 "%s"
@@ -1029,6 +1091,7 @@ set -g @status-tmux-color-ram-4 "%s"
 set -g @status-tmux-color-ram-5 "%s"
 set -g @status-tmux-color-ram-6 "%s"
 set -g @status-tmux-bg-battery "%s"
+set -g @status-tmux-bg-charging "%s"
 set -g @status-tmux-bg-cpu "%s"
 set -g @status-tmux-bg-ram "%s"
 set -g @status-tmux-bg-weather "%s"
@@ -1042,8 +1105,11 @@ set -g @status-tmux-fg-on-accent "%s"
 		sessionBG,
 		prefixBG,
 		copyBG,
+		leftSessionPad,
 		leftGap,
-		separatorColor, statusRule,
+		rulePrefixColor, statusRuleThick,
+		ruleCopyColor, statusRuleThick,
+		ruleBaseColor, statusRuleThin,
 		windowStatusFormat,
 		windowStatusCurrentFormat,
 		attentionFG, attentionBG, attentionFG, attentionBG,
@@ -1057,9 +1123,13 @@ set -g @status-tmux-fg-on-accent "%s"
 		rightGap,
 		separatorColor, weatherColor, chargingColor,
 		batteryColors[0], batteryColors[1], batteryColors[2], batteryColors[3], batteryColors[4], batteryColors[5],
+		batteryFullColors[0], batteryFullColors[1], batteryFullColors[2], batteryFullColors[3],
+		batteryHalfColors[0], batteryHalfColors[1], batteryHalfColors[2], batteryHalfColors[3],
+		batteryEmptyColors[0], batteryEmptyColors[1], batteryEmptyColors[2], batteryEmptyColors[3],
 		cpuColors[0], cpuColors[1], cpuColors[2], cpuColors[3], cpuColors[4], cpuColors[5],
 		ramColors[0], ramColors[1], ramColors[2], ramColors[3], ramColors[4], ramColors[5],
 		batteryBGSetting,
+		chargingBG,
 		cpuBG,
 		ramBG,
 		weatherBG,
@@ -1571,4 +1641,79 @@ func hueFromHex(hex string) float64 {
 		h += 360.0
 	}
 	return h
+}
+
+func saturateHexColor(hex string, boost float64) string {
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	light := (maxv + minv) / 2.0
+	if maxv == minv {
+		return normalizeHexColor(hex)
+	}
+	var sat float64
+	delta := maxv - minv
+	if light > 0.5 {
+		sat = delta / (2.0 - maxv - minv)
+	} else {
+		sat = delta / (maxv + minv)
+	}
+	h := hueFromHex(hex)
+	sat = clamp01(sat + boost*(1.0-sat))
+	return hslToHex(h, sat, light)
+}
+
+func hslToHex(h, s, l float64) string {
+	h = math.Mod(h, 360.0)
+	if h < 0 {
+		h += 360.0
+	}
+	h /= 360.0
+	if s <= 0 {
+		v := int(math.Round(l * 255.0))
+		return fmt.Sprintf("#%02x%02x%02x", clampInt(v, 0, 255), clampInt(v, 0, 255), clampInt(v, 0, 255))
+	}
+	var q float64
+	if l < 0.5 {
+		q = l * (1 + s)
+	} else {
+		q = l + s - l*s
+	}
+	p := 2*l - q
+	r := hue2rgb(p, q, h+1.0/3.0)
+	g := hue2rgb(p, q, h)
+	b := hue2rgb(p, q, h-1.0/3.0)
+	return fmt.Sprintf("#%02x%02x%02x", clampInt(int(math.Round(r*255.0)), 0, 255), clampInt(int(math.Round(g*255.0)), 0, 255), clampInt(int(math.Round(b*255.0)), 0, 255))
+}
+
+func hue2rgb(p, q, t float64) float64 {
+	if t < 0 {
+		t += 1
+	}
+	if t > 1 {
+		t -= 1
+	}
+	if t < 1.0/6.0 {
+		return p + (q-p)*6*t
+	}
+	if t < 1.0/2.0 {
+		return q
+	}
+	if t < 2.0/3.0 {
+		return p + (q-p)*(2.0/3.0-t)*6
+	}
+	return p
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

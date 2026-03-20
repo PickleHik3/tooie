@@ -110,10 +110,11 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	for _, want := range []string{
 		"Colors",
 		"Status Bar",
+		"Theme: Default",
 		"Battery: on",
 		"Weather: on",
-		"Apply (Shift+A)",
-		"#aeb1f4 primary",
+		"Palette",
+		"Wallpaper",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderThemePage() missing %q in:\n%s", want, got)
@@ -123,6 +124,60 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("renderThemePage() unexpectedly contains %q in:\n%s", unwanted, got)
 		}
+	}
+}
+
+func TestLowercaseAOpensApplyConfirmOnThemePage(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	got := next.(model)
+	if !got.showApplyConfirm {
+		t.Fatalf("expected lowercase a to open apply confirmation")
+	}
+}
+
+func TestUppercaseAStillAppliesImmediatelyOnThemePage(t *testing.T) {
+	m := model{
+		page:             pageTheme,
+		themeSource:      defaultSource,
+		mode:             defaultMode,
+		profile:          defaultProfile,
+		statusTheme:      defaultStatusTheme,
+		widgetBattery:    true,
+		widgetCPU:        true,
+		widgetRAM:        true,
+		widgetWeather:    true,
+		lastAppliedTheme: "stale",
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	got := next.(model)
+	if cmd == nil || !got.applying {
+		t.Fatalf("expected uppercase A to start immediate apply")
+	}
+}
+
+func TestKeybindsCycleThemeSettings(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+		statusTheme: defaultStatusTheme,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	got := next.(model)
+	if got.themeSource == defaultSource {
+		t.Fatalf("expected s to cycle source")
+	}
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	got = next.(model)
+	if got.statusTheme == defaultStatusTheme {
+		t.Fatalf("expected t to cycle tmux theme")
 	}
 }
 

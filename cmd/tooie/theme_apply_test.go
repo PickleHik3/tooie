@@ -309,6 +309,24 @@ func TestParseThemeApplyFlagsWidgetToggles(t *testing.T) {
 	}
 }
 
+func TestParseThemeApplyFlagsStyleFamilyAndProfileAlias(t *testing.T) {
+	cfg, err := parseThemeApplyFlags([]string{"--style-family", "warm-retro"})
+	if err != nil {
+		t.Fatalf("parseThemeApplyFlags() style-family error: %v", err)
+	}
+	if cfg.StyleFamily != "warm-retro" || cfg.Profile != "warm-retro" {
+		t.Fatalf("expected style family normalization, got style=%q profile=%q", cfg.StyleFamily, cfg.Profile)
+	}
+
+	cfg, err = parseThemeApplyFlags([]string{"--profile", "vivid-noir"})
+	if err != nil {
+		t.Fatalf("parseThemeApplyFlags() profile alias error: %v", err)
+	}
+	if cfg.StyleFamily != "vivid-noir" || cfg.Profile != "vivid-noir" {
+		t.Fatalf("expected profile alias to map to style-family, got style=%q profile=%q", cfg.StyleFamily, cfg.Profile)
+	}
+}
+
 func TestParseThemeApplyFlagsRejectsInvalidWidgetToggle(t *testing.T) {
 	if _, err := parseThemeApplyFlags([]string{"--widget-weather", "maybe"}); err == nil {
 		t.Fatalf("expected invalid widget toggle value to fail")
@@ -361,7 +379,7 @@ func TestAutoCandidateModesForMixedScene(t *testing.T) {
 		BrightPixelRatio: 0.20,
 		EdgeWeightedLuma: 0.50,
 	})
-	if len(modes) != 2 {
-		t.Fatalf("expected dual mode candidates, got %v", modes)
+	if len(modes) != 1 || modes[0] != "dark" {
+		t.Fatalf("expected readability-first dark candidates, got %v", modes)
 	}
 }

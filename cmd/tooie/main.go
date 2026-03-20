@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	internaltheme "github.com/PickleHik3/tooie/internal/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/lipgloss"
@@ -36,6 +37,7 @@ const (
 	defaultStatusTheme = "default"
 	defaultProfile     = "adaptive"
 	defaultSource      = "wallpaper"
+	themeCacheSchema   = "2026-03-20-v2"
 	pageHome           = 0
 	pageTheme          = 1
 	totalPages         = 2
@@ -207,6 +209,8 @@ type model struct {
 	customizing      bool
 	showHints        bool
 	showBackups      bool
+	showApplyConfirm bool
+	applyConfirmIdx  int
 	selectedHexes    map[string]string
 	metricsErr       error
 	applying         bool
@@ -433,7 +437,9 @@ func (m *model) loadThemeStateFromBackups() {
 	if v := strings.TrimSpace(meta["status_theme"]); v != "" {
 		m.statusTheme = v
 	}
-	if v := strings.TrimSpace(meta["profile"]); v != "" {
+	if v := strings.TrimSpace(meta["style_family"]); v != "" {
+		m.profile = v
+	} else if v := strings.TrimSpace(meta["profile"]); v != "" {
 		m.profile = v
 	} else if v := strings.TrimSpace(meta["style_preset"]); v != "" {
 		m.profile = canonicalProfile(v)
@@ -894,6 +900,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.backupIndex >= len(m.backups) {
 			m.backupIndex = max(0, len(m.backups)-1)
 		}
+		if id := strings.TrimSpace(msg.backupID); id != "" {
+			if idx := findBackupIndexByID(m.backups, id); idx >= 0 {
+				m.backupIndex = idx
+			}
+		}
 		m.loadPreviewColors()
 		return m, nil
 	case homeAppsLoadedMsg:
@@ -971,9 +982,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.metricsPaused {
 						return m, nil
 					}
-					return m, pollMetrics()
+					return m, tea.Batch(tea.ClearScreen, pollMetrics())
 				}
-				return m, nil
+				return m, tea.ClearScreen
 			case "left", "h":
 				m.page = prevPageIndex(m.page)
 				if m.page == pageHome {
@@ -981,9 +992,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.metricsPaused {
 						return m, nil
 					}
-					return m, pollMetrics()
+					return m, tea.Batch(tea.ClearScreen, pollMetrics())
 				}
-				return m, nil
+				return m, tea.ClearScreen
 			}
 		}
 
@@ -1031,7 +1042,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.showHints {
 			switch msg.String() {
-			case "?", "esc", "enter":
+			case "?", "esc":
 				m.showHints = false
 				return m, nil
 			case "q", "ctrl+c":
@@ -1059,14 +1070,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.loadPreviewColors()
 				}
 				return m, nil
-			case "r":
-				m.backups = loadBackups()
-				if m.backupIndex >= len(m.backups) {
-					m.backupIndex = max(0, len(m.backups)-1)
-				}
-				m.loadPreviewColors()
-				m.lastStatus = "Backups refreshed"
-				return m, nil
 			case "enter":
 				if len(m.backups) == 0 {
 					m.lastStatus = "No backups to restore"
@@ -1085,6 +1088,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return statusMsg("Restore completed")
 				})
+			}
+			return m, nil
+		}
+
+		if m.showApplyConfirm {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "esc", "n":
+				m.showApplyConfirm = false
+				m.applyConfirmIdx = 0
+				m.lastStatus = "Apply canceled"
+				return m, nil
+			case "left", "h", "up", "k":
+				m.applyConfirmIdx = 0
+				return m, nil
+			case "right", "l", "down", "j", "tab":
+				m.applyConfirmIdx = 1
+				return m, nil
+			case "A", "y":
+				m.showApplyConfirm = false
+				m.applyConfirmIdx = 0
+				return m.requestThemeApply()
+			case "a", "enter":
+				confirm := m.applyConfirmIdx == 0
+				m.showApplyConfirm = false
+				m.applyConfirmIdx = 0
+				if confirm {
+					return m.requestThemeApply()
+				}
+				m.lastStatus = "Apply canceled"
+				return m, nil
 			}
 			return m, nil
 		}
@@ -1132,27 +1167,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settingIndex++
 			}
 			return m, nil
-		case "r":
-			m.backups = loadBackups()
-			if m.backupIndex >= len(m.backups) {
-				m.backupIndex = max(0, len(m.backups)-1)
-			}
-			m.loadPreviewColors()
-			m.lastStatus = "Backups refreshed"
-			return m, nil
 		case "g":
-			quoted := fmt.Sprintf("%q", defaultWall)
+			quoted := fmt.Sprintf("%q", preferredWallpaperPath())
 			shellCmd := "if command -v chafa >/dev/null 2>&1; then chafa -f sixel --animate=off " + quoted +
 				"; elif command -v img2sixel >/dev/null 2>&1; then img2sixel " + quoted +
 				"; else echo 'Install chafa or img2sixel for sixel preview'; fi; printf '\\nPress Enter to continue...'; read _"
 			cmd := exec.Command("sh", "-lc", shellCmd)
-			m.lastStatus = "Launching sixel preview..."
+			m.lastStatus = "Launching wallpaper preview..."
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				if err != nil {
-					return statusMsg("Sixel preview failed: " + err.Error())
+					return statusMsg("Wallpaper preview failed: " + err.Error())
 				}
-				return statusMsg("Sixel preview finished")
+				return statusMsg("Wallpaper preview finished")
 			})
+		case "u":
+			m.refreshCurrentPreviewColors()
+			return m.startApply(m.themeActionLabel(true), true, true)
+		case "s":
+			m.themeSource = nextThemeSource(m.themeSource)
+			m.normalizeThemeSelection()
+			return m, nil
+		case "m":
+			if m.themeSource == "preset" {
+				return m, nil
+			}
+			m.mode = nextMode(m.mode)
+			return m, nil
+		case "f":
+			if m.themeSource == "preset" {
+				return m, nil
+			}
+			m.profile = nextProfile(m.profile)
+			return m, nil
+		case "t":
+			m.statusTheme = nextStatusTheme(m.statusTheme)
+			return m, nil
+		case "a":
+			if m.page == pageTheme {
+				m.showApplyConfirm = true
+				m.applyConfirmIdx = 0
+			}
+			return m, nil
 		case "A":
 			if m.page == pageTheme {
 				return m.requestThemeApply()
@@ -1167,8 +1222,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) settings() []settingItem {
 	items := []settingItem{
-		{Label: "Update Colors", Target: "preview"},
-		{Label: "Source: " + displayThemeSource(m.themeSource), Target: "theme_source"},
+		{Label: hotkeyLabel("Update Colors", "u", "4"), Target: "preview"},
+		{Label: hotkeyLabel("Source", "s", "6") + ": " + displayThemeSource(m.themeSource), Target: "theme_source"},
 	}
 	if m.themeSource == "preset" {
 		items = append(items,
@@ -1177,8 +1232,8 @@ func (m model) settings() []settingItem {
 		)
 	} else {
 		items = append(items,
-			settingItem{Label: "Mode: " + displayMode(m.mode), Target: "mode"},
-			settingItem{Label: "Flavor: " + displayProfile(m.profile), Target: "profile"},
+			settingItem{Label: hotkeyLabel("Mode", "m", "5") + ": " + displayMode(m.mode), Target: "mode"},
+			settingItem{Label: hotkeyLabel("Family", "f", "2") + ": " + displayProfile(m.profile), Target: "profile"},
 		)
 	}
 	items = append(items,
@@ -1190,12 +1245,12 @@ func (m model) settings() []settingItem {
 
 func (m model) settingsPageItems() []settingItem {
 	return []settingItem{
-		{Label: "Theme: " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
+		{Label: hotkeyLabel("Theme", "t", "3") + ": " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
 		{Label: "Battery: " + onOffLabel(m.widgetBattery), Target: "widget_battery"},
 		{Label: "CPU: " + onOffLabel(m.widgetCPU), Target: "widget_cpu"},
 		{Label: "RAM: " + onOffLabel(m.widgetRAM), Target: "widget_ram"},
 		{Label: "Weather: " + onOffLabel(m.widgetWeather), Target: "widget_weather"},
-		{Label: "Apply (Shift+A)", Target: "apply"},
+		{Label: hotkeyLabel("Apply", "A", "1"), Target: "apply"},
 	}
 }
 
@@ -1418,9 +1473,19 @@ func (m model) View() string {
 	if m.page == pageTheme {
 		title = headerChip("Tooie / Settings", "12")
 	}
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	statusColor := ensureReadableTextColor(
+		m.themeRoleColor("background", "#11131c"),
+		m.themeRoleColor("secondary", "#94e2d5"),
+		"#8ec3b0",
+	)
+	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor))
 	if strings.Contains(strings.ToLower(m.lastStatus), "failed") {
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		errColor := ensureReadableTextColor(
+			m.themeRoleColor("background", "#11131c"),
+			m.themeRoleColor("error", "#f38ba8"),
+			"#e57373",
+		)
+		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(errColor))
 	}
 	statusText := "status: " + m.lastStatus
 	if m.applying {
@@ -1432,7 +1497,12 @@ func (m model) View() string {
 	}
 	hints := ""
 	if !m.applying {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[? hints]")
+		hintColor := ensureReadableTextColor(
+			m.themeRoleColor("background", "#11131c"),
+			blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), m.themeRoleColor("background", "#11131c"), 0.45),
+			"#9aa3ad",
+		)
+		hints = lipgloss.NewStyle().Foreground(lipgloss.Color(hintColor)).Render("[? hints]")
 	}
 	topBar := joinLR(status, hints, innerW)
 
@@ -1918,60 +1988,44 @@ func (m model) renderThemePage(usableW, contentH int) string {
 	usableW = max(28, usableW)
 	contentH = max(10, contentH)
 
-	compactTop := usableW < 82 && contentH < 31
-	topMin := max(10, len(m.settings())+4)
+	topMin := max(10, max(len(m.settings()), len(m.settingsPageItems()))+4)
+	bottomMin := 10
 	if m.hasActiveOverlay() {
-		topMin = max(topMin, m.interactionLineCount()+2)
-	}
-	if compactTop {
-		topMin = max(topMin, 14)
-	}
-	bottomMin := max(8, len(m.settingsPageItems())+4)
-	if compactTop {
-		bottomMin = max(8, len(m.settingsPageItems())+3)
+		bottomMin = max(bottomMin, m.interactionLineCount()+2)
 	}
 	topH := topMin
 	if contentH-topH < bottomMin {
 		topH = max(6, contentH-bottomMin)
 	}
-	if compactTop {
-		preferred := (contentH * 58) / 100
-		if preferred > topH {
-			topH = preferred
-		}
+	preferredTop := (contentH * 42) / 100
+	if preferredTop > topH {
+		topH = preferredTop
 		if contentH-topH < bottomMin {
 			topH = max(6, contentH-bottomMin)
 		}
 	}
 	bottomH := max(bottomMin, contentH-topH)
 
-	topBody := ""
-	if compactTop && !m.hasActiveOverlay() {
-		topBody = renderTwoColumns(
-			strings.Split(m.settingsBlock(topH-2), "\n"),
-			strings.Split(m.compactPaletteWallpaperBlock(topH-2, max(18, (usableW-5)/2)), "\n"),
-			usableW-4,
-		)
-	} else {
-		topMidContent := m.paletteBlock(topH - 2)
-		wallpaperWidth := max(16, (usableW-8)/3)
-		if layout, ok := threeColumnLayout(usableW - 4); ok {
-			wallpaperWidth = layout.rightW
-		}
-		topRightContent := m.wallpaperBlock(topH-2, wallpaperWidth)
-		if m.hasActiveOverlay() {
-			topRightContent = m.interactionBlock(topH - 2)
-		}
-		topBody = renderThreeColumns(
-			strings.Split(m.settingsBlock(topH-2), "\n"),
-			strings.Split(topMidContent, "\n"),
-			strings.Split(topRightContent, "\n"),
-			usableW-4,
-		)
-	}
+	topBody := renderTwoColumns(
+		strings.Split(m.settingsBlock(topH-2), "\n"),
+		strings.Split(m.settingsPageBlock(topH-2), "\n"),
+		usableW-4,
+	)
 	topRow := panelStyle(usableW, topH, "12").Render(topBody)
 
-	bottomRow := panelStyle(usableW, bottomH, "8").Render(m.settingsPageBlock(bottomH - 2))
+	_, bottomRightW := twoColumnWidths(usableW - 4)
+	bottomLeft := m.paletteBlock(bottomH-2, max(18, usableW-6-bottomRightW))
+	bottomRight := m.wallpaperBlock(bottomH-2, max(18, bottomRightW))
+	if m.hasActiveOverlay() {
+		bottomRight = m.interactionBlock(bottomH - 2)
+	}
+	bottomBody := renderTwoColumns(
+		strings.Split(bottomLeft, "\n"),
+		strings.Split(bottomRight, "\n"),
+		usableW-4,
+	)
+
+	bottomRow := panelStyle(usableW, bottomH, "8").Render(bottomBody)
 	return topRow + "\n" + bottomRow
 }
 
@@ -1982,8 +2036,11 @@ func (m model) interactionLineCount() int {
 	if m.customizing {
 		return 10
 	}
-	if m.showHints {
+	if m.showApplyConfirm {
 		return 8
+	}
+	if m.showHints {
+		return 6
 	}
 	if m.showBackups {
 		return 10
@@ -1994,6 +2051,9 @@ func (m model) interactionLineCount() int {
 func (m model) settingsBlock(limit int) string {
 	lines := []string{headerChip("Colors", "12"), ""}
 	items := m.settings()
+	panelBG := m.themeRoleColor("surface", m.themeRoleColor("background", "#1b1d24"))
+	panelFG := ensureReadableTextColor(panelBG, m.themeRoleColor("on_surface", "#e6e2d5"), "#f3f3f3")
+	panelMuted := ensureReadableTextColor(panelBG, blendHexColor(panelFG, panelBG, 0.32), "#b8bec8")
 	visible := max(1, limit-1)
 	start, end := listWindow(len(items), m.settingIndex, visible)
 	for i := start; i < end; i++ {
@@ -2002,7 +2062,7 @@ func (m model) settingsBlock(limit int) string {
 		style := lipgloss.NewStyle()
 		if i == m.settingIndex {
 			prefix = "▶ "
-			style = style.Foreground(lipgloss.Color("11")).Bold(true)
+			style = style.Bold(true)
 		}
 		lines = append(lines, style.Render(prefix+s))
 	}
@@ -2011,10 +2071,10 @@ func (m model) settingsBlock(limit int) string {
 	}
 	if m.themeSource == "preset" {
 		if len(lines) < limit {
-			lines = append(lines, "  Exact preset palette;")
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(panelMuted)).Render("  Exact preset palette;"))
 		}
 		if len(lines) < limit {
-			lines = append(lines, "  wallpaper is ignored.")
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(panelMuted)).Render("  wallpaper is ignored."))
 		}
 	} else {
 		// Keep compact/clean first-row copy in wallpaper mode.
@@ -2037,7 +2097,7 @@ func (m model) settingsPageBlock(limit int) string {
 		style := lipgloss.NewStyle()
 		if len(m.settings())+i == m.settingIndex {
 			prefix = "▶ "
-			style = style.Foreground(lipgloss.Color("11")).Bold(true)
+			style = style.Bold(true)
 		}
 		lines = append(lines, style.Render(prefix+label))
 	}
@@ -2047,9 +2107,9 @@ func (m model) settingsPageBlock(limit int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) paletteBlock(limit int) string {
+func (m model) paletteBlock(limit, width int) string {
 	lines := []string{headerChip("Palette", "13"), ""}
-	lines = append(lines, m.palettePreviewLines()...)
+	lines = append(lines, m.palettePreviewLines(width)...)
 	for len(lines) < limit {
 		lines = append(lines, "")
 	}
@@ -2110,21 +2170,11 @@ func (m model) compactPaletteWallpaperBlock(limit, width int) string {
 }
 
 func (m model) compactPaletteGridLines(width int) []string {
-	keys := []string{"primary", "secondary", "tertiary", "error", "surface", "on_surface"}
-	swatches := make([]string, 0, len(keys))
-	for _, k := range keys {
-		hex := strings.TrimSpace(m.selectedHexes[k])
-		if hex == "" {
-			continue
-		}
-		swatches = append(swatches, lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render("   "))
+	lines := m.palettePreviewLines(width)
+	if len(lines) > 2 {
+		return lines[:2]
 	}
-	for len(swatches) < 6 {
-		swatches = append(swatches, lipgloss.NewStyle().Background(lipgloss.Color("8")).Render("   "))
-	}
-	row1 := strings.Join(swatches[:3], " ")
-	row2 := strings.Join(swatches[3:6], " ")
-	return []string{placeCenterStyled(row1, width), placeCenterStyled(row2, width)}
+	return lines
 }
 
 func (m model) renderHomePage(usableW, contentH int) string {
@@ -2237,7 +2287,7 @@ func (m model) homeSystemBlock(innerW, limit int) string {
 }
 
 func (m model) canSwitchPage() bool {
-	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch
+	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch && !m.showApplyConfirm
 }
 
 func (m model) pageLabel() string {
@@ -2250,6 +2300,9 @@ func (m model) pageLabel() string {
 func (m model) interactionBorderColor() string {
 	if m.pickerTarget != "" {
 		return "13"
+	}
+	if m.showApplyConfirm {
+		return "10"
 	}
 	if m.customizing {
 		return "12"
@@ -2272,17 +2325,33 @@ func (m model) interactionBlock(limit int) string {
 			headerChip("Hints", "13"),
 			"  up/down or j/k: move",
 			"  enter: select action",
-			"  up/down in color picker",
-			"  enter to choose color",
-			"  g: sixel preview",
-			"  b: backups menu",
-			"  r: refresh backups",
+			"  g: Wallpaper Preview",
+			"  Apply: Shift+A",
 			"  q: quit",
 			"  esc or ?: close",
 		}, "\n")
 	}
+	if m.showApplyConfirm {
+		yes := "  Yes"
+		cancel := "  Cancel"
+		if m.applyConfirmIdx == 0 {
+			yes = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render("▶ Yes")
+		} else {
+			cancel = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")).Render("▶ Cancel")
+		}
+		return strings.Join([]string{
+			headerChip("Confirm Apply", "10"),
+			"",
+			"  Apply updated theme now?",
+			"",
+			yes,
+			cancel,
+			"",
+			"  enter/a: confirm   esc: cancel   Shift+A: apply now",
+		}, "\n")
+	}
 	if m.showBackups {
-		lines := []string{headerChip("Backups", "8"), "  enter=restore, r=refresh, esc=close"}
+		lines := []string{headerChip("Backups", "8"), "  enter=restore, esc=close"}
 		if len(m.backups) == 0 {
 			lines = append(lines, "  (none)")
 		} else {
@@ -2309,7 +2378,9 @@ func (m model) interactionBlock(limit int) string {
 					line += " {" + v + "}"
 				}
 				if b.Meta["theme_source"] != "preset" {
-					if v, ok := b.Meta["profile"]; ok && v != "" {
+					if v, ok := b.Meta["style_family"]; ok && v != "" {
+						line += " (" + canonicalProfile(v) + ")"
+					} else if v, ok := b.Meta["profile"]; ok && v != "" {
 						line += " (" + v + ")"
 					} else if v, ok := b.Meta["style_preset"]; ok && v != "" {
 						line += " (" + canonicalProfile(v) + ")"
@@ -2323,26 +2394,188 @@ func (m model) interactionBlock(limit int) string {
 	return ""
 }
 
-func (m model) palettePreviewLines() []string {
-	keys := []string{"primary", "secondary", "tertiary", "error", "surface", "on_surface"}
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		hex := m.selectedHexes[k]
-		if hex == "" {
+func (m model) palettePreviewLines(width int) []string {
+	terminal := m.terminalPalette16()
+	if len(terminal) == 0 {
+		return []string{"  (no generated palette in selected backup)"}
+	}
+	cellW := 2
+	cell := func(hex string) string {
+		return lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render(strings.Repeat(" ", cellW))
+	}
+	palette := make([]string, 0, 64)
+	palette = append(palette, terminal...)
+	for _, hex := range m.previewPaletteColors() {
+		if !internaltheme.IsHexColor(hex) {
 			continue
 		}
-		swFg := ensureReadableTextColor(hex, "#111111", "#f5f5f8")
-		sw := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Foreground(lipgloss.Color(swFg)).Render("  ")
-		out = append(out, fmt.Sprintf("  %s %s", sw, hex+" "+k))
+		palette = append(palette, strings.ToLower(strings.TrimSpace(hex)))
 	}
-	if len(out) == 0 {
-		out = append(out, "  (no generated palette in selected backup)")
+	if len(palette) == 0 {
+		return []string{"  (no generated palette in selected backup)"}
+	}
+	cols := max(12, (max(16, width)-2)/cellW)
+	lines := make([]string, 0, (len(palette)+cols-1)/cols)
+	for i := 0; i < len(palette); i += cols {
+		end := min(len(palette), i+cols)
+		var row strings.Builder
+		row.WriteString("  ")
+		for _, hex := range palette[i:end] {
+			row.WriteString(cell(hex))
+		}
+		lines = append(lines, row.String())
+	}
+	return lines
+}
+
+func (m model) hasActiveOverlay() bool {
+	return m.showHints || m.showBackups || m.pickerTarget != "" || m.customizing || m.showApplyConfirm
+}
+
+func (m model) previewPaletteColors() []string {
+	order := []string{
+		"background", "surface", "on_surface", "outline",
+		"primary", "primary_container", "secondary", "secondary_container",
+		"tertiary", "tertiary_container", "error", "error_container",
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	appendHex := func(raw string) {
+		hex := strings.ToLower(strings.TrimSpace(raw))
+		if !internaltheme.IsHexColor(hex) || seen[hex] {
+			return
+		}
+		seen[hex] = true
+		out = append(out, hex)
+	}
+	for _, key := range order {
+		appendHex(m.selectedHexes[key])
+	}
+	keys := make([]string, 0, len(m.selectedHexes))
+	for k := range m.selectedHexes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		appendHex(m.selectedHexes[key])
+	}
+	for _, raw := range []string{m.ansiRed, m.ansiGreen, m.ansiYellow, m.ansiBlue, m.ansiMagenta, m.ansiCyan} {
+		appendHex(raw)
 	}
 	return out
 }
 
-func (m model) hasActiveOverlay() bool {
-	return m.showHints || m.showBackups || m.pickerTarget != "" || m.customizing
+func (m model) terminalPalette16() []string {
+	seed := m.previewPaletteColors()
+	if len(seed) == 0 {
+		return nil
+	}
+	pick := func(candidates ...string) string {
+		for _, c := range candidates {
+			hex := strings.ToLower(strings.TrimSpace(c))
+			if internaltheme.IsHexColor(hex) {
+				return hex
+			}
+		}
+		return ""
+	}
+	term := make([]string, 16)
+	term[0] = pick(m.selectedHexes["surface"], m.selectedHexes["background"], seed[0])
+	term[1] = pick(m.ansiRed, m.selectedHexes["error"], blendHexColor(term[0], "#ff5f5f", 0.75))
+	term[2] = pick(m.ansiGreen, m.selectedHexes["secondary"], blendHexColor(term[0], "#5fff87", 0.75))
+	term[3] = pick(m.ansiYellow, m.selectedHexes["tertiary"], blendHexColor(term[0], "#ffd75f", 0.75))
+	term[4] = pick(m.ansiBlue, m.selectedHexes["primary"], blendHexColor(term[0], "#5f87ff", 0.75))
+	term[5] = pick(m.ansiMagenta, m.selectedHexes["tertiary_container"], blendHexColor(term[0], "#d787ff", 0.75))
+	term[6] = pick(m.ansiCyan, m.selectedHexes["secondary_container"], blendHexColor(term[0], "#5fd7ff", 0.75))
+	term[7] = pick(m.selectedHexes["on_surface"], "#d7d7d7")
+	term[8] = pick(m.selectedHexes["outline"], blendHexColor(term[0], term[7], 0.35))
+	for i := 9; i < 16; i++ {
+		base := term[i-8]
+		if base == "" {
+			base = seed[(i-9)%len(seed)]
+		}
+		term[i] = pick(blendHexColor(base, "#ffffff", 0.22), base)
+	}
+	for i, hex := range term {
+		if internaltheme.IsHexColor(hex) {
+			continue
+		}
+		term[i] = seed[i%len(seed)]
+	}
+	return term
+}
+
+func (m model) paletteRoleAccentLines(width int) []string {
+	type roleAccent struct {
+		role  string
+		label string
+	}
+	order := []roleAccent{
+		{role: "primary", label: "Primary"},
+		{role: "secondary", label: "Secondary"},
+		{role: "tertiary", label: "Tertiary"},
+		{role: "error", label: "Error"},
+		{role: "surface", label: "Surface"},
+		{role: "on_surface", label: "On Surface"},
+	}
+	parts := make([]string, 0, len(order))
+	for _, item := range order {
+		hex := strings.ToLower(strings.TrimSpace(m.selectedHexes[item.role]))
+		if !internaltheme.IsHexColor(hex) {
+			continue
+		}
+		fg := ensureReadableTextColor(hex, "#101216", "#f3f5f8")
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(lipgloss.Color(fg)).
+			Background(lipgloss.Color(hex)).
+			Padding(0, 1).
+			Render(item.label))
+	}
+	if len(parts) == 0 {
+		return []string{"  (role accents unavailable)"}
+	}
+	return wrapPaletteParts(parts, max(18, width-2))
+}
+
+func wrapPaletteParts(parts []string, maxWidth int) []string {
+	if len(parts) == 0 {
+		return nil
+	}
+	lines := []string{}
+	cur := "  "
+	for _, p := range parts {
+		if lipgloss.Width(cur)+lipgloss.Width(p)+1 > maxWidth && strings.TrimSpace(cur) != "" {
+			lines = append(lines, cur)
+			cur = "  " + p
+			continue
+		}
+		if strings.TrimSpace(cur) == "" {
+			cur = "  " + p
+		} else {
+			cur += " " + p
+		}
+	}
+	if strings.TrimSpace(cur) != "" {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+func hotkeyLabel(label, key, color string) string {
+	lowerLabel := strings.ToLower(label)
+	lowerKey := strings.ToLower(key)
+	idx := strings.Index(lowerLabel, lowerKey)
+	if idx < 0 {
+		return label
+	}
+	runes := []rune(label)
+	start := len([]rune(label[:idx]))
+	if start < 0 || start >= len(runes) {
+		return label
+	}
+	hot := string(runes[start])
+	hotStyled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(hot)
+	return string(runes[:start]) + hotStyled + string(runes[start+1:])
 }
 
 func headerChip(text, color string) string {
@@ -2877,7 +3110,7 @@ func (m model) applyArgs(includeOverrides bool) []string {
 	if m.themeSource == "preset" {
 		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
 	} else {
-		args = append(args, "-m", m.mode, "--profile", m.profile)
+		args = append(args, "-m", m.mode, "--style-family", m.profile)
 	}
 	if includeOverrides {
 		if strings.TrimSpace(m.textColor) != "" {
@@ -2928,6 +3161,19 @@ func parseBackupID(output string) string {
 	return ""
 }
 
+func findBackupIndexByID(backups []backup, id string) int {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return -1
+	}
+	for i, b := range backups {
+		if strings.TrimSpace(b.ID) == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func runApplyCommand(args []string, label, cacheKey, reuseBackup string, previewOnly bool) tea.Cmd {
 	return func() tea.Msg {
 		if err := ensureTooieSupportScripts(); err != nil {
@@ -2963,6 +3209,7 @@ func runApplyCommand(args []string, label, cacheKey, reuseBackup string, preview
 
 func (m model) applyCacheSignature() string {
 	parts := m.applyArgs(true)
+	parts = append(parts, "cache_schema="+themeCacheSchema)
 	if m.themeSource == "wallpaper" {
 		parts = append(parts, "wallpaper_fingerprint="+wallpaperCacheFingerprint())
 	}
@@ -3177,7 +3424,7 @@ func nextPresetVariant(family, cur string) string {
 func displayProfile(name string) string {
 	switch canonicalProfile(name) {
 	case "adaptive":
-		return "Auto"
+		return "Adaptive"
 	case "soft-pastel":
 		return "Soft Pastel"
 	case "studio-dark":
@@ -3193,7 +3440,7 @@ func displayProfile(name string) string {
 	default:
 		name = strings.TrimSpace(name)
 		if name == "" || name == "default" {
-			return "Auto"
+			return "Adaptive"
 		}
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
@@ -3361,6 +3608,23 @@ func renderTwoColumns(left, right []string, totalWidth int) string {
 		lines = append(lines, leftStyle.Render(l)+sep+rightStyle.Render(r))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func twoColumnWidths(totalWidth int) (int, int) {
+	sepW := lipgloss.Width(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" │ "))
+	if totalWidth < 2*18+sepW {
+		return 0, 0
+	}
+	avail := totalWidth - sepW
+	leftW := (avail * 11) / 20
+	if leftW < 24 {
+		leftW = 24
+	}
+	if leftW > avail-20 {
+		leftW = avail - 20
+	}
+	rightW := avail - leftW
+	return leftW, rightW
 }
 
 func clampPct(v float64) float64 {
@@ -5017,6 +5281,20 @@ func (m *model) loadPreviewColors() {
 		if c := strings.TrimSpace(meta[item.Key]); c != "" {
 			m.selectedHexes[item.Role] = strings.ToLower(c)
 		}
+	}
+	for k, v := range meta {
+		if !strings.HasPrefix(k, "effective_role_") {
+			continue
+		}
+		role := strings.TrimSpace(strings.TrimPrefix(k, "effective_role_"))
+		hex := strings.ToLower(strings.TrimSpace(v))
+		if role == "" || !internaltheme.IsHexColor(hex) {
+			continue
+		}
+		m.selectedHexes[role] = hex
+	}
+	if len(m.selectedHexes) > 12 {
+		return
 	}
 	p := filepath.Join(backupRoot, m.backups[m.backupIndex].ID, "matugen.json")
 	raw, err := os.ReadFile(p)
