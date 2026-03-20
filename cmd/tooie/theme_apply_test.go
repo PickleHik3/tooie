@@ -121,10 +121,10 @@ func TestRenderTmuxBlockRoundedTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g @status-tmux-edge-style "rounded"`) {
 		t.Fatalf("expected rounded theme to keep rounded widget edges, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, ``) {
+	if !strings.Contains(got, `set -g window-status-format "#{?window_start_flag`) || !strings.Contains(got, ``) {
 		t.Fatalf("expected rounded theme to use rounded inactive window chips, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g window-status-current-format "#[fg=`) || !strings.Contains(got, ``) {
+	if !strings.Contains(got, `set -g window-status-current-format "#{?window_start_flag`) || !strings.Contains(got, ``) {
 		t.Fatalf("expected rounded theme to use rounded active window chips, got: %s", got)
 	}
 }
