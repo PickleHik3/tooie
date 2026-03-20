@@ -707,9 +707,10 @@ func (m model) homePinnedSixelOverlays(totalInnerW, panelH, outerPad int) []sixe
 			offsetY = 0
 		}
 		overlays = append(overlays, sixelOverlay{
-			row:  max(1, outerPad+bottomPanelInnerTopBodyRow+layout.pinnedStart+offsetY+pinnedSixelRowAdjust),
-			col:  max(1, outerPad+x+offsetX+pinnedSixelColAdjust),
-			data: res.data,
+			row:    max(1, outerPad+bottomPanelInnerTopBodyRow+layout.pinnedStart+offsetY+pinnedSixelRowAdjust),
+			col:    max(1, outerPad+x+offsetX+pinnedSixelColAdjust),
+			rowEnd: max(1, outerPad+bottomPanelInnerTopBodyRow+layout.pinnedStart+offsetY+pinnedSixelRowAdjust) + max(0, sixelHeightCells-1),
+			data:   res.data,
 		})
 		x += layout.slotWidths[i]
 	}

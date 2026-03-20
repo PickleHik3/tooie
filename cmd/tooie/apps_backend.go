@@ -24,11 +24,8 @@ import (
 )
 
 const defaultAppsCacheTTL = 10 * time.Minute
-const (
-	defaultLauncherPackage = "com.termux"
-	restartIntentAction    = "com.termux.app.restart"
-	defaultLauncherMain    = "com.termux/.app.TermuxActivity"
-)
+
+var execCommand = exec.Command
 
 type launchableApp struct {
 	PackageName   string `json:"packageName"`
@@ -105,7 +102,7 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "      Show this help screen.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie --restart")
-	fmt.Fprintln(w, "      Trigger termux-launcher restart.")
+	fmt.Fprintln(w, "      Restart termux-launcher via launcherctl.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands")
 	fmt.Fprintln(w, "  tooie apps [--refresh]")
@@ -267,7 +264,7 @@ func runRestartCommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, "tooie restart: restart requested for com.termux")
+	fmt.Fprintln(os.Stdout, "tooie restart: launcherctl restart requested")
 	return 0
 }
 
@@ -472,25 +469,11 @@ func launchComponent(component string) error {
 }
 
 func restartLauncherApp() error {
-	base, token, ok := readTooieEndpointToken()
-	if ok {
-		if err := tooieRestartRequest(base, token); err == nil {
-			return nil
-		}
+	out, err := execCommand("launcherctl", "restart").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("launcherctl restart failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
-	out, err := exec.Command("am", "start", "-S", "-n", defaultLauncherMain).CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	legacyOut, legacyErr := exec.Command("am", "broadcast", "-a", restartIntentAction, "-p", defaultLauncherPackage).CombinedOutput()
-	if legacyErr == nil {
-		return nil
-	}
-	return fmt.Errorf(
-		"restart failed: endpoint unavailable; am start failed: %s; legacy broadcast failed: %s",
-		strings.TrimSpace(string(out)),
-		strings.TrimSpace(string(legacyOut)),
-	)
+	return nil
 }
 
 func fetchBackendAppMetadata() (map[string]backendAppMeta, error) {
@@ -1171,40 +1154,6 @@ func tooieExecCommand(base, token, command string) (string, error) {
 	}
 	result, _ := anyToString(out["output"])
 	return result, nil
-}
-
-func tooieRestartRequest(base, token string) error {
-	url := strings.TrimRight(base, "/") + "/v1/app/restart"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader([]byte("{}")))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 6 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("restart endpoint returned %d", resp.StatusCode)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return err
-	}
-	if !truthyJSON(out["ok"]) {
-		msg, _ := anyToString(out["message"])
-		if strings.TrimSpace(msg) == "" {
-			msg = "restart failed"
-		}
-		return errors.New(msg)
-	}
-	return nil
 }
 
 func truthyJSON(v any) bool {

@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -103,6 +104,38 @@ func TestIsRestartCLIArgs(t *testing.T) {
 			t.Fatalf("isRestartCLIArgs(%v) = %v, want %v", tt.args, got, tt.want)
 		}
 	}
+}
+
+func TestRestartLauncherAppUsesLauncherctl(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cs := []string{"-test.run=TestHelperProcess", "--", name}
+		cs = append(cs, args...)
+		cmd := exec.Command(os.Args[0], cs...)
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		return cmd
+	}
+
+	if err := restartLauncherApp(); err != nil {
+		t.Fatalf("restartLauncherApp() error: %v", err)
+	}
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			if !reflect.DeepEqual(args[i+1:], []string{"launcherctl", "restart"}) {
+				os.Exit(2)
+			}
+			os.Exit(0)
+		}
+	}
+	os.Exit(3)
 }
 
 func TestTrimTransparentImage(t *testing.T) {
@@ -205,6 +238,7 @@ func TestApplyArgsPresetOmitsMode(t *testing.T) {
 	if !reflect.DeepEqual(args, []string{
 		"--theme-source", "preset",
 		"--status-palette", "default",
+		"--status-theme", "default",
 		"--preset-family", "catppuccin",
 		"--preset-variant", "mocha",
 		"--widget-battery", "on",
@@ -247,6 +281,7 @@ func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
 	want := []string{
 		"--theme-source", "wallpaper",
 		"--status-palette", "vibrant",
+		"--status-theme", "default",
 		"-m", "auto",
 		"--profile", "neon-night",
 		"--widget-battery", "off",

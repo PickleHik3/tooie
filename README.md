@@ -11,12 +11,12 @@ What it does:
 
 Press keybind "prefix + i" to bring up quick reference to the tmux keybinds. The prefix is "Ctrl + b" and "Ctrl + Space".
 
-The TUI is split into 3 pages:
+The TUI is split into 2 pages:
 - First page includes the clock, live system stats and an android app launcher.
   - Pressing `/` brings up app search. From there you can press `Ctrl+p` to pin the highlighted app to the home screen.
   - Pinned apps can be launched directly by pressing their respective number keys `1-7`.
-- Second page includes color scheme controls. It uses `matugen` to generate color palettes from the terminal background situated at `~/.termux/background/`. Optionally, you can override extracted colors and choose adaptive or curated profiles (Catppuccin/OneDark/TokyoNight/Gruvbox/Dracula/Nord), as well as fixed preset themes.
-- Third page includes shell settings for tmux status segments (`battery`, `cpu`, `ram`, `weather`) and a two-step reset action that restores bootstrap-managed configs (with a safety backup snapshot first).
+- Second page is a merged theme/status screen. The top row contains theme controls and the generated palette view. The bottom row contains tmux status widget toggles (`battery`, `cpu`, `ram`, `weather`) and their current on/off state summary.
+- Theme generation still uses `matugen` against the terminal background at `~/.termux/background/`, with adaptive/curated profiles and fixed preset themes available from the merged page.
 
 ## Screenshots
 
@@ -25,9 +25,6 @@ The TUI is split into 3 pages:
 
 ### Theme
 ![Tooie Theme](docs/screenshots/theme.png)
-
-### Settings
-![Tooie Settings](docs/screenshots/settings.png)
 
 ### `tooie --clock --cal`
 ![tooie --clock --cal](docs/screenshots/Screenshot_20260309-073307.png)
@@ -98,6 +95,7 @@ The installer places files here:
 - `~/.config/tooie/restore-material.sh`
 - `~/.config/tooie/list-material-backups.sh`
 - `~/.config/tooie/reset-bootstrap-defaults.sh`
+- `~/.config/tooie/setup-btop-shizuku.sh`
 - `~/.config/tooie/bootstrap-defaults/`
 
 It supports both `pkg` and `pacman`.

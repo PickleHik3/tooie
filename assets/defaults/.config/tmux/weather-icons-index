@@ -1,0 +1,80 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/status-tmux"
+INDEX_JSON="$CACHE_DIR/weather-icons-index.json"
+NF_GLYPH_URL="${STATUS_TMUX_NERD_GLYPHNAMES_URL:-https://raw.githubusercontent.com/ryanoasis/nerd-fonts/master/glyphnames.json}"
+
+usage(){
+  cat <<'EOF'
+Usage: weather-icons-index [--refresh] [--markdown]
+
+  --refresh   Refetch Nerd Fonts glyphnames.json and rebuild weather index cache.
+  --markdown  Print a markdown table instead of JSON.
+EOF
+}
+
+refresh=0
+format="json"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --refresh) refresh=1 ;;
+    --markdown) format="markdown" ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'unknown arg: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+mkdir -p "$CACHE_DIR"
+
+build_index(){
+  command -v jq >/dev/null 2>&1 || {
+    printf '%s\n' 'weather-icons-index: jq is required' >&2
+    return 1
+  }
+  raw="$(curl -fsSL --connect-timeout 3 --max-time 6 "$NF_GLYPH_URL" 2>/dev/null || true)"
+  [ -n "$raw" ] || return 1
+  now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  printf '%s' "$raw" | jq -c --arg generated_at "$now" --arg source "$NF_GLYPH_URL" '
+    {
+      generated_at: $generated_at,
+      source: $source,
+      count: ([to_entries[] | select(.key | startswith("weather-"))] | length),
+      icons: (
+        [to_entries[]
+         | select(.key | startswith("weather-"))
+         | {name: .key, glyph: .value.char, codepoint: .value.code}
+        ] | sort_by(.name)
+      )
+    }'
+}
+
+if [ "$refresh" -eq 1 ] || [ ! -s "$INDEX_JSON" ]; then
+  if out="$(build_index)"; then
+    printf '%s\n' "$out" > "$INDEX_JSON.tmp.$$" && mv "$INDEX_JSON.tmp.$$" "$INDEX_JSON"
+  fi
+fi
+
+[ -s "$INDEX_JSON" ] || {
+  printf '%s\n' 'weather-icons-index: no cached index and fetch failed' >&2
+  exit 1
+}
+
+if [ "$format" = "json" ]; then
+  cat "$INDEX_JSON"
+  exit 0
+fi
+
+jq -r '
+  "# Nerd Fonts Weather Icons",
+  "",
+  "- Source: \(.source)",
+  "- Generated: \(.generated_at)",
+  "- Count: \(.count)",
+  "",
+  "| Name | Glyph | Codepoint |",
+  "|---|---|---|",
+  (.icons[] | "| `\(.name)` | \(.glyph) | `\(.codepoint)` |")
+' "$INDEX_JSON"

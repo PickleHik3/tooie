@@ -37,7 +37,9 @@ RAM_6_COLOR="${STATUS_TMUX_RAM_LEVEL_6_COLOR:-colour1}"
 BAT_SEGMENTS="${STATUS_TMUX_BAT_SEGMENTS:-6}"
 BAT_FULL_ICON="${STATUS_TMUX_BAT_FULL_ICON:-}"
 BAT_EMPTY_ICON="${STATUS_TMUX_BAT_EMPTY_ICON:-}"
+BAT_HALF_ICON="${STATUS_TMUX_BAT_HALF_ICON:-󰛞}"
 BAT_CHARGING_ICON="${STATUS_TMUX_BAT_CHARGING_ICON:- 󱈑}"
+BG_RIGHT="${STATUS_TMUX_BG_RIGHT:-off}"
 
 mkdir -p "$CACHE_DIR"
 
@@ -156,7 +158,7 @@ update_cache_if_needed(){
 }
 
 meter_color(){ case "$1" in 1) echo "$METER_1_COLOR";;2) echo "$METER_2_COLOR";;3) echo "$METER_3_COLOR";;4) echo "$METER_4_COLOR";;5) echo "$METER_5_COLOR";;*) echo "$METER_6_COLOR";; esac; }
-render_battery(){ level="$1"; charging="$2"; [ "$level" -gt 100 ] && level=100; [ "$level" -lt 0 ] && level=0; [ "$BAT_SEGMENTS" -lt 1 ] && BAT_SEGMENTS=1; filled=$(( (level * BAT_SEGMENTS + 99) / 100 )); [ "$filled" -gt "$BAT_SEGMENTS" ] && filled="$BAT_SEGMENTS"; meter=""; i=1; while [ "$i" -le "$BAT_SEGMENTS" ]; do c="$(meter_color "$i")"; if [ "$i" -le "$filled" ]; then meter="${meter}#[fg=${c}]${BAT_FULL_ICON}"; else meter="${meter}#[fg=${c}]${BAT_EMPTY_ICON}"; fi; i=$((i+1)); done; if [ "$charging" = "true" ]; then charge="#[fg=${CHARGE_COLOR}]${BAT_CHARGING_ICON}"; else charge=""; fi; printf "%s%s#[default]" "$charge" "${charge:+ }$meter"; }
+render_battery(){ level="$1"; charging="$2"; [ "$level" -gt 100 ] && level=100; [ "$level" -lt 0 ] && level=0; segs="$BAT_SEGMENTS"; is_on "$BG_RIGHT" && segs=4; [ "$segs" -lt 1 ] && segs=1; units_total=$((segs * 2)); units_filled=$((level * units_total / 100)); full=$((units_filled / 2)); half=$((units_filled % 2)); [ "$full" -gt "$segs" ] && full="$segs"; [ "$full" -lt 0 ] && full=0; if [ "$full" -ge "$segs" ]; then half=0; fi; spacer=""; is_on "$BG_RIGHT" && spacer=" "; meter=""; i=1; while [ "$i" -le "$segs" ]; do c="$(meter_color "$i")"; icon="$BAT_EMPTY_ICON"; if [ "$i" -le "$full" ]; then icon="$BAT_FULL_ICON"; elif [ "$half" -eq 1 ] && [ "$i" -eq $((full + 1)) ]; then icon="$BAT_HALF_ICON"; fi; meter="${meter}#[fg=${c}]${icon}"; [ "$i" -lt "$segs" ] && meter="${meter}${spacer}"; i=$((i+1)); done; if [ "$charging" = "true" ]; then charge="#[fg=${CHARGE_COLOR}]${BAT_CHARGING_ICON}"; else charge=""; fi; printf "%s%s" "$charge" "${charge:+ }$meter"; }
 cpu_usage_color(){
   v="$1"
   # CPU palette: healthy -> warning -> critical

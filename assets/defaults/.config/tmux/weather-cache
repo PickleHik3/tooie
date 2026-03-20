@@ -8,21 +8,179 @@ MAX_AGE="${STATUS_TMUX_WEATHER_MAX_AGE:-300}"
 LOCATION="${STATUS_TMUX_WEATHER_LOCATION:-Kuwait}"
 mkdir -p "$CACHE_DIR"
 
-is_night(){ h="$(date +%H)"; [ "$h" -ge 18 ] || [ "$h" -lt 6 ]; }
-placeholder(){ if is_night; then printf '󰖔 ...'; else printf '󰖙 ...'; fi; }
-map_weather_icon(){ code="$1"; n="$2"; case "$code" in 113) [ "$n" -eq 1 ]&&echo '󰖔'||echo '󰖙';;116) [ "$n" -eq 1 ]&&echo ''||echo '󰖕';;119|122) [ "$n" -eq 1 ]&&echo ''||echo '󰖐';;143|248|260) [ "$n" -eq 1 ]&&echo ''||echo '󰖑';;176|266|293|305|308|311|314|317|320|389) [ "$n" -eq 1 ]&&echo ''||echo '󰖗';;323|326|392|395) [ "$n" -eq 1 ]&&echo ''||echo '󰖖';;179|227|230|356|359|362|365|368|371|407|410|413) [ "$n" -eq 1 ]&&echo ''||echo '󰖘';;182|185|296|299|302|329|332|335|338|350|353|398|401|404) [ "$n" -eq 1 ]&&echo ''||echo '󰙿';;200|386|422|425|428|431) [ "$n" -eq 1 ]&&echo ''||echo '󰖓';;*) [ "$n" -eq 1 ]&&echo ''||echo '󰖐';; esac; }
+fallback_is_night(){ h="$(date +%H)"; [ "$h" -ge 18 ] || [ "$h" -lt 6 ]; }
+placeholder(){ if fallback_is_night; then printf ' ...'; else printf ' ...'; fi; }
+
+to_minutes(){
+  ts="$1"
+  [ -n "$ts" ] || return 1
+  v="$(printf '%s' "$ts" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  set -- $v
+  [ $# -ge 2 ] || return 1
+  hm="$1"
+  ampm="$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')"
+  hh="$(printf '%s' "$hm" | cut -d: -f1 2>/dev/null || true)"
+  mm="$(printf '%s' "$hm" | cut -d: -f2 2>/dev/null || true)"
+  case "$hh$mm$ampm" in ''|*[!0-9APM]*) return 1 ;; esac
+  h="$(printf '%d' "$hh" 2>/dev/null || true)"
+  m="$(printf '%d' "$mm" 2>/dev/null || true)"
+  [ -n "$h" ] || return 1
+  [ -n "$m" ] || return 1
+  [ "$h" -ge 1 ] && [ "$h" -le 12 ] || return 1
+  [ "$m" -ge 0 ] && [ "$m" -le 59 ] || return 1
+  case "$ampm" in
+    AM) [ "$h" -eq 12 ] && h=0 ;;
+    PM) [ "$h" -lt 12 ] && h=$((h + 12)) ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' $((h * 60 + m))
+}
+
+night_flag_from_sun(){
+  sunrise="$1"; sunset="$2"
+  rise_m="$(to_minutes "$sunrise" 2>/dev/null || true)"
+  set_m="$(to_minutes "$sunset" 2>/dev/null || true)"
+  [ -n "$rise_m" ] || { echo ""; return 0; }
+  [ -n "$set_m" ] || { echo ""; return 0; }
+  now_h="$(date +%H)"; now_m="$(date +%M)"
+  nh="$(printf '%d' "$now_h" 2>/dev/null || true)"
+  nm="$(printf '%d' "$now_m" 2>/dev/null || true)"
+  [ -n "$nh" ] || { echo ""; return 0; }
+  [ -n "$nm" ] || { echo ""; return 0; }
+  now=$((nh * 60 + nm))
+  if [ "$now" -lt "$rise_m" ] || [ "$now" -ge "$set_m" ]; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+weather_condition_from_code(){
+  code="$1"
+  case "$code" in
+    113) echo "Sunny" ;;
+    116) echo "PartlyCloudy" ;;
+    119) echo "Cloudy" ;;
+    122) echo "VeryCloudy" ;;
+    143|248|260) echo "Fog" ;;
+    176|263|353) echo "LightShowers" ;;
+    266|293|296) echo "LightRain" ;;
+    299|305|356) echo "HeavyShowers" ;;
+    302|308|359) echo "HeavyRain" ;;
+    179|362|365|374) echo "LightSleetShowers" ;;
+    182|185|281|284|311|314|317|350|377) echo "LightSleet" ;;
+    227|320) echo "LightSnow" ;;
+    323|326|368) echo "LightSnowShowers" ;;
+    230|329|332|338) echo "HeavySnow" ;;
+    335|371|395) echo "HeavySnowShowers" ;;
+    200|386|413|422|425) echo "ThunderyShowers" ;;
+    389|410) echo "ThunderyHeavyRain" ;;
+    392|398|401|404|407|428|431) echo "ThunderySnowShowers" ;;
+    *) echo "Unknown" ;;
+  esac
+}
+
+weather_icon_from_condition(){
+  cond="$1"; night="$2"
+  case "$cond:$night" in
+    Sunny:0) echo '' ;;
+    Sunny:1) echo '' ;;
+    PartlyCloudy:0) echo '' ;;
+    PartlyCloudy:1) echo '' ;;
+    Cloudy:*) echo '' ;;
+    VeryCloudy:*) echo '' ;;
+    Fog:*) echo '' ;;
+    LightShowers:0) echo '' ;;
+    LightShowers:1) echo '' ;;
+    LightRain:0) echo '' ;;
+    LightRain:1) echo '' ;;
+    HeavyShowers:*) echo '' ;;
+    HeavyRain:*) echo '' ;;
+    LightSleet:0) echo '' ;;
+    LightSleet:1) echo '' ;;
+    LightSleetShowers:0) echo '' ;;
+    LightSleetShowers:1) echo '' ;;
+    LightSnow:0) echo '' ;;
+    LightSnow:1) echo '' ;;
+    LightSnowShowers:0) echo '' ;;
+    LightSnowShowers:1) echo '' ;;
+    HeavySnow:*) echo '' ;;
+    HeavySnowShowers:*) echo '' ;;
+    ThunderyShowers:*) echo '' ;;
+    ThunderyHeavyRain:*) echo '' ;;
+    ThunderySnowShowers:0) echo '' ;;
+    ThunderySnowShowers:1) echo '' ;;
+    *) echo '' ;;
+  esac
+}
+
+moon_phase_icon(){
+  phase="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr ' -' '__' | tr -s '_')"
+  case "$phase" in
+    new_moon) echo '' ;;
+    waxing_crescent) echo '' ;;
+    first_quarter) echo '' ;;
+    waxing_gibbous) echo '' ;;
+    full_moon) echo '' ;;
+    waning_gibbous) echo '' ;;
+    third_quarter|last_quarter) echo '' ;;
+    waning_crescent) echo '' ;;
+    *) echo "" ;;
+  esac
+}
+
+map_weather_icon(){
+  code="$1"; night="$2"; moon_phase="${3:-}"
+  cond="$(weather_condition_from_code "$code")"
+  icon="$(weather_icon_from_condition "$cond" "$night")"
+  if [ "$night" -eq 1 ]; then
+    case "$cond" in
+      Sunny|PartlyCloudy)
+        moon_icon="$(moon_phase_icon "$moon_phase")"
+        [ -n "$moon_icon" ] && icon="$moon_icon"
+        ;;
+    esac
+  fi
+  printf '%s' "$icon"
+}
+
 cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(date +%s)"; mt="$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)"; [ "$mt" -gt 0 ] || { echo 999999; return; }; echo $((now-mt)); }
-read_cache(){ [ -s "$CACHE_FILE" ] && cat "$CACHE_FILE"; }
+read_cache(){ [ -s "$CACHE_FILE" ] && sed -n '1{s/^\(.*°C\).*/\1/p;q;}' "$CACHE_FILE"; }
 
 fetch_weather(){
-  json="$(curl -fsS --connect-timeout 1 --max-time 1 "wttr.in/${LOCATION}?format=j1" 2>/dev/null || true)"
+  json="${STATUS_TMUX_WEATHER_JSON:-}"
+  if [ -z "$json" ]; then
+    json="$(curl -fsS --connect-timeout 1 --max-time 1 "wttr.in/${LOCATION}?format=j1" 2>/dev/null || true)"
+  fi
   [ -n "$json" ] || return 1
-  temp="$(printf '%s' "$json" | sed -n 's/.*"temp_C"[[:space:]]*:[[:space:]]*"\{0,1\}\(-\{0,1\}[0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
-  code="$(printf '%s' "$json" | sed -n 's/.*"weatherCode"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
-  desc="$(printf '%s' "$json" | sed -n 's/.*"weatherDesc".*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+
+  temp=""
+  code=""
+  sunrise=""
+  sunset=""
+  moon_phase=""
+  if command -v jq >/dev/null 2>&1; then
+    temp="$(printf '%s' "$json" | jq -r '.data.current_condition[0].temp_C // .current_condition[0].temp_C // empty' 2>/dev/null | head -n1)"
+    code="$(printf '%s' "$json" | jq -r '.data.current_condition[0].weatherCode // .current_condition[0].weatherCode // empty' 2>/dev/null | head -n1)"
+    sunrise="$(printf '%s' "$json" | jq -r '.data.weather[0].astronomy[0].sunrise // .weather[0].astronomy[0].sunrise // empty' 2>/dev/null | head -n1)"
+    sunset="$(printf '%s' "$json" | jq -r '.data.weather[0].astronomy[0].sunset // .weather[0].astronomy[0].sunset // empty' 2>/dev/null | head -n1)"
+    moon_phase="$(printf '%s' "$json" | jq -r '.data.weather[0].astronomy[0].moon_phase // .weather[0].astronomy[0].moon_phase // empty' 2>/dev/null | head -n1)"
+  else
+    temp="$(printf '%s' "$json" | sed -n 's/.*"temp_C"[[:space:]]*:[[:space:]]*"\{0,1\}\(-\{0,1\}[0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
+    code="$(printf '%s' "$json" | sed -n 's/.*"weatherCode"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
+  fi
+
   [ -n "$temp" ] || return 1; [ -n "$code" ] || code=119
-  n=0; if is_night; then n=1; fi
-  out="$(map_weather_icon "$code" "$n") ${temp}°C"; [ -n "$desc" ] && out="$out $desc"
+  n=0
+  sun_night="$(night_flag_from_sun "$sunrise" "$sunset")"
+  if [ "$sun_night" = "1" ]; then
+    n=1
+  elif [ "$sun_night" = "0" ]; then
+    n=0
+  elif fallback_is_night; then
+    n=1
+  fi
+  out="$(map_weather_icon "$code" "$n" "$moon_phase") ${temp}°C"
   printf '%s\n' "$out" > "$CACHE_FILE.tmp.$$" && mv "$CACHE_FILE.tmp.$$" "$CACHE_FILE"
   printf '%s' "$out"
 }

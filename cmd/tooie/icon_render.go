@@ -30,6 +30,34 @@ var pinnedIconRenderCache = renderedIconCache{
 	items: map[renderedIconKey]string{},
 }
 
+func renderCachedImageFile(path string, widthCells, heightRows int) string {
+	widthCells = max(2, widthCells)
+	heightRows = max(1, heightRows)
+
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+
+	key := renderedIconKey{
+		packageName: "__image__",
+		iconPath:    path,
+		modUnixNano: info.ModTime().UnixNano(),
+		widthCells:  widthCells,
+		heightRows:  heightRows,
+	}
+	if cached, ok := pinnedIconRenderCache.get(key); ok {
+		return cached
+	}
+
+	rendered, err := renderIconFile(path, widthCells, heightRows)
+	if err != nil || strings.TrimSpace(rendered) == "" {
+		return ""
+	}
+	pinnedIconRenderCache.set(key, rendered)
+	return rendered
+}
+
 func renderPinnedAppIcon(app launchableApp, widthCells, heightRows int) string {
 	widthCells = max(2, widthCells)
 	heightRows = max(1, heightRows)
