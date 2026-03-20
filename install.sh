@@ -124,7 +124,8 @@ deploy_assets() {
   install_file "$REPO_DIR/scripts/restore-material.sh" "$TOOIE_DIR/restore-material.sh"
   install_file "$REPO_DIR/scripts/list-material-backups.sh" "$TOOIE_DIR/list-material-backups.sh"
   install_file "$REPO_DIR/scripts/reset-bootstrap-defaults.sh" "$TOOIE_DIR/reset-bootstrap-defaults.sh"
-  chmod +x "$TOOIE_DIR/apply-material.sh" "$TOOIE_DIR/restore-material.sh" "$TOOIE_DIR/list-material-backups.sh" "$TOOIE_DIR/reset-bootstrap-defaults.sh"
+  install_file "$REPO_DIR/scripts/setup-btop-shizuku.sh" "$TOOIE_DIR/setup-btop-shizuku.sh"
+  chmod +x "$TOOIE_DIR/apply-material.sh" "$TOOIE_DIR/restore-material.sh" "$TOOIE_DIR/list-material-backups.sh" "$TOOIE_DIR/reset-bootstrap-defaults.sh" "$TOOIE_DIR/setup-btop-shizuku.sh"
 }
 
 post_setup() {

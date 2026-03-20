@@ -18,7 +18,7 @@ func testThemePayload() computedPayload {
 		"tertiary":  "#a1d0c4",
 		"error":     "#ffb4ab",
 	}
-	p.Meta = map[string]string{"status_palette": "vibrant"}
+	p.Meta = map[string]string{"status_palette": "vibrant", "status_theme": "default"}
 	p.Colors = map[int]string{}
 	for i := 0; i <= 21; i++ {
 		p.Colors[i] = "#111111"
@@ -49,31 +49,34 @@ func TestRenderTmuxBlockIncludesPaletteKey(t *testing.T) {
 	}
 }
 
-func TestRenderTmuxBlockTransparentStatusAndSessionBadge(t *testing.T) {
+func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 	got := renderTmuxBlock(testThemePayload())
 	if !strings.Contains(got, `set -g status-style "bg=default,fg=`) {
 		t.Fatalf("expected transparent status-style, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g @status-left-style-session "#[fg=`) || !strings.Contains(got, ",bg=") {
-		t.Fatalf("expected rectangular session badge with fg/bg, got: %s", got)
+	if !strings.Contains(got, `set -g @status-tmux-edge-style "rounded"`) {
+		t.Fatalf("expected default theme to keep rounded widget edges, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-left "#{?client_prefix,#{@status-left-style-prefix} PRFX ,#{?pane_in_mode,#{@status-left-style-copy} COPY ,#{@status-left-style-session} #{session_name} }}`) {
-		t.Fatalf("expected status-left to switch between session/prefix/copy badges, got: %s", got)
+	if !strings.Contains(got, `set -g status-left " #(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')`) {
+		t.Fatalf("expected status-left to use the widget-left helper, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g window-status-separator ""`) {
-		t.Fatalf("expected rectangular window list with no separator, got: %s", got)
+		t.Fatalf("expected empty window separator, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, ",bg=") {
-		t.Fatalf("expected inactive window format with fg/bg colors, got: %s", got)
+		t.Fatalf("expected default inactive window format to stay rectangular, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g window-status-current-format "#[fg=`) || !strings.Contains(got, ",bg=") {
-		t.Fatalf("expected active window format with fg/bg colors, got: %s", got)
+		t.Fatalf("expected default active window format to stay rectangular, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g mode-style "bg=`) || strings.Contains(got, `set -g mode-style "bg=default`) {
 		t.Fatalf("expected copy mode to use explicit highlight background, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"`) {
 		t.Fatalf("expected canonical status-right widget pipeline, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-widget-gap-right "space"`) {
+		t.Fatalf("expected default theme to keep spaced right widgets, got: %s", got)
 	}
 	for _, key := range []string{
 		`set -g @status-tmux-widget-battery "on"`,
@@ -109,11 +112,38 @@ func TestRenderTmuxBlockTransparentStatusAndSessionBadge(t *testing.T) {
 	if paneBorderLine == strings.Replace(paneActiveBorderLine, "pane-active-border-style", "pane-border-style", 1) {
 		t.Fatalf("expected active pane border color to differ from inactive border, got: %s", got)
 	}
-	if !strings.Contains(got, "PRFX") || !strings.Contains(got, "COPY") {
-		t.Fatalf("expected status-left to include PRFX/COPY mode labels, got: %s", got)
+}
+
+func TestRenderTmuxBlockRoundedTheme(t *testing.T) {
+	payload := testThemePayload()
+	payload.Meta["status_theme"] = "rounded"
+	got := renderTmuxBlock(payload)
+	if !strings.Contains(got, `set -g @status-tmux-edge-style "rounded"`) {
+		t.Fatalf("expected rounded theme to keep rounded widget edges, got: %s", got)
 	}
-	if strings.Contains(got, "#{?client_prefix,PREFIX ,}") {
-		t.Fatalf("expected PREFIX marker removed from status-right, got: %s", got)
+	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, ``) {
+		t.Fatalf("expected rounded theme to use rounded inactive window chips, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g window-status-current-format "#[fg=`) || !strings.Contains(got, ``) {
+		t.Fatalf("expected rounded theme to use rounded active window chips, got: %s", got)
+	}
+}
+
+func TestRenderTmuxBlockRectangleTheme(t *testing.T) {
+	payload := testThemePayload()
+	payload.Meta["status_theme"] = "rectangle"
+	got := renderTmuxBlock(payload)
+	if !strings.Contains(got, `set -g @status-tmux-edge-style "flat"`) {
+		t.Fatalf("expected rectangle theme to use flat widget edges, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-left " #(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}') "`) {
+		t.Fatalf("expected rectangle theme to add a gap after the left widget, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-widget-gap-right "none"`) {
+		t.Fatalf("expected rectangle theme to remove right widget gaps, got: %s", got)
+	}
+	if strings.Contains(got, `window-status-format "#[fg=`) && strings.Contains(got, ``) {
+		t.Fatalf("expected rectangle theme windows to stay rectangular, got: %s", got)
 	}
 }
 

@@ -24,10 +24,8 @@ import (
 )
 
 const defaultAppsCacheTTL = 10 * time.Minute
-const (
-	defaultLauncherPackage = "com.termux"
-	restartIntentAction    = "com.termux.app.restart"
-)
+
+var execCommand = exec.Command
 
 type launchableApp struct {
 	PackageName   string `json:"packageName"`
@@ -104,7 +102,7 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "      Show this help screen.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie --restart")
-	fmt.Fprintln(w, "      Trigger termux-launcher restart via broadcast intent.")
+	fmt.Fprintln(w, "      Restart termux-launcher via launcherctl.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands")
 	fmt.Fprintln(w, "  tooie apps [--refresh]")
@@ -266,7 +264,7 @@ func runRestartCommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "tooie restart: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, "tooie restart: broadcast restart intent sent for com.termux")
+	fmt.Fprintln(os.Stdout, "tooie restart: launcherctl restart requested")
 	return 0
 }
 
@@ -471,16 +469,9 @@ func launchComponent(component string) error {
 }
 
 func restartLauncherApp() error {
-	cmd := fmt.Sprintf("am broadcast -a %s -p %s", restartIntentAction, defaultLauncherPackage)
-	base, token, ok := readTooieEndpointToken()
-	if ok {
-		if _, err := tooieExecCommand(base, token, cmd); err == nil {
-			return nil
-		}
-	}
-	out, err := exec.Command("am", "broadcast", "-a", restartIntentAction, "-p", defaultLauncherPackage).CombinedOutput()
+	out, err := execCommand("launcherctl", "restart").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("restart broadcast failed: %w (%s)", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("launcherctl restart failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

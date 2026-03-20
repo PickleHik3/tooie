@@ -81,12 +81,16 @@ main() {
 
   install_file "$defaults_dir/.config/starship.toml" "$HOME_DIR/.config/starship.toml"
   install_file "$defaults_dir/.config/fish/config.fish" "$HOME_DIR/.config/fish/config.fish"
+  backup_if_exists "$HOME_DIR/.config/fish/conf.d/tooie-btop.fish"
+  rm -f "$HOME_DIR/.config/fish/conf.d/tooie-btop.fish"
   install_file "$defaults_dir/.config/peaclock/config" "$HOME_DIR/.config/peaclock/config"
 
   # Preserve launcherctl endpoint/token auth files by replacing only config.json.
   install_file "$defaults_dir/.launcherctl/config.json" "$HOME_DIR/.launcherctl/config.json"
 
   install_dir "$defaults_dir/.config/tmux" "$HOME_DIR/.config/tmux"
+  backup_if_exists "$TOOIE_DIR/btop"
+  rm -rf "$TOOIE_DIR/btop"
 
   reload_surfaces
 

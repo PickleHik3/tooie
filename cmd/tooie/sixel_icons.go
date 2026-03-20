@@ -19,7 +19,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const sixelNoScroll = "\x1b[?80l"
+const (
+	sixelNoScroll = "\x1b[?80l"
+	sixelScroll   = "\x1b[?80h"
+)
 
 type cellDim struct {
 	width  int
@@ -34,6 +37,7 @@ type sixelRenderResult struct {
 
 type sixelCacheKey struct {
 	iconPath    string
+	bgHex       string
 	modUnixNano int64
 	widthCells  int
 	heightCells int
@@ -42,9 +46,10 @@ type sixelCacheKey struct {
 }
 
 type sixelOverlay struct {
-	row  int
-	col  int
-	data string
+	row    int
+	col    int
+	rowEnd int
+	data   string
 }
 
 type sixelCache struct {
@@ -53,6 +58,7 @@ type sixelCache struct {
 }
 
 var pinnedSixelCache = sixelCache{items: map[sixelCacheKey]sixelRenderResult{}}
+var wallpaperSixelCache = sixelCache{items: map[sixelCacheKey]sixelRenderResult{}}
 
 func sixelCellGeometry() (cellDim, bool) {
 	if strings.TrimSpace(os.Getenv("TOOIE_DISABLE_SIXEL")) != "" {
@@ -125,6 +131,31 @@ func clearPinnedSixelCache() {
 	pinnedSixelCache.items = map[sixelCacheKey]sixelRenderResult{}
 }
 
+func renderCachedWallpaperSixel(path string, widthCells, heightCells int, geom cellDim, bgHex string) (sixelRenderResult, bool) {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		return sixelRenderResult{}, false
+	}
+	key := sixelCacheKey{
+		iconPath:    path,
+		bgHex:       strings.ToLower(strings.TrimSpace(bgHex)),
+		modUnixNano: info.ModTime().UnixNano(),
+		widthCells:  widthCells,
+		heightCells: heightCells,
+		cellW:       geom.width,
+		cellH:       geom.height,
+	}
+	if cached, ok := wallpaperSixelCache.get(key); ok {
+		return cached, true
+	}
+	res, err := renderSixelPhotoFromFile(path, widthCells, heightCells, geom, bgHex)
+	if err != nil || strings.TrimSpace(res.data) == "" {
+		return sixelRenderResult{}, false
+	}
+	wallpaperSixelCache.set(key, res)
+	return res, true
+}
+
 func renderSixelFromFile(path string, widthCells, heightCells int, geom cellDim) (sixelRenderResult, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -136,6 +167,19 @@ func renderSixelFromFile(path string, widthCells, heightCells int, geom cellDim)
 		return sixelRenderResult{}, err
 	}
 	return renderSixelImage(img, widthCells, heightCells, geom)
+}
+
+func renderSixelPhotoFromFile(path string, widthCells, heightCells int, geom cellDim, bgHex string) (sixelRenderResult, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return sixelRenderResult{}, err
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return sixelRenderResult{}, err
+	}
+	return renderSixelPhotoImage(img, widthCells, heightCells, geom, bgHex)
 }
 
 func renderSixelImage(src image.Image, widthCells, heightCells int, geom cellDim) (sixelRenderResult, error) {
@@ -156,6 +200,50 @@ func renderSixelImage(src image.Image, widthCells, heightCells int, geom cellDim
 		widthPx:  b.Dx(),
 		heightPx: b.Dy(),
 	}, nil
+}
+
+func renderSixelPhotoImage(src image.Image, widthCells, heightCells int, geom cellDim, bgHex string) (sixelRenderResult, error) {
+	targetW := max(1, widthCells*geom.width)
+	targetH := max(1, heightCells*geom.height)
+	src = trimTransparentImage(src)
+	src = flattenImageAlpha(src, bgHex)
+	scaled := scaleImageAspectFit(src, targetW, targetH)
+	var buf bytes.Buffer
+	enc := sixel.NewEncoder(&buf)
+	if err := enc.Encode(scaled); err != nil {
+		return sixelRenderResult{}, err
+	}
+	b := scaled.Bounds()
+	return sixelRenderResult{
+		data:     buf.String(),
+		widthPx:  b.Dx(),
+		heightPx: b.Dy(),
+	}, nil
+}
+
+func flattenImageAlpha(src image.Image, bgHex string) image.Image {
+	bgHex = strings.TrimSpace(bgHex)
+	if bgHex == "" {
+		bgHex = "#11131c"
+	}
+	r, g, b := parseHexColor(bgHex)
+	bg := color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
+	bounds := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			sr, sg, sb, sa := src.At(x, y).RGBA()
+			alpha := float64(sa) / 65535.0
+			inv := 1.0 - alpha
+			dst.Set(x-bounds.Min.X, y-bounds.Min.Y, color.RGBA{
+				R: uint8(float64(uint8(sr>>8))*alpha + float64(bg.R)*inv),
+				G: uint8(float64(uint8(sg>>8))*alpha + float64(bg.G)*inv),
+				B: uint8(float64(uint8(sb>>8))*alpha + float64(bg.B)*inv),
+				A: 255,
+			})
+		}
+	}
+	return dst
 }
 
 func scaleImage(src image.Image, targetW, targetH int) image.Image {
@@ -222,6 +310,7 @@ func renderSixelOverlays(overlays []sixelOverlay) string {
 		return ""
 	}
 	var b strings.Builder
+	b.WriteString("\x1b7")
 	b.WriteString(sixelNoScroll)
 	for _, ov := range overlays {
 		if ov.row < 1 || ov.col < 1 || strings.TrimSpace(ov.data) == "" {
@@ -230,6 +319,8 @@ func renderSixelOverlays(overlays []sixelOverlay) string {
 		b.WriteString(fmt.Sprintf("\x1b[%d;%dH", ov.row, ov.col))
 		b.WriteString(ov.data)
 	}
+	b.WriteString(sixelScroll)
+	b.WriteString("\x1b8")
 	return b.String()
 }
 

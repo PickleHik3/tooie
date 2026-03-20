@@ -112,6 +112,7 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 		"Status Bar",
 		"Battery: on",
 		"Weather: on",
+		"Apply (Shift+A)",
 		"#aeb1f4 primary",
 	} {
 		if !strings.Contains(got, want) {
@@ -125,6 +126,53 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	}
 }
 
+func TestRequestThemeApplyNoopsWithoutChanges(t *testing.T) {
+	m := model{
+		themeSource:      defaultSource,
+		mode:             defaultMode,
+		profile:          defaultProfile,
+		statusTheme:      defaultStatusTheme,
+		widgetBattery:    true,
+		widgetCPU:        true,
+		widgetRAM:        true,
+		widgetWeather:    true,
+		lastAppliedTheme: "",
+	}
+	m.lastAppliedTheme = m.applyCacheSignature()
+
+	next, cmd := m.requestThemeApply()
+	got := next.(model)
+	if cmd != nil {
+		t.Fatalf("requestThemeApply() returned command for unchanged theme")
+	}
+	if got.lastStatus != "No theme changes to apply" {
+		t.Fatalf("lastStatus = %q", got.lastStatus)
+	}
+}
+
+func TestRequestThemeApplyStartsWhenChanged(t *testing.T) {
+	m := model{
+		themeSource:      defaultSource,
+		mode:             defaultMode,
+		profile:          defaultProfile,
+		statusTheme:      defaultStatusTheme,
+		widgetBattery:    true,
+		widgetCPU:        true,
+		widgetRAM:        true,
+		widgetWeather:    true,
+		lastAppliedTheme: "stale",
+	}
+
+	next, cmd := m.requestThemeApply()
+	got := next.(model)
+	if cmd == nil {
+		t.Fatalf("requestThemeApply() expected command when theme changed")
+	}
+	if !got.applying {
+		t.Fatalf("requestThemeApply() should enter applying state")
+	}
+}
+
 func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -133,12 +181,18 @@ func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 		themeSource:   defaultSource,
 		mode:          defaultMode,
 		profile:       defaultProfile,
+		statusTheme:   defaultStatusTheme,
 		widgetBattery: true,
 		widgetCPU:     true,
 		widgetRAM:     false,
 		widgetWeather: true,
 	}
-	m.settingIndex = len(m.settings())
+	for i, item := range m.mergedPageItems() {
+		if item.Target == "widget_battery" {
+			m.settingIndex = i
+			break
+		}
+	}
 
 	next, cmd := m.activateSetting()
 	got := next.(model)

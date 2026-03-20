@@ -31,16 +31,18 @@ var (
 )
 
 const (
-	defaultMode    = "auto"
-	defaultPalette = "default"
-	defaultProfile = "adaptive"
-	defaultSource  = "wallpaper"
-	pageHome       = 0
-	pageTheme      = 1
-	totalPages     = 2
+	defaultMode        = "auto"
+	defaultPalette     = "default"
+	defaultStatusTheme = "default"
+	defaultProfile     = "adaptive"
+	defaultSource      = "wallpaper"
+	pageHome           = 0
+	pageTheme          = 1
+	totalPages         = 2
 )
 
 var modePresets = []string{"auto", "dark", "light"}
+var statusThemePresets = []string{"default", "rounded", "rectangle"}
 var profilePresets = []string{"adaptive", "soft-pastel", "studio-dark", "neon-night", "warm-retro", "vivid-noir", "arctic-calm"}
 var themeSources = []string{"wallpaper", "preset"}
 var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84", "dracula", "gruvbox", "nord"}
@@ -186,6 +188,7 @@ type model struct {
 	customIndex      int
 	mode             string
 	palette          string
+	statusTheme      string
 	profile          string
 	themeSource      string
 	presetFamily     string
@@ -212,6 +215,7 @@ type model struct {
 	applyTarget      float64
 	applyLabel       string
 	applyCacheKey    string
+	lastAppliedTheme string
 	previewCacheKey  string
 	previewBackupID  string
 	metricsPaused    bool
@@ -276,6 +280,7 @@ func initialModel() model {
 		uptimeText:    "--",
 		mode:          defaultMode,
 		palette:       defaultPalette,
+		statusTheme:   defaultStatusTheme,
 		profile:       defaultProfile,
 		themeSource:   defaultSource,
 		presetFamily:  presetFamilyOrder[0],
@@ -311,6 +316,7 @@ func initialModel() model {
 	m.loadThemeStateFromBackups()
 	m.loadShellSettings()
 	m.loadPreviewColors()
+	m.lastAppliedTheme = m.applyCacheSignature()
 	m.pinnedPackages = loadPinnedApps()
 	m.refreshAppSearchResults()
 	m.startHomeIntro()
@@ -371,6 +377,7 @@ func initialMiniModel(showClock, showCal bool) model {
 		uptimeText:    "--",
 		mode:          defaultMode,
 		palette:       defaultPalette,
+		statusTheme:   defaultStatusTheme,
 		profile:       defaultProfile,
 		themeSource:   defaultSource,
 		presetFamily:  presetFamilyOrder[0],
@@ -404,6 +411,7 @@ func initialMiniModel(showClock, showCal bool) model {
 	m.loadThemeStateFromBackups()
 	m.loadShellSettings()
 	m.loadPreviewColors()
+	m.lastAppliedTheme = m.applyCacheSignature()
 	return m
 }
 
@@ -421,6 +429,9 @@ func (m *model) loadThemeStateFromBackups() {
 	}
 	if v := strings.TrimSpace(meta["status_palette"]); v != "" {
 		m.palette = v
+	}
+	if v := strings.TrimSpace(meta["status_theme"]); v != "" {
+		m.statusTheme = v
 	}
 	if v := strings.TrimSpace(meta["profile"]); v != "" {
 		m.profile = v
@@ -463,6 +474,7 @@ func (m *model) loadThemeStateFromBackups() {
 func (m *model) normalizeThemeSelection() {
 	m.mode = canonicalMode(m.mode)
 	m.profile = canonicalProfile(m.profile)
+	m.statusTheme = normalizeStatusTheme(m.statusTheme)
 	if !contains(themeSources, m.themeSource) {
 		m.themeSource = defaultSource
 	}
@@ -471,6 +483,9 @@ func (m *model) normalizeThemeSelection() {
 	}
 	if !contains(profilePresets, m.profile) {
 		m.profile = defaultProfile
+	}
+	if !contains(statusThemePresets, m.statusTheme) {
+		m.statusTheme = defaultStatusTheme
 	}
 	if !contains(presetFamilyOrder, m.presetFamily) {
 		m.presetFamily = presetFamilyOrder[0]
@@ -861,6 +876,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.lastStatus = msg.label + " completed"
 			}
+			if !msg.previewOnly {
+				m.lastAppliedTheme = msg.cacheKey
+			}
 			if strings.TrimSpace(msg.backupID) != "" {
 				m.previewBackupID = msg.backupID
 			}
@@ -919,6 +937,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.backupIndex = max(0, len(m.backups)-1)
 		}
 		m.loadPreviewColors()
+		m.lastAppliedTheme = m.applyCacheSignature()
 		return m, post
 	case tea.KeyMsg:
 		if m.clockOnly {
@@ -1134,6 +1153,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return statusMsg("Sixel preview finished")
 			})
+		case "A":
+			if m.page == pageTheme {
+				return m.requestThemeApply()
+			}
+			return m, nil
 		case "enter":
 			return m.activateSetting()
 		}
@@ -1143,34 +1167,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) settings() []settingItem {
 	items := []settingItem{
-		{Label: "Apply Theme", Target: "apply"},
 		{Label: "Update Colors", Target: "preview"},
-		{Label: "Theme Strategy: " + displayThemeSource(m.themeSource), Target: "theme_source"},
+		{Label: "Source: " + displayThemeSource(m.themeSource), Target: "theme_source"},
 	}
 	if m.themeSource == "preset" {
 		items = append(items,
-			settingItem{Label: "Preset Family: " + displayPresetFamily(m.presetFamily), Target: "preset_family"},
+			settingItem{Label: "Preset: " + displayPresetFamily(m.presetFamily), Target: "preset_family"},
 			settingItem{Label: "Preset Variant: " + displayPresetVariant(m.presetVariant), Target: "preset_variant"},
 		)
 	} else {
 		items = append(items,
-			settingItem{Label: "Adaptation Mode: " + displayMode(m.mode), Target: "mode"},
-			settingItem{Label: "Dynamic Profile: " + displayProfile(m.profile), Target: "profile"},
+			settingItem{Label: "Mode: " + displayMode(m.mode), Target: "mode"},
+			settingItem{Label: "Flavor: " + displayProfile(m.profile), Target: "profile"},
 		)
 	}
 	items = append(items,
-		settingItem{Label: "Customize Colors...", Target: "customize"},
-		settingItem{Label: "Backups...", Target: "backups"},
+		settingItem{Label: "Customize Colors", Target: "customize"},
+		settingItem{Label: "Backups", Target: "backups"},
 	)
 	return items
 }
 
 func (m model) settingsPageItems() []settingItem {
 	return []settingItem{
+		{Label: "Theme: " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
 		{Label: "Battery: " + onOffLabel(m.widgetBattery), Target: "widget_battery"},
 		{Label: "CPU: " + onOffLabel(m.widgetCPU), Target: "widget_cpu"},
 		{Label: "RAM: " + onOffLabel(m.widgetRAM), Target: "widget_ram"},
 		{Label: "Weather: " + onOffLabel(m.widgetWeather), Target: "widget_weather"},
+		{Label: "Apply (Shift+A)", Target: "apply"},
 	}
 }
 
@@ -1204,12 +1229,16 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 	}
 	switch items[m.settingIndex].Target {
 	case "apply":
-		return m.startApply(m.themeActionLabel(false), true, false)
+		return m.requestThemeApply()
 	case "preview":
+		m.refreshCurrentPreviewColors()
 		return m.startApply(m.themeActionLabel(true), true, true)
 	case "theme_source":
 		m.themeSource = nextThemeSource(m.themeSource)
 		m.normalizeThemeSelection()
+		return m, nil
+	case "status_theme":
+		m.statusTheme = nextStatusTheme(m.statusTheme)
 		return m, nil
 	case "mode":
 		m.mode = nextMode(m.mode)
@@ -1889,26 +1918,57 @@ func (m model) renderThemePage(usableW, contentH int) string {
 	usableW = max(28, usableW)
 	contentH = max(10, contentH)
 
-	topMin := max(8, len(m.settings())+2)
+	compactTop := usableW < 82 && contentH < 31
+	topMin := max(10, len(m.settings())+4)
 	if m.hasActiveOverlay() {
 		topMin = max(topMin, m.interactionLineCount()+2)
 	}
-	bottomMin := max(7, len(m.settingsPageItems())+3)
+	if compactTop {
+		topMin = max(topMin, 14)
+	}
+	bottomMin := max(8, len(m.settingsPageItems())+4)
+	if compactTop {
+		bottomMin = max(8, len(m.settingsPageItems())+3)
+	}
 	topH := topMin
 	if contentH-topH < bottomMin {
 		topH = max(6, contentH-bottomMin)
 	}
+	if compactTop {
+		preferred := (contentH * 58) / 100
+		if preferred > topH {
+			topH = preferred
+		}
+		if contentH-topH < bottomMin {
+			topH = max(6, contentH-bottomMin)
+		}
+	}
 	bottomH := max(bottomMin, contentH-topH)
 
-	topRightContent := m.paletteBlock(topH - 2)
-	if m.hasActiveOverlay() {
-		topRightContent = m.interactionBlock(topH - 2)
+	topBody := ""
+	if compactTop && !m.hasActiveOverlay() {
+		topBody = renderTwoColumns(
+			strings.Split(m.settingsBlock(topH-2), "\n"),
+			strings.Split(m.compactPaletteWallpaperBlock(topH-2, max(18, (usableW-5)/2)), "\n"),
+			usableW-4,
+		)
+	} else {
+		topMidContent := m.paletteBlock(topH - 2)
+		wallpaperWidth := max(16, (usableW-8)/3)
+		if layout, ok := threeColumnLayout(usableW - 4); ok {
+			wallpaperWidth = layout.rightW
+		}
+		topRightContent := m.wallpaperBlock(topH-2, wallpaperWidth)
+		if m.hasActiveOverlay() {
+			topRightContent = m.interactionBlock(topH - 2)
+		}
+		topBody = renderThreeColumns(
+			strings.Split(m.settingsBlock(topH-2), "\n"),
+			strings.Split(topMidContent, "\n"),
+			strings.Split(topRightContent, "\n"),
+			usableW-4,
+		)
 	}
-	topBody := renderTwoColumns(
-		strings.Split(m.settingsBlock(topH-2), "\n"),
-		strings.Split(topRightContent, "\n"),
-		usableW-4,
-	)
 	topRow := panelStyle(usableW, topH, "12").Render(topBody)
 
 	bottomRow := panelStyle(usableW, bottomH, "8").Render(m.settingsPageBlock(bottomH - 2))
@@ -1932,7 +1992,7 @@ func (m model) interactionLineCount() int {
 }
 
 func (m model) settingsBlock(limit int) string {
-	lines := []string{headerChip("Colors", "12")}
+	lines := []string{headerChip("Colors", "12"), ""}
 	items := m.settings()
 	visible := max(1, limit-1)
 	start, end := listWindow(len(items), m.settingIndex, visible)
@@ -1957,18 +2017,13 @@ func (m model) settingsBlock(limit int) string {
 			lines = append(lines, "  wallpaper is ignored.")
 		}
 	} else {
-		if len(lines) < limit {
-			lines = append(lines, "  Wallpaper-derived palette,")
-		}
-		if len(lines) < limit {
-			lines = append(lines, "  then shaped by profile.")
-		}
+		// Keep compact/clean first-row copy in wallpaper mode.
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (m model) settingsPageBlock(limit int) string {
-	lines := []string{headerChip("Status Bar", "8")}
+	lines := []string{headerChip("Status Bar", "8"), ""}
 	items := m.settingsPageItems()
 	selected := m.settingIndex - len(m.settings())
 	if selected < 0 {
@@ -1993,7 +2048,8 @@ func (m model) settingsPageBlock(limit int) string {
 }
 
 func (m model) paletteBlock(limit int) string {
-	lines := append([]string{}, m.palettePreviewLines()...)
+	lines := []string{headerChip("Palette", "13"), ""}
+	lines = append(lines, m.palettePreviewLines()...)
 	for len(lines) < limit {
 		lines = append(lines, "")
 	}
@@ -2001,6 +2057,74 @@ func (m model) paletteBlock(limit int) string {
 		lines = lines[:limit]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m model) wallpaperBlock(limit, width int) string {
+	lines := []string{headerChip("Wallpaper", "8"), ""}
+	innerWidth := max(8, width-4)
+	imageRows := max(3, limit-len(lines))
+	rendered := renderCachedImageFile(preferredWallpaperPath(), innerWidth, imageRows)
+	if strings.TrimSpace(rendered) == "" {
+		lines = append(lines, "  wallpaper preview")
+		lines = append(lines, "  unavailable")
+	} else {
+		lines = append(lines, strings.Split(rendered, "\n")...)
+	}
+	for len(lines) < limit {
+		lines = append(lines, "")
+	}
+	if len(lines) > limit {
+		lines = lines[:limit]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) compactPaletteWallpaperBlock(limit, width int) string {
+	lines := []string{headerChip("Palette", "13"), ""}
+	lines = append(lines, m.compactPaletteGridLines(width)...)
+	if len(lines) < limit {
+		lines = append(lines, "")
+	}
+	if len(lines) < limit {
+		lines = append(lines, headerChip("Wallpaper", "8"), "")
+	}
+	remaining := limit - len(lines)
+	if remaining > 0 {
+		rendered := renderCachedImageFile(preferredWallpaperPath(), max(8, width-4), max(3, remaining))
+		if strings.TrimSpace(rendered) == "" {
+			lines = append(lines, "  wallpaper preview")
+			if len(lines) < limit {
+				lines = append(lines, "  unavailable")
+			}
+		} else {
+			lines = append(lines, strings.Split(rendered, "\n")...)
+		}
+	}
+	for len(lines) < limit {
+		lines = append(lines, "")
+	}
+	if len(lines) > limit {
+		lines = lines[:limit]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) compactPaletteGridLines(width int) []string {
+	keys := []string{"primary", "secondary", "tertiary", "error", "surface", "on_surface"}
+	swatches := make([]string, 0, len(keys))
+	for _, k := range keys {
+		hex := strings.TrimSpace(m.selectedHexes[k])
+		if hex == "" {
+			continue
+		}
+		swatches = append(swatches, lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render("   "))
+	}
+	for len(swatches) < 6 {
+		swatches = append(swatches, lipgloss.NewStyle().Background(lipgloss.Color("8")).Render("   "))
+	}
+	row1 := strings.Join(swatches[:3], " ")
+	row2 := strings.Join(swatches[3:6], " ")
+	return []string{placeCenterStyled(row1, width), placeCenterStyled(row2, width)}
 }
 
 func (m model) renderHomePage(usableW, contentH int) string {
@@ -2604,7 +2728,6 @@ func (m model) customizeItems() []customizeItem {
 		{Label: "ANSI Magenta", Target: "ansi_magenta"},
 		{Label: "ANSI Cyan", Target: "ansi_cyan"},
 		{Label: "Status Palette", Target: "status_palette"},
-		{Label: "Apply Theme", Target: "apply"},
 		{Label: "Back", Target: "back"},
 	}
 }
@@ -2626,7 +2749,7 @@ func (m model) customizeBlock(limit int) string {
 		switch item.Target {
 		case "status_palette":
 			value = m.palette
-		case "apply", "back":
+		case "back":
 			value = ""
 		default:
 			hex := m.getColorTarget(item.Target)
@@ -2690,8 +2813,6 @@ func (m model) activateCustomizeItem() (tea.Model, tea.Cmd) {
 			m.palette = "default"
 		}
 		return m, nil
-	case "apply":
-		return m.startApply("Apply", true, false)
 	case "back":
 		m.customizing = false
 		m.customIndex = 0
@@ -2748,7 +2869,11 @@ func (m *model) setColorTarget(target, hex string) {
 }
 
 func (m model) applyArgs(includeOverrides bool) []string {
-	args := []string{"--theme-source", m.themeSource, "--status-palette", m.palette}
+	statusTheme := normalizeStatusTheme(m.statusTheme)
+	if statusTheme == "" {
+		statusTheme = defaultStatusTheme
+	}
+	args := []string{"--theme-source", m.themeSource, "--status-palette", m.palette, "--status-theme", statusTheme}
 	if m.themeSource == "preset" {
 		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
 	} else {
@@ -2845,8 +2970,9 @@ func (m model) applyCacheSignature() string {
 }
 
 func wallpaperCacheFingerprint() string {
-	if st, err := os.Stat(defaultWall); err == nil {
-		return fmt.Sprintf("fixed:%s:%d:%d", defaultWall, st.ModTime().UnixNano(), st.Size())
+	wall := preferredWallpaperPath()
+	if st, err := os.Stat(wall); err == nil {
+		return fmt.Sprintf("fixed:%s:%d:%d", wall, st.ModTime().UnixNano(), st.Size())
 	}
 	bgDir := filepath.Dir(defaultWall)
 	entries, err := os.ReadDir(bgDir)
@@ -2879,6 +3005,17 @@ func wallpaperCacheFingerprint() string {
 	return fmt.Sprintf("latest:%s:%d:%d", newest.name, newest.modTime.UnixNano(), newest.size)
 }
 
+func preferredWallpaperPath() string {
+	if st, err := os.Stat(defaultWall); err == nil && st.Size() > 0 {
+		return defaultWall
+	}
+	fallback := filepath.Join(homeDir, ".termux", "background", "background.jpeg")
+	if st, err := os.Stat(fallback); err == nil && st.Size() > 0 {
+		return fallback
+	}
+	return defaultWall
+}
+
 func (m model) startApply(label string, includeOverrides bool, previewOnly bool) (tea.Model, tea.Cmd) {
 	if m.applying {
 		return m, nil
@@ -2898,6 +3035,40 @@ func (m model) startApply(label string, includeOverrides bool, previewOnly bool)
 	m.applyTarget = 0.02
 	m.lastStatus = label + " in progress..."
 	return m, tea.Batch(tickApply(), runApplyCommand(args, label, cacheKey, reuseBackup, previewOnly))
+}
+
+func (m model) requestThemeApply() (tea.Model, tea.Cmd) {
+	cacheKey := m.applyCacheSignature()
+	if cacheKey == m.lastAppliedTheme {
+		m.lastStatus = "No theme changes to apply"
+		return m, nil
+	}
+	return m.startApply(m.themeActionLabel(false), true, false)
+}
+
+func (m *model) refreshCurrentPreviewColors() {
+	cfg, err := parseThemeApplyFlags(m.applyArgs(true))
+	if err != nil {
+		return
+	}
+	payload, _, err := computeThemePayload(cfg, "")
+	if err != nil {
+		return
+	}
+	m.selectedHexes = map[string]string{}
+	for role, hex := range payload.Roles {
+		hex = strings.ToLower(strings.TrimSpace(hex))
+		if hex == "" {
+			continue
+		}
+		m.selectedHexes[role] = hex
+	}
+	if strings.TrimSpace(payload.Background) != "" {
+		m.selectedHexes["background"] = strings.ToLower(strings.TrimSpace(payload.Background))
+	}
+	if strings.TrimSpace(payload.Foreground) != "" {
+		m.selectedHexes["on_surface"] = strings.ToLower(strings.TrimSpace(payload.Foreground))
+	}
 }
 
 func nextProfile(cur string) string {
@@ -2966,6 +3137,18 @@ func nextThemeSource(cur string) string {
 	return themeSources[0]
 }
 
+func nextStatusTheme(cur string) string {
+	if len(statusThemePresets) == 0 {
+		return cur
+	}
+	for i, theme := range statusThemePresets {
+		if theme == cur {
+			return statusThemePresets[(i+1)%len(statusThemePresets)]
+		}
+	}
+	return statusThemePresets[0]
+}
+
 func nextPresetFamily(cur string) string {
 	if len(presetFamilyOrder) == 0 {
 		return cur
@@ -3032,9 +3215,20 @@ func displayMode(mode string) string {
 func displayThemeSource(source string) string {
 	switch strings.TrimSpace(source) {
 	case "preset":
-		return "Fixed Preset"
+		return "Preset"
 	default:
-		return "Dynamic (Wallpaper)"
+		return "Wallpaper"
+	}
+}
+
+func displayStatusTheme(name string) string {
+	switch normalizeStatusTheme(name) {
+	case "rounded":
+		return "Rounded"
+	case "rectangle":
+		return "Rectangle"
+	default:
+		return "Default"
 	}
 }
 
@@ -3077,29 +3271,96 @@ func presetVariantMode(family, variant string) string {
 	}
 }
 
+type threeColumnSpec struct {
+	leftW  int
+	midW   int
+	rightW int
+	sep    string
+	sepW   int
+}
+
+func threeColumnLayout(totalWidth int) (threeColumnSpec, bool) {
+	if totalWidth < 72 {
+		return threeColumnSpec{}, false
+	}
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" │ ")
+	sepW := lipgloss.Width(sep)
+	leftW := (totalWidth - 2*sepW) / 3
+	midW := leftW
+	rightW := totalWidth - 2*sepW - leftW - midW
+	if leftW < 18 || midW < 18 || rightW < 18 {
+		return threeColumnSpec{}, false
+	}
+	return threeColumnSpec{leftW: leftW, midW: midW, rightW: rightW, sep: sep, sepW: sepW}, true
+}
+
+func renderThreeColumns(left, middle, right []string, totalWidth int) string {
+	spec, ok := threeColumnLayout(totalWidth)
+	if !ok {
+		joined := make([]string, 0, len(left)+len(middle)+len(right)+4)
+		joined = append(joined, left...)
+		joined = append(joined, "")
+		joined = append(joined, middle...)
+		joined = append(joined, "")
+		joined = append(joined, right...)
+		return strings.Join(joined, "\n")
+	}
+
+	rowCount := max(len(left), max(len(middle), len(right)))
+	lines := make([]string, 0, rowCount)
+	leftStyle := lipgloss.NewStyle().Width(spec.leftW)
+	middleStyle := lipgloss.NewStyle().Width(spec.midW)
+	rightStyle := lipgloss.NewStyle().Width(spec.rightW)
+	for i := 0; i < rowCount; i++ {
+		l, m, r := "", "", ""
+		if i < len(left) {
+			l = left[i]
+		}
+		if i < len(middle) {
+			m = middle[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		lines = append(lines, leftStyle.Render(l)+spec.sep+middleStyle.Render(m)+spec.sep+rightStyle.Render(r))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func renderTwoColumns(left, right []string, totalWidth int) string {
-	if totalWidth < 56 {
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" │ ")
+	sepW := lipgloss.Width(sep)
+	if totalWidth < 2*18+sepW {
 		joined := make([]string, 0, len(left)+len(right)+2)
 		joined = append(joined, left...)
 		joined = append(joined, "")
 		joined = append(joined, right...)
 		return strings.Join(joined, "\n")
 	}
-
-	gap := "   "
-	leftW := (totalWidth - len(gap)) / 2
-	rightW := totalWidth - len(gap) - leftW
-	if leftW < 20 || rightW < 20 {
-		joined := make([]string, 0, len(left)+len(right)+2)
-		joined = append(joined, left...)
-		joined = append(joined, "")
-		joined = append(joined, right...)
-		return strings.Join(joined, "\n")
+	avail := totalWidth - sepW
+	leftW := (avail * 11) / 20
+	if leftW < 24 {
+		leftW = 24
 	}
-
-	leftBlock := lipgloss.NewStyle().Width(leftW).Render(strings.Join(left, "\n"))
-	rightBlock := lipgloss.NewStyle().Width(rightW).Render(strings.Join(right, "\n"))
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftBlock, gap, rightBlock)
+	if leftW > avail-20 {
+		leftW = avail - 20
+	}
+	rightW := avail - leftW
+	rowCount := max(len(left), len(right))
+	lines := make([]string, 0, rowCount)
+	leftStyle := lipgloss.NewStyle().Width(leftW)
+	rightStyle := lipgloss.NewStyle().Width(rightW)
+	for i := 0; i < rowCount; i++ {
+		l, r := "", ""
+		if i < len(left) {
+			l = left[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		lines = append(lines, leftStyle.Render(l)+sep+rightStyle.Render(r))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func clampPct(v float64) float64 {

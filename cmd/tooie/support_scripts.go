@@ -26,6 +26,7 @@ func ensureTooieSupportScripts() error {
 		{path: installedRestoreScriptPath(), repoRel: filepath.Join("scripts", "restore-material.sh")},
 		{path: filepath.Join(tooieConfigDir, "list-material-backups.sh"), repoRel: filepath.Join("scripts", "list-material-backups.sh")},
 		{path: installedResetScriptPath(), repoRel: filepath.Join("scripts", "reset-bootstrap-defaults.sh")},
+		{path: installedBtopSetupScriptPath(), repoRel: filepath.Join("scripts", "setup-btop-shizuku.sh")},
 	}
 	for _, script := range scripts {
 		if err := ensureSupportScript(script.path, script.repoRel); err != nil {
@@ -90,6 +91,14 @@ func installedResetScriptPath() string {
 
 func currentResetScriptPath() string {
 	return installedResetScriptPath()
+}
+
+func installedBtopSetupScriptPath() string {
+	return filepath.Join(tooieConfigDir, "setup-btop-shizuku.sh")
+}
+
+func currentBtopSetupScriptPath() string {
+	return installedBtopSetupScriptPath()
 }
 
 func resolveRepoSupportPath(repoRel string) string {
