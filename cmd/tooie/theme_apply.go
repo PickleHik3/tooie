@@ -932,39 +932,39 @@ func renderTmuxBlock(payload computedPayload) string {
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
 	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
-	errorBase := nonBlackStatusColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), payload.Foreground)
 	weatherColor := ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground)
 	separatorColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48)), payload.Foreground)
 	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
 	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
 	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
 	chargingColor := ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground)
-	batteryColors := []string{
-		ensureReadableTextColor(payload.Background, errorBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, blendHexColor(errorBase, tertiaryFixedDim, 0.18), payload.Foreground),
-		ensureReadableTextColor(payload.Background, blendHexColor(tertiaryFixedDim, secondaryFixedDim, 0.28), payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+	batteryRamp := []string{
+		"#ff6b6b", // red
+		"#ff8f5a", // orange-red
+		"#ffb347", // orange
+		"#ffd166", // yellow
+		"#b7df6a", // yellow-green
+		"#49d17d", // green
 	}
-	for i, c := range batteryColors {
-		batteryColors[i] = ensureReadableTextColor(payload.Background, saturateHexColor(c, 0.34), payload.Foreground)
+	batteryColors := make([]string, len(batteryRamp))
+	for i, c := range batteryRamp {
+		batteryColors[i] = ensureReadableTextColor(payload.Background, saturateHexColor(c, 0.16), payload.Foreground)
 	}
 	batteryFullColors := [4]string{}
 	batteryHalfColors := [4]string{}
 	batteryEmptyColors := [4]string{}
 	batAnchors := []string{
-		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(errorBase, "#ff4d4d", 0.55), 0.50), payload.Foreground),
-		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(errorBase, "#ff9f43", 0.66), 0.46), payload.Foreground),
-		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(tertiaryBase, "#ffd166", 0.74), 0.42), payload.Foreground),
-		ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(secondaryBase, "#49d17d", 0.72), 0.40), payload.Foreground),
+		batteryColors[0],
+		batteryColors[1],
+		batteryColors[3],
+		batteryColors[5],
 	}
 	for i := 0; i < 4; i++ {
 		fullT := 0.06 + (0.88 * float64(i) / 3.0)
 		halfT := 0.18 + (0.88 * float64(i) / 3.0)
 		full := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground)
 		half := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground)
-		empty := ensureReadableTextColor(payload.Background, blendHexColor(full, surfaceHighest, 0.62), payload.Foreground)
+		empty := ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(full, surfaceHighest, 0.18), 0.14), payload.Foreground)
 		batteryFullColors[i] = full
 		batteryHalfColors[i] = half
 		batteryEmptyColors[i] = empty
@@ -985,7 +985,7 @@ func renderTmuxBlock(payload computedPayload) string {
 		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
 		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
 	}
-	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.12, 0.20)))
+	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.18, 0.24)))
 	chargingBG := nonBlackStatusColor(blendHexColor(blendHexColor(secondaryBase, primaryBase, 0.35), tertiaryBase, 0.18), payload.Foreground)
 	cpuBG := nonBlackStatusColor(blendHexColor(secondaryContainer, surfaceHighest, 0.20), payload.Foreground)
 	ramBG := nonBlackStatusColor(blendHexColor(primaryContainer, surfaceHighest, 0.22), payload.Foreground)
@@ -1006,7 +1006,8 @@ func renderTmuxBlock(payload computedPayload) string {
 	switch statusTheme {
 	case "rounded":
 		// One outer rounded capsule for the full window list, with active window inset as its own pill.
-		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag, #I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
+		rightGap = "space"
+		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag,#I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
 		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
 	case "rectangle":
 		edgeStyle = "flat"
@@ -1033,7 +1034,7 @@ set -g @status-tmux-left-bg-session "%s"
 set -g @status-tmux-left-bg-prefix "%s"
 set -g @status-tmux-left-bg-copy "%s"
 set -g @status-tmux-left-session-pad "%s"
-set -g status-left " #(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
+set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
 set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
 set -g status-format[1] "#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#[fg=%s]%s}}"
 set -g window-status-separator ""

@@ -1988,45 +1988,29 @@ func (m model) renderThemePage(usableW, contentH int) string {
 	usableW = max(28, usableW)
 	contentH = max(10, contentH)
 
-	topMin := max(10, max(len(m.settings()), len(m.settingsPageItems()))+4)
-	bottomMin := 10
+	mainH := contentH
+	overlayH := 0
 	if m.hasActiveOverlay() {
-		bottomMin = max(bottomMin, m.interactionLineCount()+2)
-	}
-	topH := topMin
-	if contentH-topH < bottomMin {
-		topH = max(6, contentH-bottomMin)
-	}
-	preferredTop := (contentH * 42) / 100
-	if preferredTop > topH {
-		topH = preferredTop
-		if contentH-topH < bottomMin {
-			topH = max(6, contentH-bottomMin)
+		overlayH = max(6, m.interactionLineCount()+2)
+		if mainH-overlayH < 8 {
+			overlayH = max(4, mainH-8)
 		}
+		mainH = max(8, contentH-overlayH)
 	}
-	bottomH := max(bottomMin, contentH-topH)
 
-	topBody := renderTwoColumns(
-		strings.Split(m.settingsBlock(topH-2), "\n"),
-		strings.Split(m.settingsPageBlock(topH-2), "\n"),
+	_, rightW := twoColumnWidths(usableW - 4)
+	mainBody := renderTwoColumns(
+		strings.Split(m.settingsCombinedBlock(mainH-2), "\n"),
+		strings.Split(m.wallpaperBlock(mainH-2, max(18, rightW)), "\n"),
 		usableW-4,
 	)
-	topRow := panelStyle(usableW, topH, "12").Render(topBody)
-
-	_, bottomRightW := twoColumnWidths(usableW - 4)
-	bottomLeft := m.paletteBlock(bottomH-2, max(18, usableW-6-bottomRightW))
-	bottomRight := m.wallpaperBlock(bottomH-2, max(18, bottomRightW))
-	if m.hasActiveOverlay() {
-		bottomRight = m.interactionBlock(bottomH - 2)
+	mainRow := panelStyle(usableW, mainH, "12").Render(mainBody)
+	if overlayH <= 0 {
+		return mainRow
 	}
-	bottomBody := renderTwoColumns(
-		strings.Split(bottomLeft, "\n"),
-		strings.Split(bottomRight, "\n"),
-		usableW-4,
-	)
-
-	bottomRow := panelStyle(usableW, bottomH, "8").Render(bottomBody)
-	return topRow + "\n" + bottomRow
+	overlayBody := m.interactionBlock(overlayH - 2)
+	overlayRow := panelStyle(usableW, overlayH, "8").Render(overlayBody)
+	return mainRow + "\n" + overlayRow
 }
 
 func (m model) interactionLineCount() int {
@@ -2103,6 +2087,34 @@ func (m model) settingsPageBlock(limit int) string {
 	}
 	for len(lines) < limit {
 		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) settingsCombinedBlock(limit int) string {
+	if limit < 6 {
+		return strings.Join([]string{
+			headerChip("Colors", "12"),
+			"  (expand terminal)",
+		}, "\n")
+	}
+	statusLimit := max(3, (limit-1)/2)
+	if limit >= 11 {
+		statusLimit = max(statusLimit, 7)
+	}
+	if statusLimit > limit-4 {
+		statusLimit = limit - 4
+	}
+	colorLimit := max(3, limit-statusLimit-1)
+	lines := []string{}
+	lines = append(lines, strings.Split(m.settingsBlock(colorLimit), "\n")...)
+	lines = append(lines, "")
+	lines = append(lines, strings.Split(m.settingsPageBlock(statusLimit), "\n")...)
+	for len(lines) < limit {
+		lines = append(lines, "")
+	}
+	if len(lines) > limit {
+		lines = lines[:limit]
 	}
 	return strings.Join(lines, "\n")
 }

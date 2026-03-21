@@ -113,12 +113,14 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 		"Theme: Default",
 		"Battery: on",
 		"Weather: on",
-		"Palette",
 		"Wallpaper",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderThemePage() missing %q in:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "Palette") {
+		t.Fatalf("renderThemePage() unexpectedly contains Palette in:\n%s", got)
 	}
 	for _, unwanted := range []string{"Details", "Current Theme", "Setup Btop", "Reset Bootstrap"} {
 		if strings.Contains(got, unwanted) {
