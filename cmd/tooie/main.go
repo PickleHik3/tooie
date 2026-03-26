@@ -63,6 +63,11 @@ type settingItem struct {
 	Target string
 }
 
+type settingChoice struct {
+	Value string
+	Label string
+}
+
 type tickMsg time.Time
 type metricsTickMsg time.Time
 type applyTickMsg time.Time
@@ -87,20 +92,6 @@ type applyDoneMsg struct {
 	cacheKey    string
 	reused      bool
 	previewOnly bool
-}
-
-type homeAppsLoadedMsg struct {
-	apps []launchableApp
-	err  error
-}
-
-type homeLaunchDoneMsg struct {
-	label string
-	err   error
-}
-
-type homeIconsWarmedMsg struct {
-	packages []string
 }
 
 type clockFontDef struct {
@@ -147,103 +138,99 @@ type applyProgressState struct {
 }
 
 type model struct {
-	width            int
-	height           int
-	page             int
-	now              time.Time
-	cpuPercent       float64
-	cpuFiltered      float64
-	ramUsedGB        float64
-	ramTotalGB       float64
-	ramFiltered      float64
-	storUsedGB       float64
-	storTotalGB      float64
-	storPercent      float64
-	storFiltered     float64
-	uptimeSeconds    uint64
-	uptimeText       string
-	cpuViz           float64
-	ramViz           float64
-	storViz          float64
-	cpuVel           float64
-	ramVel           float64
-	storVel          float64
-	lastTick         time.Time
-	barSpring        harmonica.Spring
-	clockPhase       float64
-	introUntil       time.Time
-	introMode        int
-	introSeed        float64
-	clockFontDefs    []clockFontDef
-	clockFontIdx     int
-	clockGlyphs      map[rune][]string
-	clockPatterns    []string
-	patternIndex     int
-	clockLoc         *time.Location
-	noticeText       string
-	noticeKind       string
-	noticeStart      time.Time
-	noticeUntil      time.Time
-	backups          []backup
-	backupIndex      int
-	settingIndex     int
-	customIndex      int
-	mode             string
-	palette          string
-	statusTheme      string
-	profile          string
-	themeSource      string
-	presetFamily     string
-	presetVariant    string
-	textColor        string
-	cursorColor      string
-	ansiRed          string
-	ansiGreen        string
-	ansiYellow       string
-	ansiBlue         string
-	ansiMagenta      string
-	ansiCyan         string
-	lastStatus       string
-	pickerTarget     string
-	pickerIndex      int
-	customizing      bool
-	showHints        bool
-	showBackups      bool
-	showApplyConfirm bool
-	applyConfirmIdx  int
-	selectedHexes    map[string]string
-	metricsErr       error
-	applying         bool
-	applyProgress    float64
-	applyVel         float64
-	applyTarget      float64
-	applyLabel       string
-	applyCacheKey    string
-	lastAppliedTheme string
-	previewCacheKey  string
-	previewBackupID  string
-	metricsPaused    bool
-	apps             []launchableApp
-	appsLoaded       bool
-	appLoadErr       error
-	pinnedPackages   []string
-	pinnedApps       []launchableApp
-	pinnedIndex      int
-	showAppSearch    bool
-	appSearchQuery   string
-	appSearchIndex   int
-	appSearchResults []launchableApp
-	systemInfo       systemInfo
-	widgetBattery    bool
-	widgetCPU        bool
-	widgetRAM        bool
-	widgetWeather    bool
-	clockOnly        bool
-	miniShowClock    bool
-	miniShowCal      bool
-	calFontDefs      []clockFontDef
-	calFontIdx       int
-	calGlyphs        map[int][]string
+	width             int
+	height            int
+	page              int
+	now               time.Time
+	cpuPercent        float64
+	cpuFiltered       float64
+	ramUsedGB         float64
+	ramTotalGB        float64
+	ramFiltered       float64
+	storUsedGB        float64
+	storTotalGB       float64
+	storPercent       float64
+	storFiltered      float64
+	uptimeSeconds     uint64
+	uptimeText        string
+	cpuViz            float64
+	ramViz            float64
+	storViz           float64
+	cpuVel            float64
+	ramVel            float64
+	storVel           float64
+	lastTick          time.Time
+	barSpring         harmonica.Spring
+	clockPhase        float64
+	introUntil        time.Time
+	introMode         int
+	introSeed         float64
+	clockFontDefs     []clockFontDef
+	clockFontIdx      int
+	clockGlyphs       map[rune][]string
+	clockPatterns     []string
+	patternIndex      int
+	clockLoc          *time.Location
+	noticeText        string
+	noticeKind        string
+	noticeStart       time.Time
+	noticeUntil       time.Time
+	backups           []backup
+	backupIndex       int
+	settingIndex      int
+	customIndex       int
+	mode              string
+	palette           string
+	statusTheme       string
+	profile           string
+	themeSource       string
+	presetFamily      string
+	presetVariant     string
+	textColor         string
+	cursorColor       string
+	ansiRed           string
+	ansiGreen         string
+	ansiYellow        string
+	ansiBlue          string
+	ansiMagenta       string
+	ansiCyan          string
+	lastStatus        string
+	pickerTarget      string
+	pickerIndex       int
+	customizing       bool
+	showHints         bool
+	showBackups       bool
+	showApplyConfirm  bool
+	applyConfirmIdx   int
+	selectedHexes     map[string]string
+	metricsErr        error
+	applying          bool
+	applyProgress     float64
+	applyVel          float64
+	applyTarget       float64
+	applyLabel        string
+	applyCacheKey     string
+	lastAppliedTheme  string
+	previewCacheKey   string
+	previewBackupID   string
+	metricsPaused     bool
+	systemInfo        systemInfo
+	widgetBattery     bool
+	widgetCPU         bool
+	widgetRAM         bool
+	widgetWeather     bool
+	clockOnly         bool
+	miniShowClock     bool
+	miniShowCal       bool
+	calFontDefs       []clockFontDef
+	calFontIdx        int
+	calGlyphs         map[int][]string
+	switchAnimTarget  string
+	switchAnimFrom    bool
+	switchAnimTo      bool
+	switchAnimProg    float64
+	settingMenuTarget string
+	settingMenuIndex  int
 }
 
 func initialModel() model {
@@ -321,8 +308,6 @@ func initialModel() model {
 	m.loadShellSettings()
 	m.loadPreviewColors()
 	m.lastAppliedTheme = m.applyCacheSignature()
-	m.pinnedPackages = loadPinnedApps()
-	m.refreshAppSearchResults()
 	m.startHomeIntro()
 	return m
 }
@@ -554,6 +539,13 @@ func loadShellSettingsFromBackups(backups []backup) persistedShellSettings {
 }
 
 func loadPersistedShellSettings() (persistedShellSettings, bool) {
+	if settings, ok := loadTooieSettings(); ok {
+		return settings.Widgets, true
+	}
+	return loadLegacyShellSettings()
+}
+
+func loadLegacyShellSettings() (persistedShellSettings, bool) {
 	out := defaultShellSettings()
 	path := shellSettingsPath()
 	raw, err := os.ReadFile(path)
@@ -567,6 +559,18 @@ func loadPersistedShellSettings() (persistedShellSettings, bool) {
 }
 
 func savePersistedShellSettings(settings persistedShellSettings) error {
+	conf, ok := loadTooieSettings()
+	if !ok {
+		conf = defaultTooieSettings()
+	}
+	conf.Widgets = settings
+	if err := saveTooieSettings(conf); err != nil {
+		return err
+	}
+	return saveLegacyShellSettings(settings)
+}
+
+func saveLegacyShellSettings(settings persistedShellSettings) error {
 	path := shellSettingsPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -643,8 +647,6 @@ func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		tickClock(),
 		pollMetrics(),
-		loadHomeAppsCmd(false),
-		warmPinnedIconsCmd(m.pinnedPackages),
 		loadSystemInfoCmd(),
 		syncTmuxWidgetSettingsCmd(m.currentShellSettings()),
 	}
@@ -792,6 +794,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ramViz, m.ramVel = m.barSpring.Update(m.ramViz, m.ramVel, ramVizTarget)
 		m.storViz, m.storVel = m.barSpring.Update(m.storViz, m.storVel, storTarget)
 		m.clockPhase += dt * 0.45
+		m.advanceSwitchAnimation(dt)
 		return m, tickClock()
 	case metricsTickMsg:
 		if m.metricsPaused {
@@ -907,31 +910,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loadPreviewColors()
 		return m, nil
-	case homeAppsLoadedMsg:
-		m.appsLoaded = true
-		m.appLoadErr = msg.err
-		if msg.err == nil {
-			m.apps = msg.apps
-			if len(m.pinnedPackages) == 0 {
-				m.pinnedPackages = defaultPinnedPackages(m.apps)
-				savePinnedApps(m.pinnedPackages)
-			}
-			m.refreshPinnedApps()
-			m.refreshAppSearchResults()
-			return m, warmPinnedIconsCmd(m.pinnedPackages)
-		}
-		return m, nil
-	case homeLaunchDoneMsg:
-		if msg.err != nil {
-			m.lastStatus = msg.label + " failed: " + msg.err.Error()
-		} else {
-			m.lastStatus = "Launched " + msg.label
-		}
-		return m, nil
-	case homeIconsWarmedMsg:
-		m.refreshPinnedApps()
-		m.refreshAppSearchResults()
-		return m, nil
 	case statusMsg:
 		m.lastStatus = string(msg)
 		var post tea.Cmd
@@ -1035,6 +1013,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setColorTarget(m.pickerTarget, selected.Hex)
 				m.pickerTarget = ""
 				m.pickerIndex = 0
+				return m, nil
+			}
+			return m, nil
+		}
+
+		if m.settingMenuTarget != "" {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				m.settingMenuTarget = ""
+				m.settingMenuIndex = 0
+				return m, nil
+			case "up", "k":
+				if m.settingMenuIndex > 0 {
+					m.settingMenuIndex--
+				}
+				return m, nil
+			case "down", "j":
+				opts := m.settingMenuChoices(m.settingMenuTarget)
+				if m.settingMenuIndex < len(opts)-1 {
+					m.settingMenuIndex++
+				}
+				return m, nil
+			case "enter":
+				opts := m.settingMenuChoices(m.settingMenuTarget)
+				if len(opts) == 0 {
+					m.settingMenuTarget = ""
+					m.settingMenuIndex = 0
+					return m, nil
+				}
+				if m.settingMenuIndex >= len(opts) {
+					m.settingMenuIndex = len(opts) - 1
+				}
+				selected := opts[m.settingMenuIndex]
+				m.applySettingChoice(m.settingMenuTarget, selected.Value)
+				m.settingMenuTarget = ""
+				m.settingMenuIndex = 0
 				return m, nil
 			}
 			return m, nil
@@ -1180,12 +1196,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return statusMsg("Wallpaper preview finished")
 			})
-		case "u":
+		case "u", "U":
 			m.refreshCurrentPreviewColors()
 			return m.startApply(m.themeActionLabel(true), true, true)
 		case "s":
 			m.themeSource = nextThemeSource(m.themeSource)
-			m.normalizeThemeSelection()
+			m.clampMergedSettingIndex()
 			return m, nil
 		case "m":
 			if m.themeSource == "preset" {
@@ -1199,7 +1215,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.profile = nextProfile(m.profile)
 			return m, nil
-		case "t":
+		case "t", "T":
 			m.statusTheme = nextStatusTheme(m.statusTheme)
 			return m, nil
 		case "a":
@@ -1289,24 +1305,22 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		m.refreshCurrentPreviewColors()
 		return m.startApply(m.themeActionLabel(true), true, true)
 	case "theme_source":
-		m.themeSource = nextThemeSource(m.themeSource)
-		m.normalizeThemeSelection()
+		m.openSettingMenu("theme_source")
 		return m, nil
 	case "status_theme":
-		m.statusTheme = nextStatusTheme(m.statusTheme)
+		m.openSettingMenu("status_theme")
 		return m, nil
 	case "mode":
-		m.mode = nextMode(m.mode)
+		m.openSettingMenu("mode")
 		return m, nil
 	case "profile":
-		m.profile = nextProfile(m.profile)
+		m.openSettingMenu("profile")
 		return m, nil
 	case "preset_family":
-		m.presetFamily = nextPresetFamily(m.presetFamily)
-		m.normalizeThemeSelection()
+		m.openSettingMenu("preset_family")
 		return m, nil
 	case "preset_variant":
-		m.presetVariant = nextPresetVariant(m.presetFamily, m.presetVariant)
+		m.openSettingMenu("preset_variant")
 		return m, nil
 	case "customize":
 		m.customizing = true
@@ -1316,13 +1330,21 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		m.showBackups = true
 		return m, nil
 	case "widget_battery":
+		prev := m.widgetBattery
 		m.widgetBattery = !m.widgetBattery
+		m.startSwitchAnimation("widget_battery", prev, m.widgetBattery)
 	case "widget_cpu":
+		prev := m.widgetCPU
 		m.widgetCPU = !m.widgetCPU
+		m.startSwitchAnimation("widget_cpu", prev, m.widgetCPU)
 	case "widget_ram":
+		prev := m.widgetRAM
 		m.widgetRAM = !m.widgetRAM
+		m.startSwitchAnimation("widget_ram", prev, m.widgetRAM)
 	case "widget_weather":
+		prev := m.widgetWeather
 		m.widgetWeather = !m.widgetWeather
+		m.startSwitchAnimation("widget_weather", prev, m.widgetWeather)
 	}
 	if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
 		m.lastStatus = "Failed to save settings: " + err.Error()
@@ -1337,6 +1359,32 @@ func onOffLabel(v bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+func (m *model) startSwitchAnimation(target string, from, to bool) {
+	if target == "" || from == to {
+		m.switchAnimTarget = ""
+		m.switchAnimProg = 1
+		return
+	}
+	m.switchAnimTarget = target
+	m.switchAnimFrom = from
+	m.switchAnimTo = to
+	m.switchAnimProg = 0
+}
+
+func (m *model) advanceSwitchAnimation(dt float64) {
+	if strings.TrimSpace(m.switchAnimTarget) == "" {
+		return
+	}
+	if dt <= 0 {
+		dt = 1.0 / 30.0
+	}
+	m.switchAnimProg += dt * 4.2
+	if m.switchAnimProg >= 1 {
+		m.switchAnimProg = 1
+		m.switchAnimTarget = ""
+	}
 }
 
 func onOffFlag(v bool) string {
@@ -1499,8 +1547,8 @@ func (m model) View() string {
 	if !m.applying {
 		hintColor := ensureReadableTextColor(
 			m.themeRoleColor("background", "#11131c"),
-			blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), m.themeRoleColor("background", "#11131c"), 0.45),
-			"#9aa3ad",
+			blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), m.themeRoleColor("background", "#11131c"), 0.28),
+			"#b3bcc8",
 		)
 		hints = lipgloss.NewStyle().Foreground(lipgloss.Color(hintColor)).Render("[? hints]")
 	}
@@ -1520,7 +1568,6 @@ func (m model) View() string {
 			header = joinLR(title, notice, innerW)
 		}
 		body = fmt.Sprintf("%s\n%s\n%s", header, main, m.homeHintsLine(innerW))
-		overlays = m.homePinnedSixelOverlays(innerW, panelH, outerPad)
 	}
 	rendered := lipgloss.NewStyle().Padding(outerPad, outerPad, renderPadBottom, outerPad).Render(body)
 	if len(overlays) > 0 {
@@ -1839,8 +1886,6 @@ func (m model) homeHintsLine(width int) string {
 	keyTab := blendHexColor(muted, m.themeRoleColor("primary", "#89b4fa"), 0.35)
 	keyFont := m.themeRoleColor("primary", "#89b4fa")
 	keyAnim := m.themeRoleColor("secondary", "#94e2d5")
-	keyApps := m.themeRoleColor("secondary", "#94e2d5")
-	keySearch := m.themeRoleColor("tertiary", "#cba6f7")
 	keyPause := blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), muted, 0.10)
 	keyRedraw := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), muted, 0.18)
 	keyQuit := m.themeRoleColor("error", "#f38ba8")
@@ -1849,12 +1894,6 @@ func (m model) homeHintsLine(width int) string {
 	tab := lipgloss.NewStyle().Foreground(lipgloss.Color(keyTab)).Render("tab/h/l")
 	font := lipgloss.NewStyle().Foreground(lipgloss.Color(keyFont)).Render("f") + styleMuted.Render("ont")
 	anim := lipgloss.NewStyle().Foreground(lipgloss.Color(keyAnim)).Render("a") + styleMuted.Render("nim")
-	appsText := "1-0 Apps"
-	if len(m.pinnedApps) > 0 {
-		appsText = fmt.Sprintf("1-%d", len(m.pinnedApps))
-	}
-	apps := lipgloss.NewStyle().Foreground(lipgloss.Color(keyApps)).Render(appsText) + styleMuted.Render(" Apps")
-	search := lipgloss.NewStyle().Foreground(lipgloss.Color(keySearch)).Render("/") + styleMuted.Render(" search")
 	pause := ""
 	if m.metricsPaused {
 		pause = styleMuted.Render("un") + lipgloss.NewStyle().Foreground(lipgloss.Color(keyPause)).Render("p") + styleMuted.Render("ause")
@@ -1864,7 +1903,7 @@ func (m model) homeHintsLine(width int) string {
 	redraw := lipgloss.NewStyle().Foreground(lipgloss.Color(keyRedraw)).Render("r") + styleMuted.Render("edraw")
 	quit := lipgloss.NewStyle().Foreground(lipgloss.Color(keyQuit)).Render("q") + styleMuted.Render("uit")
 	sp := styleMuted.Render("  ")
-	line := tab + sp + font + sp + anim + sp + apps + sp + search + sp + pause + sp + redraw + sp + quit
+	line := tab + sp + font + sp + anim + sp + pause + sp + redraw + sp + quit
 	return placeCenterStyled(line, width)
 }
 
@@ -1998,9 +2037,12 @@ func (m model) renderThemePage(usableW, contentH int) string {
 		mainH = max(8, contentH-overlayH)
 	}
 
-	_, rightW := twoColumnWidths(usableW - 4)
+	leftW, rightW := twoColumnWidths(usableW - 4)
+	if leftW == 0 {
+		leftW = max(24, usableW-4)
+	}
 	mainBody := renderTwoColumns(
-		strings.Split(m.settingsCombinedBlock(mainH-2), "\n"),
+		strings.Split(m.settingsCombinedBlock(mainH-2, leftW), "\n"),
 		strings.Split(m.wallpaperBlock(mainH-2, max(18, rightW)), "\n"),
 		usableW-4,
 	)
@@ -2017,6 +2059,9 @@ func (m model) interactionLineCount() int {
 	if m.pickerTarget != "" {
 		return 10
 	}
+	if m.settingMenuTarget != "" {
+		return 11
+	}
 	if m.customizing {
 		return 10
 	}
@@ -2032,69 +2077,48 @@ func (m model) interactionLineCount() int {
 	return 4
 }
 
-func (m model) settingsBlock(limit int) string {
-	lines := []string{headerChip("Colors", "12"), ""}
+func (m model) settingsBlock(limit, width int) string {
+	lines := []string{headerChip("Colors", "12")}
 	items := m.settings()
-	panelBG := m.themeRoleColor("surface", m.themeRoleColor("background", "#1b1d24"))
-	panelFG := ensureReadableTextColor(panelBG, m.themeRoleColor("on_surface", "#e6e2d5"), "#f3f3f3")
-	panelMuted := ensureReadableTextColor(panelBG, blendHexColor(panelFG, panelBG, 0.32), "#b8bec8")
-	visible := max(1, limit-1)
+	visible := max(1, (max(1, limit-3)+1)/2)
 	start, end := listWindow(len(items), m.settingIndex, visible)
+	rows := make([]string, 0, (end-start)*2)
 	for i := start; i < end; i++ {
-		s := items[i].Label
-		prefix := "  "
-		style := lipgloss.NewStyle()
-		if i == m.settingIndex {
-			prefix = "▶ "
-			style = style.Bold(true)
+		label, state, kind, toggle := m.settingsRowView(items[i].Target)
+		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, i == m.settingIndex, width))
+		if i < end-1 {
+			rows = append(rows, "")
 		}
-		lines = append(lines, style.Render(prefix+s))
 	}
-	if len(lines) < limit {
-		lines = append(lines, "")
-	}
-	if m.themeSource == "preset" {
-		if len(lines) < limit {
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(panelMuted)).Render("  Exact preset palette;"))
-		}
-		if len(lines) < limit {
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(panelMuted)).Render("  wallpaper is ignored."))
-		}
-	} else {
-		// Keep compact/clean first-row copy in wallpaper mode.
-	}
+	lines = append(lines, m.renderSettingsGroupPanel(rows, width)...)
 	return strings.Join(lines, "\n")
 }
 
-func (m model) settingsPageBlock(limit int) string {
-	lines := []string{headerChip("Status Bar", "8"), ""}
+func (m model) settingsPageBlock(limit, width int) string {
+	lines := []string{headerChip("Status Bar", "8")}
 	items := m.settingsPageItems()
 	selected := m.settingIndex - len(m.settings())
 	if selected < 0 {
 		selected = 0
 	}
-	visible := max(1, limit-1)
+	visible := max(1, (max(1, limit-3)+1)/2)
 	start, end := listWindow(len(items), selected, visible)
+	rows := make([]string, 0, (end-start)*2)
 	for i := start; i < end; i++ {
-		label := items[i].Label
-		prefix := "  "
-		style := lipgloss.NewStyle()
-		if len(m.settings())+i == m.settingIndex {
-			prefix = "▶ "
-			style = style.Bold(true)
+		label, state, kind, toggle := m.settingsRowView(items[i].Target)
+		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, len(m.settings())+i == m.settingIndex, width))
+		if i < end-1 {
+			rows = append(rows, "")
 		}
-		lines = append(lines, style.Render(prefix+label))
 	}
-	for len(lines) < limit {
-		lines = append(lines, "")
-	}
+	lines = append(lines, m.renderSettingsGroupPanel(rows, width)...)
 	return strings.Join(lines, "\n")
 }
 
-func (m model) settingsCombinedBlock(limit int) string {
+func (m model) settingsCombinedBlock(limit, width int) string {
 	if limit < 6 {
 		return strings.Join([]string{
-			headerChip("Colors", "12"),
+			headerChip("Settings", "12"),
 			"  (expand terminal)",
 		}, "\n")
 	}
@@ -2102,14 +2126,13 @@ func (m model) settingsCombinedBlock(limit int) string {
 	if limit >= 11 {
 		statusLimit = max(statusLimit, 7)
 	}
-	if statusLimit > limit-4 {
-		statusLimit = limit - 4
+	if statusLimit > limit-3 {
+		statusLimit = limit - 3
 	}
-	colorLimit := max(3, limit-statusLimit-1)
+	colorLimit := max(3, limit-statusLimit)
 	lines := []string{}
-	lines = append(lines, strings.Split(m.settingsBlock(colorLimit), "\n")...)
-	lines = append(lines, "")
-	lines = append(lines, strings.Split(m.settingsPageBlock(statusLimit), "\n")...)
+	lines = append(lines, strings.Split(m.settingsBlock(colorLimit, width), "\n")...)
+	lines = append(lines, strings.Split(m.settingsPageBlock(statusLimit, width), "\n")...)
 	for len(lines) < limit {
 		lines = append(lines, "")
 	}
@@ -2135,12 +2158,16 @@ func (m model) wallpaperBlock(limit, width int) string {
 	lines := []string{headerChip("Wallpaper", "8"), ""}
 	innerWidth := max(8, width-4)
 	imageRows := max(3, limit-len(lines))
-	rendered := renderCachedImageFile(preferredWallpaperPath(), innerWidth, imageRows)
+	framePad := 1
+	imageWidth := max(6, innerWidth-(framePad*2))
+	rendered := renderCachedImageFile(preferredWallpaperPath(), imageWidth, imageRows)
 	if strings.TrimSpace(rendered) == "" {
-		lines = append(lines, "  wallpaper preview")
-		lines = append(lines, "  unavailable")
+		lines = append(lines, strings.Repeat(" ", framePad+2)+"wallpaper preview")
+		lines = append(lines, strings.Repeat(" ", framePad+2)+"unavailable")
 	} else {
-		lines = append(lines, strings.Split(rendered, "\n")...)
+		for _, row := range strings.Split(rendered, "\n") {
+			lines = append(lines, strings.Repeat(" ", framePad)+row+strings.Repeat(" ", framePad))
+		}
 	}
 	for len(lines) < limit {
 		lines = append(lines, "")
@@ -2162,14 +2189,17 @@ func (m model) compactPaletteWallpaperBlock(limit, width int) string {
 	}
 	remaining := limit - len(lines)
 	if remaining > 0 {
-		rendered := renderCachedImageFile(preferredWallpaperPath(), max(8, width-4), max(3, remaining))
+		framePad := 1
+		rendered := renderCachedImageFile(preferredWallpaperPath(), max(8, width-4-(framePad*2)), max(3, remaining))
 		if strings.TrimSpace(rendered) == "" {
-			lines = append(lines, "  wallpaper preview")
+			lines = append(lines, strings.Repeat(" ", framePad+2)+"wallpaper preview")
 			if len(lines) < limit {
-				lines = append(lines, "  unavailable")
+				lines = append(lines, strings.Repeat(" ", framePad+2)+"unavailable")
 			}
 		} else {
-			lines = append(lines, strings.Split(rendered, "\n")...)
+			for _, row := range strings.Split(rendered, "\n") {
+				lines = append(lines, strings.Repeat(" ", framePad)+row+strings.Repeat(" ", framePad))
+			}
 		}
 	}
 	for len(lines) < limit {
@@ -2189,17 +2219,338 @@ func (m model) compactPaletteGridLines(width int) []string {
 	return lines
 }
 
+func (m model) renderSettingsGroupPanel(rows []string, width int) []string {
+	if len(rows) == 0 {
+		rows = []string{" "}
+	}
+	borderColor := blendHexColor(m.themeRoleColor("outline", "#565f89"), m.themeRoleColor("background", "#11131c"), 0.55)
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color(borderColor)).
+		Padding(0, 1).
+		Width(max(16, width-2)).
+		Render(strings.Join(rows, "\n"))
+	return strings.Split(panel, "\n")
+}
+
+func (m *model) openSettingMenu(target string) {
+	choices := m.settingMenuChoices(target)
+	if len(choices) == 0 {
+		return
+	}
+	m.settingMenuTarget = target
+	m.settingMenuIndex = 0
+	current := m.currentSettingChoice(target)
+	for i, choice := range choices {
+		if choice.Value == current {
+			m.settingMenuIndex = i
+			break
+		}
+	}
+}
+
+func (m model) currentSettingChoice(target string) string {
+	switch target {
+	case "theme_source":
+		return m.themeSource
+	case "status_theme":
+		return m.statusTheme
+	case "mode":
+		return canonicalMode(m.mode)
+	case "profile":
+		return canonicalProfile(m.profile)
+	case "preset_family":
+		return m.presetFamily
+	case "preset_variant":
+		return m.presetVariant
+	default:
+		return ""
+	}
+}
+
+func (m model) settingMenuChoices(target string) []settingChoice {
+	switch target {
+	case "theme_source":
+		return []settingChoice{
+			{Value: "wallpaper", Label: "Wallpaper"},
+			{Value: "preset", Label: "Preset"},
+		}
+	case "status_theme":
+		return []settingChoice{
+			{Value: "default", Label: "Default"},
+			{Value: "rounded", Label: "Rounded"},
+			{Value: "rectangle", Label: "Rectangle"},
+		}
+	case "mode":
+		return []settingChoice{
+			{Value: "auto", Label: "Auto"},
+			{Value: "dark", Label: "Dark"},
+			{Value: "light", Label: "Light"},
+		}
+	case "profile":
+		out := make([]settingChoice, 0, len(profilePresets))
+		for _, p := range profilePresets {
+			out = append(out, settingChoice{Value: p, Label: displayProfile(p)})
+		}
+		return out
+	case "preset_family":
+		out := make([]settingChoice, 0, len(presetFamilyOrder))
+		for _, family := range presetFamilyOrder {
+			out = append(out, settingChoice{Value: family, Label: displayPresetFamily(family)})
+		}
+		return out
+	case "preset_variant":
+		variants := presetVariantsByFamily[m.presetFamily]
+		out := make([]settingChoice, 0, len(variants))
+		for _, variant := range variants {
+			out = append(out, settingChoice{Value: variant, Label: displayPresetVariant(variant)})
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func (m *model) applySettingChoice(target, value string) {
+	switch target {
+	case "theme_source":
+		if contains(themeSources, value) {
+			m.themeSource = value
+		} else {
+			m.themeSource = defaultSource
+		}
+		m.clampMergedSettingIndex()
+	case "status_theme":
+		m.statusTheme = value
+		m.normalizeThemeSelection()
+	case "mode":
+		m.mode = canonicalMode(value)
+	case "profile":
+		m.profile = value
+		m.normalizeThemeSelection()
+	case "preset_family":
+		m.presetFamily = value
+		m.normalizeThemeSelection()
+	case "preset_variant":
+		m.presetVariant = value
+		m.normalizeThemeSelection()
+	}
+}
+
+func settingMenuLabel(target string) string {
+	switch target {
+	case "theme_source":
+		return "Source"
+	case "status_theme":
+		return "Status Theme"
+	case "mode":
+		return "Mode"
+	case "profile":
+		return "Flavor"
+	case "preset_family":
+		return "Preset"
+	case "preset_variant":
+		return "Preset Variant"
+	default:
+		return "Options"
+	}
+}
+
+func (m model) settingsRowView(target string) (label, state, kind string, toggle bool) {
+	switch target {
+	case "preview":
+		return hotkeyLabel("Update Colors", "u", "4"), "Preview", "action", false
+	case "theme_source":
+		return hotkeyLabel("Source", "s", "6"), displayThemeSource(m.themeSource) + " ▾", "info", false
+	case "mode":
+		return hotkeyLabel("Mode", "m", "5"), displayMode(m.mode) + " ▾", "info", false
+	case "profile":
+		return hotkeyLabel("Family", "f", "2"), displayProfile(m.profile) + " ▾", "info", false
+	case "preset_family":
+		return "Preset", displayPresetFamily(m.presetFamily) + " ▾", "info", false
+	case "preset_variant":
+		return "Preset Variant", displayPresetVariant(m.presetVariant) + " ▾", "info", false
+	case "customize":
+		return "Customize Colors", "Open", "action", false
+	case "backups":
+		return "Backups", fmt.Sprintf("%d saved", len(m.backups)), "info", false
+	case "status_theme":
+		return hotkeyLabel("Theme", "t", "3"), displayStatusTheme(m.statusTheme) + " ▾", "info", false
+	case "widget_battery":
+		return "Battery", onOffLabel(m.widgetBattery), "toggle", m.widgetBattery
+	case "widget_cpu":
+		return "CPU", onOffLabel(m.widgetCPU), "toggle", m.widgetCPU
+	case "widget_ram":
+		return "RAM", onOffLabel(m.widgetRAM), "toggle", m.widgetRAM
+	case "widget_weather":
+		return "Weather", onOffLabel(m.widgetWeather), "toggle", m.widgetWeather
+	case "apply":
+		return hotkeyLabel("Apply", "A", "1"), "Apply", "action", false
+	default:
+		return target, "", "info", false
+	}
+}
+
+func (m model) renderSettingsMenuRow(label, state, kind, target string, toggle bool, selected bool, width int) string {
+	width = max(24, width-4)
+	labelW := (width * 3) / 5
+	if labelW < 16 {
+		labelW = 16
+	}
+	if labelW > width-12 {
+		labelW = width - 12
+	}
+	stateW := max(10, width-labelW-2)
+
+	labelFG := ensureReadableTextColor(
+		m.themeRoleColor("background", "#11131c"),
+		m.themeRoleColor("on_surface", "#e6e2d5"),
+		"#f1f1f3",
+	)
+	prefix := "  "
+	if selected {
+		prefix = "▶ "
+	}
+	labelBody := lipgloss.NewStyle().
+		Width(max(1, labelW)).
+		Foreground(lipgloss.Color(labelFG)).
+		Bold(selected).
+		Render(prefix + label)
+
+	stateCell := ""
+	if kind == "toggle" {
+		stateCell = m.renderToggleStateCell(target, toggle, stateW, selected)
+	} else {
+		stateCell = m.renderInfoStateCell(state, kind, stateW, selected)
+	}
+	return labelBody + "  " + stateCell
+}
+
+func (m model) renderInfoStateCell(state, kind string, width int, selected bool) string {
+	width = max(8, width)
+	state = cutPad(strings.TrimSpace(state), max(1, width-2))
+	bg := blendHexColor(m.themeRoleColor("surface_container", "#1f2335"), m.themeRoleColor("background", "#11131c"), 0.30)
+	switch kind {
+	case "action":
+		bg = blendHexColor(m.themeRoleColor("tertiary", "#cba6f7"), m.themeRoleColor("background", "#11131c"), 0.70)
+	case "info":
+		bg = blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("background", "#11131c"), 0.76)
+	}
+	if selected {
+		bg = blendHexColor(bg, m.themeRoleColor("primary", "#89b4fa"), 0.12)
+	}
+	fg := ensureReadableTextColor(bg, m.themeRoleColor("on_surface", "#e6e2d5"), "#f6f7fb")
+	return lipgloss.NewStyle().
+		Width(width).
+		Align(lipgloss.Center).
+		Foreground(lipgloss.Color(fg)).
+		Background(lipgloss.Color(bg)).
+		Bold(selected || kind == "action").
+		Render(state)
+}
+
+func (m model) renderToggleStateCell(target string, on bool, width int, selected bool) string {
+	width = max(13, width)
+	_, animating := m.toggleMixForTarget(target, on)
+	yesLabel := " yes "
+	noLabel := " no "
+	activeStops := []string{
+		m.themeRoleColor("primary", "#ff4fa3"),
+		m.themeRoleColor("tertiary", "#b96cff"),
+	}
+	if !on {
+		activeStops = []string{
+			m.themeRoleColor("secondary", "#8f967f"),
+			blendHexColor(m.themeRoleColor("secondary", "#8f967f"), m.themeRoleColor("background", "#11131c"), 0.35),
+		}
+	}
+	yesActiveBG := gradientFromStops(0.25, activeStops)
+	noActiveBG := gradientFromStops(0.75, activeStops)
+	if selected || animating {
+		yesActiveBG = blendHexColor(yesActiveBG, "#ffffff", 0.10)
+		noActiveBG = blendHexColor(noActiveBG, "#ffffff", 0.10)
+	}
+	inactiveBG := blendHexColor(m.themeRoleColor("surface_container", "#2f3138"), m.themeRoleColor("background", "#11131c"), 0.22)
+	activeFGYes := ensureReadableTextColor(yesActiveBG, m.themeRoleColor("on_primary", "#111111"), "#f7f7fb")
+	activeFGNo := ensureReadableTextColor(noActiveBG, m.themeRoleColor("on_primary", "#111111"), "#f7f7fb")
+	inactiveFG := ensureReadableTextColor(inactiveBG, m.themeRoleColor("on_surface", "#a7adbb"), "#c9cfda")
+	yesStyle := lipgloss.NewStyle().Bold(true)
+	noStyle := lipgloss.NewStyle().Bold(true)
+	if on {
+		yesStyle = yesStyle.Background(lipgloss.Color(yesActiveBG)).Foreground(lipgloss.Color(activeFGYes))
+		noStyle = noStyle.Background(lipgloss.Color(inactiveBG)).Foreground(lipgloss.Color(inactiveFG))
+	} else {
+		yesStyle = yesStyle.Background(lipgloss.Color(inactiveBG)).Foreground(lipgloss.Color(inactiveFG))
+		noStyle = noStyle.Background(lipgloss.Color(noActiveBG)).Foreground(lipgloss.Color(activeFGNo))
+	}
+	text := yesStyle.Render(yesLabel) + " " + noStyle.Render(noLabel)
+	return lipgloss.NewStyle().
+		Width(width).
+		Align(lipgloss.Center).
+		Render(text)
+}
+
+func (m model) renderGradientToggleSegment(text string, emphasize bool) string {
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return ""
+	}
+	stops := []string{
+		m.themeRoleColor("primary", "#89b4fa"),
+		m.themeRoleColor("secondary", "#94e2d5"),
+		m.themeRoleColor("tertiary", "#cba6f7"),
+	}
+	out := strings.Builder{}
+	for i, r := range runes {
+		t := 0.0
+		if len(runes) > 1 {
+			t = float64(i) / float64(len(runes)-1)
+		}
+		bg := gradientFromStops(t, stops)
+		if emphasize {
+			bg = blendHexColor(bg, "#ffffff", 0.08)
+		}
+		fg := ensureReadableTextColor(bg, m.themeRoleColor("on_primary", "#0b0f16"), "#f7f7fb")
+		out.WriteString(lipgloss.NewStyle().
+			Background(lipgloss.Color(bg)).
+			Foreground(lipgloss.Color(fg)).
+			Bold(true).
+			Render(string(r)))
+	}
+	return out.String()
+}
+
+func (m model) toggleMixForTarget(target string, on bool) (float64, bool) {
+	if strings.TrimSpace(target) != "" && target == m.switchAnimTarget && m.switchAnimProg >= 0 && m.switchAnimProg < 1 {
+		p := m.switchAnimProg
+		if p < 0 {
+			p = 0
+		}
+		if p > 1 {
+			p = 1
+		}
+		p = 0.5 - (0.5 * math.Cos(math.Pi*p))
+		if m.switchAnimFrom == m.switchAnimTo {
+			if m.switchAnimTo {
+				return 1, true
+			}
+			return 0, true
+		}
+		if m.switchAnimFrom {
+			return 1 - p, true
+		}
+		return p, true
+	}
+	if on {
+		return 1, false
+	}
+	return 0, false
+}
+
 func (m model) renderHomePage(usableW, contentH int) string {
 	usableW = max(28, usableW)
 	contentH = max(8, contentH)
-
-	topH := (contentH * 70) / 100
-	if topH < 6 {
-		topH = 6
-	}
-	if contentH > 12 {
-		topH += 2
-	}
+	topH := contentH
 	metricW, metricH := clockGlyphMetrics(m.clockGlyphs)
 	clockMinH := desiredClockPanelHeight(metricH)
 	switch m.currentClockFontName() {
@@ -2207,11 +2558,6 @@ func (m model) renderHomePage(usableW, contentH int) string {
 		clockMinH = max(6, clockMinH-3)
 	}
 	topH = max(topH, clockMinH)
-	bottomH := contentH - topH
-	if bottomH < 3 {
-		bottomH = 3
-		topH = max(5, contentH-bottomH)
-	}
 
 	leftW := desiredClockPanelWidth(usableW, topH, metricW, metricH)
 	if leftW < 18 {
@@ -2227,13 +2573,9 @@ func (m model) renderHomePage(usableW, contentH int) string {
 	clockLines := m.renderDashboardVerticalClockTest(max(1, leftW-4), max(1, rowH-2))
 	clockBorder := blendHexColor(m.themeRoleColor("primary", "#89b4fa"), m.themeRoleColor("outline", "#565f89"), 0.35)
 	sysBorder := blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("outline", "#565f89"), 0.30)
-	launcherBorder := blendHexColor(m.themeRoleColor("outline", "#565f89"), m.themeRoleColor("surface_variant", "#1f2335"), 0.30)
 	clockPanel := framedPanel(leftW, rowH, clockBorder, strings.Join(clockLines, "\n"), "", "left", m.clockMeridiemLabel(), "right")
 	sysPanel := framedPanel(rightW, rowH, sysBorder, m.homeSystemBlock(rightW-4, rowH-2), m.systemPanelTitle(), "left", "", "left")
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, clockPanel, sysPanel)
-	bottomH = max(3, contentH-rowH)
-	bottomRow := panelStyle(usableW, bottomH, launcherBorder).Render(m.renderHomeLauncherBlock(usableW-4, bottomH-2))
-	return topRow + "\n" + bottomRow
+	return lipgloss.JoinHorizontal(lipgloss.Top, clockPanel, sysPanel)
 }
 
 func (m model) homeSystemBlock(innerW, limit int) string {
@@ -2299,7 +2641,7 @@ func (m model) homeSystemBlock(innerW, limit int) string {
 }
 
 func (m model) canSwitchPage() bool {
-	return m.pickerTarget == "" && !m.customizing && !m.showBackups && !m.showAppSearch && !m.showApplyConfirm
+	return m.pickerTarget == "" && m.settingMenuTarget == "" && !m.customizing && !m.showBackups && !m.showApplyConfirm
 }
 
 func (m model) pageLabel() string {
@@ -2312,6 +2654,9 @@ func (m model) pageLabel() string {
 func (m model) interactionBorderColor() string {
 	if m.pickerTarget != "" {
 		return "13"
+	}
+	if m.settingMenuTarget != "" {
+		return "12"
 	}
 	if m.showApplyConfirm {
 		return "10"
@@ -2328,6 +2673,29 @@ func (m model) interactionBorderColor() string {
 func (m model) interactionBlock(limit int) string {
 	if m.pickerTarget != "" {
 		return m.colorPickerBlock(limit)
+	}
+	if m.settingMenuTarget != "" {
+		choices := m.settingMenuChoices(m.settingMenuTarget)
+		lines := []string{
+			headerChip("Choose "+settingMenuLabel(m.settingMenuTarget), "12"),
+			"  up/down: move",
+			"  enter: select   esc: close",
+		}
+		start, end := listWindow(len(choices), m.settingMenuIndex, max(1, limit-3))
+		for i := start; i < end; i++ {
+			prefix := "  "
+			style := lipgloss.NewStyle()
+			if i == m.settingMenuIndex {
+				prefix = "▶ "
+				style = style.Bold(true)
+			}
+			line := prefix + choices[i].Label
+			if choices[i].Value == m.currentSettingChoice(m.settingMenuTarget) {
+				line += "  (current)"
+			}
+			lines = append(lines, style.Render(line))
+		}
+		return strings.Join(lines, "\n")
 	}
 	if m.customizing {
 		return m.customizeBlock(limit)
@@ -2441,7 +2809,7 @@ func (m model) palettePreviewLines(width int) []string {
 }
 
 func (m model) hasActiveOverlay() bool {
-	return m.showHints || m.showBackups || m.pickerTarget != "" || m.customizing || m.showApplyConfirm
+	return m.showHints || m.showBackups || m.pickerTarget != "" || m.settingMenuTarget != "" || m.customizing || m.showApplyConfirm
 }
 
 func (m model) previewPaletteColors() []string {
@@ -3119,6 +3487,12 @@ func (m model) applyArgs(includeOverrides bool) []string {
 		statusTheme = defaultStatusTheme
 	}
 	args := []string{"--theme-source", m.themeSource, "--status-palette", m.palette, "--status-theme", statusTheme}
+	setupCfg, _ := loadTooieSettings()
+	args = append(args,
+		"--status-position", normalizeStatusPosition(setupCfg.Tmux.StatusPosition),
+		"--status-layout", normalizeStatusLayout(setupCfg.Tmux.StatusLayout),
+		"--status-separator", normalizeSeparatorMode(setupCfg.Tmux.StatusSeparator),
+	)
 	if m.themeSource == "preset" {
 		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
 	} else {
@@ -3186,12 +3560,30 @@ func findBackupIndexByID(backups []backup, id string) int {
 	return -1
 }
 
+func resolveTooieApplyRunner() (string, []string) {
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		return exe, []string{"theme", "apply"}
+	}
+	home, _ := os.UserHomeDir()
+	if strings.TrimSpace(home) != "" {
+		bin := filepath.Join(home, ".local", "bin", "tooie")
+		if info, err := os.Stat(bin); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return bin, []string{"theme", "apply"}
+		}
+	}
+	if lp, err := exec.LookPath("tooie"); err == nil && strings.TrimSpace(lp) != "" {
+		return lp, []string{"theme", "apply"}
+	}
+	return "", nil
+}
+
 func runApplyCommand(args []string, label, cacheKey, reuseBackup string, previewOnly bool) tea.Cmd {
 	return func() tea.Msg {
-		if err := ensureTooieSupportScripts(); err != nil {
+		runner, prefix := resolveTooieApplyRunner()
+		if strings.TrimSpace(runner) == "" {
 			return applyDoneMsg{
 				label:       label,
-				err:         err,
+				err:         fmt.Errorf("tooie binary not found for theme apply"),
 				out:         "",
 				cacheKey:    cacheKey,
 				previewOnly: previewOnly,
@@ -3203,7 +3595,8 @@ func runApplyCommand(args []string, label, cacheKey, reuseBackup string, preview
 		if strings.TrimSpace(reuseBackup) != "" {
 			args = append(args, "--reuse-backup", strings.TrimSpace(reuseBackup))
 		}
-		cmd := exec.Command(currentApplyScriptPath(), args...)
+		cmdArgs := append(append([]string{}, prefix...), args...)
+		cmd := exec.Command(runner, cmdArgs...)
 		cmd.Env = append(os.Environ(), "TOOIE_APPLY_PROGRESS_FILE="+applyProgressPath())
 		out, err := cmd.CombinedOutput()
 		outText := strings.TrimSpace(string(out))
@@ -3587,7 +3980,7 @@ func renderThreeColumns(left, middle, right []string, totalWidth int) string {
 }
 
 func renderTwoColumns(left, right []string, totalWidth int) string {
-	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" │ ")
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(" │ ")
 	sepW := lipgloss.Width(sep)
 	if totalWidth < 2*18+sepW {
 		joined := make([]string, 0, len(left)+len(right)+2)
@@ -3597,7 +3990,7 @@ func renderTwoColumns(left, right []string, totalWidth int) string {
 		return strings.Join(joined, "\n")
 	}
 	avail := totalWidth - sepW
-	leftW := (avail * 11) / 20
+	leftW := (avail * 12) / 20
 	if leftW < 24 {
 		leftW = 24
 	}
@@ -3623,12 +4016,12 @@ func renderTwoColumns(left, right []string, totalWidth int) string {
 }
 
 func twoColumnWidths(totalWidth int) (int, int) {
-	sepW := lipgloss.Width(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" │ "))
+	sepW := lipgloss.Width(lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(" │ "))
 	if totalWidth < 2*18+sepW {
 		return 0, 0
 	}
 	avail := totalWidth - sepW
-	leftW := (avail * 11) / 20
+	leftW := (avail * 12) / 20
 	if leftW < 24 {
 		leftW = 24
 	}
@@ -5586,16 +5979,7 @@ func main() {
 	if len(os.Args) > 1 {
 		os.Exit(runCLI(os.Args[1:]))
 	}
-	if err := ensureTooieSupportScripts(); err != nil {
-		fmt.Fprintf(os.Stderr, "tooie error: failed to prepare support scripts: %v\n", err)
-		os.Exit(1)
-	}
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen(), tea.WithFPS(60))
-	_, err := p.Run()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "tooie error: %v\n", err)
-		os.Exit(1)
-	}
+	os.Exit(runUICommand(nil))
 }
 
 func runMiniTUI(showClock, showCal bool) int {
