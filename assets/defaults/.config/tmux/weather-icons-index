@@ -1,4 +1,4 @@
-!/data/data/com.termux/files/usr/bin/sh#!/data/data/com.termux/files/usr/bin/sh
+#!/usr/bin/env sh
 set -eu
 PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
 
