@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+#!/usr/bin/env sh
 set -eu
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
 rm -f "$HOME_DIR/.local/bin/tooie"

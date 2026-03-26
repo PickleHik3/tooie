@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+!/data/data/com.termux/files/usr/bin/sh#!/data/data/com.termux/files/usr/bin/sh
 set -u
 PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
 
@@ -9,6 +9,8 @@ TTL_SECONDS="${STATUS_TMUX_WIDGET_TTL:-3}"
 LOCK_STALE_SECONDS=10
 BACKEND_TIMEOUT="${STATUS_TMUX_BACKEND_TIMEOUT:-1}"
 USE_TERMUX_API_BATTERY="${STATUS_TMUX_USE_TERMUX_API_BATTERY:-0}"
+HELPER_STATS_FILE="${STATUS_TMUX_HELPER_STATS_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/tooie/helper-stats.json}"
+HELPER_STATS_TTL="${STATUS_TMUX_HELPER_STATS_TTL:-3}"
 SHOW_BATTERY="${STATUS_TMUX_SHOW_BATTERY:-on}"
 SHOW_CPU="${STATUS_TMUX_SHOW_CPU:-on}"
 SHOW_RAM="${STATUS_TMUX_SHOW_RAM:-on}"
@@ -54,6 +56,15 @@ now_epoch(){ date +%s; }
 cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(now_epoch)"; mt="$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)"; [ "$mt" -gt 0 ] || { echo 999999; return; }; echo $((now-mt)); }
 cleanup_stale_lock(){ [ -d "$LOCK_DIR" ] || return 0; mt="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"; now="$(now_epoch)"; [ "$mt" -gt 0 ] && [ $((now-mt)) -gt "$LOCK_STALE_SECONDS" ] && rmdir "$LOCK_DIR" 2>/dev/null || true; }
 is_on(){ case "$1" in 1|on|true|yes|enabled) return 0;; *) return 1;; esac; }
+
+helper_stats_is_fresh(){
+  [ -f "$HELPER_STATS_FILE" ] || return 1
+  now="$(now_epoch)"
+  mt="$(stat -c %Y "$HELPER_STATS_FILE" 2>/dev/null || echo 0)"
+  [ "$mt" -gt 0 ] || return 1
+  age=$((now-mt))
+  [ "$age" -le "$HELPER_STATS_TTL" ]
+}
 
 json_get(){
   key="$1"; file="$2"
@@ -205,6 +216,19 @@ render_widgets(){
   [ -n "$bat_level" ] || bat_level="$(json_get battery.level "$CACHE_FILE")"
   bat_charging="$(json_get battery.charging "$CACHE_FILE")"
   [ -n "$cpu" ] || cpu=0; [ -n "$mem_used" ] || mem_used=0; [ -n "$mem_total" ] || mem_total=0; [ -n "$bat_level" ] || bat_level=0; [ -n "$bat_charging" ] || bat_charging=false
+  if helper_stats_is_fresh; then
+    h_cpu="$(json_get cpuPercent "$HELPER_STATS_FILE")"
+    h_mem_used="$(json_get memUsedBytes "$HELPER_STATS_FILE")"
+    h_mem_total="$(json_get memTotalBytes "$HELPER_STATS_FILE")"
+    h_bat_level="$(json_get battery.levelPercent "$HELPER_STATS_FILE")"
+    [ -n "$h_bat_level" ] || h_bat_level="$(json_get battery.level "$HELPER_STATS_FILE")"
+    h_bat_charging="$(json_get battery.charging "$HELPER_STATS_FILE")"
+    [ -n "$h_cpu" ] && cpu="$h_cpu"
+    [ -n "$h_mem_used" ] && mem_used="$h_mem_used"
+    [ -n "$h_mem_total" ] && mem_total="$h_mem_total"
+    [ -n "$h_bat_level" ] && bat_level="$h_bat_level"
+    [ -n "$h_bat_charging" ] && bat_charging="$h_bat_charging"
+  fi
   cpu_pct="$(awk -v x="$cpu" 'BEGIN{printf "%.0f", x}')"; case "$cpu_pct" in ''|*[!0-9]*) cpu_pct=0;; esac; [ "$cpu_pct" -gt 100 ] && cpu_pct=100; [ "$cpu_pct" -lt 0 ] && cpu_pct=0
   if [ "$mem_total" -gt 0 ] 2>/dev/null; then ram_pct="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.0f", (u*100)/t}')"; else ram_pct=0; fi; case "$ram_pct" in ''|*[!0-9]*) ram_pct=0;; esac; [ "$ram_pct" -gt 100 ] && ram_pct=100; [ "$ram_pct" -lt 0 ] && ram_pct=0
   cpu_color="$(cpu_usage_color "$cpu_pct")"; ram_color="$(ram_usage_color "$ram_pct")"; cpu_pct_fixed="$(printf "%02d" "$cpu_pct")"; ram_text="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.1f/%.1fG", u/1073741824, t/1073741824}')"; show_bat_charge=true; is_on "$BG_RIGHT" && show_bat_charge=false; bat_text="$(render_battery "$bat_level" "$bat_charging" "$show_bat_charge")"

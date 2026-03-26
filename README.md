@@ -48,6 +48,9 @@ chsh -s fish
 ~/.local/bin/tooie --restart
 ```
 
+> **v2 quick start:**  
+> `git clone https://github.com/PickleHik3/tooie && cd ~/tooie && git checkout v2-dev && ./install.sh`
+
 ## Run
 
 ```sh

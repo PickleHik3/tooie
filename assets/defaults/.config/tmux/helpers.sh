@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+!/data/data/com.termux/files/usr/bin/sh#!/data/data/com.termux/files/usr/bin/sh
 
 get_tmux_option() {
   key="$1"

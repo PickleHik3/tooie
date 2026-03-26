@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+!/data/data/com.termux/files/usr/bin/sh#!/data/data/com.termux/files/usr/bin/sh
 set -eu
 
 tmp_root_log="${XDG_RUNTIME_DIR:-${TMPDIR:-$HOME/.tmp}}"

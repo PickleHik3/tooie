@@ -34,6 +34,9 @@ type themeApplyConfig struct {
 	MatugenBin    string
 	StatusPalette string
 	StatusTheme   string
+	StatusPosition string
+	StatusLayout   string
+	StatusSeparator string
 	StyleFamily   string
 	Profile       string
 	TextColor     string
@@ -134,6 +137,9 @@ func runThemeApplyCommand(args []string) int {
 	meta["cursor_color_override"] = strings.TrimSpace(cfg.CursorColor)
 	meta["status_palette"] = cfg.StatusPalette
 	meta["status_theme"] = cfg.StatusTheme
+	meta["status_position"] = cfg.StatusPosition
+	meta["status_layout"] = cfg.StatusLayout
+	meta["status_separator"] = cfg.StatusSeparator
 	meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
@@ -216,6 +222,9 @@ type autoDecisionMetrics struct {
 	EdgeWeightedLuma float64
 	MeanSat          float64
 	P90Sat           float64
+	DominantHue      float64
+	SecondaryHue     float64
+	HueStrength      float64
 }
 
 func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload, []byte, error) {
@@ -305,6 +314,9 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	}
 	out.Meta["status_palette"] = cfg.StatusPalette
 	out.Meta["status_theme"] = cfg.StatusTheme
+	out.Meta["status_position"] = cfg.StatusPosition
+	out.Meta["status_layout"] = cfg.StatusLayout
+	out.Meta["status_separator"] = cfg.StatusSeparator
 	out.Meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	out.Meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	out.Meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
@@ -349,6 +361,13 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	meta["auto_edge_luma"] = fmt.Sprintf("%.4f", metrics.EdgeWeightedLuma)
 	meta["auto_mean_sat"] = fmt.Sprintf("%.4f", metrics.MeanSat)
 	meta["auto_p90_sat"] = fmt.Sprintf("%.4f", metrics.P90Sat)
+	meta["auto_hue_strength"] = fmt.Sprintf("%.4f", metrics.HueStrength)
+	if metrics.DominantHue >= 0 {
+		meta["auto_dominant_hue"] = fmt.Sprintf("%.2f", metrics.DominantHue)
+	}
+	if metrics.SecondaryHue >= 0 {
+		meta["auto_secondary_hue"] = fmt.Sprintf("%.2f", metrics.SecondaryHue)
+	}
 	meta["auto_candidate_count"] = fmt.Sprintf("%d", len(candidates))
 	sceneClass, modeGate := autoSceneDecision(metrics, mode)
 	meta["auto_scene_class"] = sceneClass
@@ -360,6 +379,7 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	meta["auto_selected_readability"] = fmt.Sprintf("%.4f", best.Readability)
 	meta["auto_selected_ansi_delta"] = fmt.Sprintf("%.4f", ansiSeparationScore(best.Roles))
 	meta["auto_selected_scene_fit"] = fmt.Sprintf("%.4f", sceneFitScore(best.Mode, metrics))
+	meta["auto_selected_wallpaper_affinity"] = fmt.Sprintf("%.4f", wallpaperHueAffinityScore(best.Roles, metrics))
 
 	return best.Raw, best.Mode, meta, nil
 }
@@ -402,6 +422,16 @@ func minFloat(v float64, more ...float64) float64 {
 	return m
 }
 
+func maxFloat(v float64, more ...float64) float64 {
+	m := v
+	for _, x := range more {
+		if x > m {
+			m = x
+		}
+	}
+	return m
+}
+
 type matugenCandidate struct {
 	Raw         []byte
 	Mode        string
@@ -415,7 +445,7 @@ type matugenCandidate struct {
 func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metrics autoDecisionMetrics) ([]matugenCandidate, error) {
 	schemes := pickSchemeCandidates(cfg.SchemeType)
 	modes := autoCandidateModes(mode, metrics)
-	indices := []int{0, 1, 2, 3, 4}
+	indices := sourceIndexCandidates(cfg.StyleFamily)
 	candidates := make([]matugenCandidate, 0, len(modes)*len(schemes)*len(indices))
 	var lastErr error
 	for _, m := range modes {
@@ -440,7 +470,7 @@ func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metr
 					Roles:       roles,
 					Readability: readability,
 				}
-				c.Score = scoreCandidate(c, metrics)
+				c.Score = scoreCandidate(c, metrics, cfg.StyleFamily)
 				candidates = append(candidates, c)
 			}
 		}
@@ -483,7 +513,16 @@ func pickSchemeCandidates(schemeType string) []string {
 	return []string{"scheme-expressive", "scheme-tonal-spot", "scheme-fidelity", "scheme-content"}
 }
 
-func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
+func sourceIndexCandidates(styleFamily string) []int {
+	if canonicalProfile(styleFamily) == "adaptive" {
+		// Keep adaptive anchored to the strongest wallpaper seed colors.
+		return []int{0, 1, 2}
+	}
+	return []int{0, 1, 2, 3, 4}
+}
+
+func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics, styleFamily string) float64 {
+	isAdaptive := canonicalProfile(styleFamily) == "adaptive"
 	bg := getRoleOr(c.Roles, "background", "#1a1b26")
 	fg := getRoleOr(c.Roles, "on_background", "#c0caf5")
 	fgContrast := contrastRatioHex(fg, bg)
@@ -502,6 +541,7 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 
 	sceneFit := sceneFitScore(c.Mode, metrics)
 	ansiSep := ansiSeparationScore(c.Roles)
+	wallpaperAffinity := wallpaperHueAffinityScore(c.Roles, metrics)
 	modePenalty := 0.0
 	if darkDominantScene(metrics) && c.Mode == "light" {
 		modePenalty += 2.4
@@ -512,7 +552,9 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	sourcePenalty := 0.0
 	if c.SourceIndex > 0 {
 		sourcePenalty = 0.22 * float64(c.SourceIndex)
-		if metrics.P90Sat > 0.45 {
+		if isAdaptive {
+			sourcePenalty = 0.42 * float64(c.SourceIndex)
+		} else if metrics.P90Sat > 0.45 {
 			sourcePenalty *= 0.65
 		}
 	}
@@ -520,12 +562,45 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	switch c.Scheme {
 	case "scheme-expressive":
 		schemeBias = 0.22 + (0.35 * clamp01(metrics.P90Sat-0.32))
+		if isAdaptive {
+			schemeBias -= 0.20
+		}
 	case "scheme-fidelity", "scheme-content":
 		schemeBias = 0.16 + (0.28 * clamp01(metrics.P90Sat-0.28))
 	case "scheme-tonal-spot":
 		schemeBias = 0.18 + (0.25 * clamp01(0.40-metrics.P90Sat))
 	}
-	return (c.Readability * 1.85) + (fgContrast * 0.9) + (accentMin * 0.85) + (ansiSep * 0.8) + sceneFit + schemeBias - sourcePenalty - modePenalty
+	affinityWeight := 0.75
+	if isAdaptive {
+		affinityWeight = 1.45
+	}
+	return (c.Readability * 1.85) + (fgContrast * 0.9) + (accentMin * 0.85) + (ansiSep * 0.8) + (wallpaperAffinity * affinityWeight) + sceneFit + schemeBias - sourcePenalty - modePenalty
+}
+
+func wallpaperHueAffinityScore(roles map[string]string, metrics autoDecisionMetrics) float64 {
+	if metrics.HueStrength <= 0.05 || metrics.DominantHue < 0 {
+		return 0
+	}
+	accents := []string{
+		getRoleOr(roles, "primary", "#7aa2f7"),
+		getRoleOr(roles, "secondary", "#7dcfff"),
+		getRoleOr(roles, "tertiary", "#bb9af7"),
+		getRoleOr(roles, "error", "#f7768e"),
+	}
+	sum := 0.0
+	for _, hex := range accents {
+		h := hueFromHex(hex)
+		d1 := hueDistanceDegrees(h, metrics.DominantHue)
+		closeness := 1.0 - (d1 / 180.0)
+		if metrics.SecondaryHue >= 0 {
+			d2 := hueDistanceDegrees(h, metrics.SecondaryHue)
+			c2 := 1.0 - (d2 / 180.0)
+			closeness = maxFloat(closeness, c2*0.82)
+		}
+		sum += closeness
+	}
+	avg := sum / float64(len(accents))
+	return (avg - 0.5) * 2.0 * clamp01(metrics.HueStrength*1.35)
 }
 
 func sceneFitScore(mode string, metrics autoDecisionMetrics) float64 {
@@ -594,9 +669,9 @@ func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 	// Fallback for environments where decode fails.
 	l := wallpaperLuma(path)
 	if l < 0 {
-		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5, MeanSat: 0.35, P90Sat: 0.55}
+		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5, MeanSat: 0.35, P90Sat: 0.55, DominantHue: -1, SecondaryHue: -1, HueStrength: 0}
 	}
-	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l, MeanSat: 0.40, P90Sat: 0.60}
+	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l, MeanSat: 0.40, P90Sat: 0.60, DominantHue: -1, SecondaryHue: -1, HueStrength: 0}
 }
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
@@ -608,6 +683,9 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		PresetVariant: "mocha",
 		StatusPalette: "default",
 		StatusTheme:   "default",
+		StatusPosition: "top",
+		StatusLayout:   "two-line",
+		StatusSeparator: "on",
 		StyleFamily:   "adaptive",
 		Profile:       "adaptive",
 		WidgetBattery: true,
@@ -634,6 +712,9 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.CursorColor, "cursor-color", "", "")
 	fs.StringVar(&cfg.StatusPalette, "status-palette", cfg.StatusPalette, "")
 	fs.StringVar(&cfg.StatusTheme, "status-theme", cfg.StatusTheme, "")
+	fs.StringVar(&cfg.StatusPosition, "status-position", cfg.StatusPosition, "")
+	fs.StringVar(&cfg.StatusLayout, "status-layout", cfg.StatusLayout, "")
+	fs.StringVar(&cfg.StatusSeparator, "status-separator", cfg.StatusSeparator, "")
 	fs.StringVar(&cfg.StyleFamily, "style-family", cfg.StyleFamily, "")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "")
 	fs.BoolVar(&cfg.PreviewOnly, "preview-only", false, "")
@@ -666,6 +747,12 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg.StatusTheme = normalizeStatusTheme(cfg.StatusTheme)
 	if cfg.StatusTheme == "" {
 		return cfg, fmt.Errorf("invalid status theme")
+	}
+	cfg.StatusPosition = normalizeStatusPosition(cfg.StatusPosition)
+	cfg.StatusLayout = normalizeStatusLayout(cfg.StatusLayout)
+	cfg.StatusSeparator = normalizeSeparatorMode(cfg.StatusSeparator)
+	if cfg.StatusLayout == "single-line" {
+		cfg.StatusSeparator = "off"
 	}
 	styleFamilySet := false
 	fs.Visit(func(f *flag.Flag) {
@@ -739,6 +826,33 @@ func normalizeStatusTheme(raw string) string {
 		return "rectangle"
 	default:
 		return ""
+	}
+}
+
+func normalizeStatusPosition(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "bottom":
+		return "bottom"
+	default:
+		return "top"
+	}
+}
+
+func normalizeStatusLayout(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "single", "single-line", "single_line":
+		return "single-line"
+	default:
+		return "two-line"
+	}
+}
+
+func normalizeSeparatorMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "off", "none", "false", "0":
+		return "off"
+	default:
+		return "on"
 	}
 }
 
@@ -899,7 +1013,14 @@ func renderTmuxBlock(payload computedPayload) string {
 		),
 		payload.Foreground,
 	)
-	attentionFG := ensureReadableTextColor(attentionBG, payload.Background, payload.Foreground)
+	attentionFG := bestTextColorForBackgrounds(
+		ensureReadableTextColor(attentionBG, payload.Background, payload.Foreground),
+		payload.Foreground,
+		4.5,
+		payload.Background,
+		windowInactiveBG,
+		windowActiveBG,
+	)
 	windowAccentFG := ensureReadableTextColor(windowActiveBG, payload.Background, payload.Foreground)
 	paneBorderColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.62), payload.Foreground)
 	paneActiveBorderColor := nonBlackStatusColor(
@@ -913,6 +1034,12 @@ func renderTmuxBlock(payload computedPayload) string {
 	statusTheme := normalizeStatusTheme(payload.Meta["status_theme"])
 	if statusTheme == "" {
 		statusTheme = "default"
+	}
+	statusPosition := normalizeStatusPosition(payload.Meta["status_position"])
+	statusLayout := normalizeStatusLayout(payload.Meta["status_layout"])
+	statusSeparator := normalizeSeparatorMode(payload.Meta["status_separator"])
+	if statusLayout == "single-line" {
+		statusSeparator = "off"
 	}
 	widgetBattery := onOffFlag(parseOnOffDefault(payload.Meta["widget_battery"], true))
 	widgetCPU := onOffFlag(parseOnOffDefault(payload.Meta["widget_cpu"], true))
@@ -932,12 +1059,12 @@ func renderTmuxBlock(payload computedPayload) string {
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
 	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
-	weatherColor := ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground)
+	weatherColor := bestTextColorForBackgrounds(tertiaryFixedDim, payload.Foreground, 4.5, payload.Background)
 	separatorColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48)), payload.Foreground)
 	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
 	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
 	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
-	chargingColor := ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground)
+	chargingColor := bestTextColorForBackgrounds(secondaryFixed, payload.Foreground, 4.5, payload.Background)
 	batteryRamp := []string{
 		"#ff6b6b", // red
 		"#ff8f5a", // orange-red
@@ -948,7 +1075,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	}
 	batteryColors := make([]string, len(batteryRamp))
 	for i, c := range batteryRamp {
-		batteryColors[i] = ensureReadableTextColor(payload.Background, saturateHexColor(c, 0.16), payload.Foreground)
+		batteryColors[i] = bestTextColorForBackgrounds(saturateHexColor(c, 0.16), payload.Foreground, 4.5, payload.Background)
 	}
 	batteryFullColors := [4]string{}
 	batteryHalfColors := [4]string{}
@@ -962,35 +1089,59 @@ func renderTmuxBlock(payload computedPayload) string {
 	for i := 0; i < 4; i++ {
 		fullT := 0.06 + (0.88 * float64(i) / 3.0)
 		halfT := 0.18 + (0.88 * float64(i) / 3.0)
-		full := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground)
-		half := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground)
-		empty := ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(full, surfaceHighest, 0.18), 0.14), payload.Foreground)
+		full := bestTextColorForBackgrounds(saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground, 4.5, payload.Background)
+		half := bestTextColorForBackgrounds(saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground, 4.5, payload.Background)
+		empty := bestTextColorForBackgrounds(saturateHexColor(blendHexColor(full, surfaceHighest, 0.18), 0.14), payload.Foreground, 4.5, payload.Background)
 		batteryFullColors[i] = full
 		batteryHalfColors[i] = half
 		batteryEmptyColors[i] = empty
 	}
 	cpuColors := []string{
-		ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+		bestTextColorForBackgrounds(primaryBase, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(primaryFixed, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(secondaryBase, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(secondaryFixed, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(tertiaryBase, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(tertiaryFixed, payload.Foreground, 4.5, payload.Background),
 	}
 	ramColors := []string{
-		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
+		bestTextColorForBackgrounds(tertiaryBase, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(tertiaryFixed, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(primaryFixedDim, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(primaryFixed, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(secondaryFixedDim, payload.Foreground, 4.5, payload.Background),
+		bestTextColorForBackgrounds(secondaryFixed, payload.Foreground, 4.5, payload.Background),
 	}
 	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.18, 0.24)))
 	chargingBG := nonBlackStatusColor(blendHexColor(blendHexColor(secondaryBase, primaryBase, 0.35), tertiaryBase, 0.18), payload.Foreground)
 	cpuBG := nonBlackStatusColor(blendHexColor(secondaryContainer, surfaceHighest, 0.20), payload.Foreground)
 	ramBG := nonBlackStatusColor(blendHexColor(primaryContainer, surfaceHighest, 0.22), payload.Foreground)
 	weatherBG := nonBlackStatusColor(blendHexColor(tertiaryContainer, surfaceHighest, 0.18), payload.Foreground)
-	widgetAccentFG := ensureReadableTextColor(blendHexColor(blendHexColor(batteryBG, cpuBG, 0.5), blendHexColor(ramBG, weatherBG, 0.5), 0.5), payload.Foreground, payload.Background)
+	weatherColor = bestTextColorForBackgrounds(weatherColor, payload.Foreground, 4.5, payload.Background, weatherBG)
+	chargingColor = bestTextColorForBackgrounds(chargingColor, payload.Foreground, 4.5, payload.Background, chargingBG)
+	for i := range batteryColors {
+		batteryColors[i] = bestTextColorForBackgrounds(batteryColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
+	}
+	for i := range batteryFullColors {
+		batteryFullColors[i] = bestTextColorForBackgrounds(batteryFullColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
+		batteryHalfColors[i] = bestTextColorForBackgrounds(batteryHalfColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
+		batteryEmptyColors[i] = bestTextColorForBackgrounds(batteryEmptyColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
+	}
+	for i := range cpuColors {
+		cpuColors[i] = bestTextColorForBackgrounds(cpuColors[i], payload.Foreground, 4.5, payload.Background, cpuBG)
+	}
+	for i := range ramColors {
+		ramColors[i] = bestTextColorForBackgrounds(ramColors[i], payload.Foreground, 4.5, payload.Background, ramBG)
+	}
+	widgetAccentFG := bestTextColorForBackgrounds(payload.Foreground, payload.Background, 6.0, payload.Background)
+	sessionBG = ensureBackgroundContrastForText(sessionBG, widgetAccentFG, 3.8)
+	prefixBG = ensureBackgroundContrastForText(prefixBG, widgetAccentFG, 3.8)
+	copyBG = ensureBackgroundContrastForText(copyBG, widgetAccentFG, 3.8)
+	batteryBG = ensureBackgroundContrastForText(batteryBG, widgetAccentFG, 3.8)
+	chargingBG = ensureBackgroundContrastForText(chargingBG, widgetAccentFG, 3.8)
+	cpuBG = ensureBackgroundContrastForText(cpuBG, widgetAccentFG, 3.8)
+	ramBG = ensureBackgroundContrastForText(ramBG, widgetAccentFG, 3.8)
+	weatherBG = ensureBackgroundContrastForText(weatherBG, widgetAccentFG, 3.8)
 	batteryBGSetting := batteryBG
 	if statusTheme == "default" {
 		batteryBGSetting = "default"
@@ -1022,10 +1173,23 @@ func renderTmuxBlock(payload computedPayload) string {
 	}
 	statusRuleThin := strings.Repeat("─", 260)
 	statusRuleThick := strings.Repeat("━", 260)
+	statusRuleExpr := fmt.Sprintf(`#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#[fg=%s]%s}}`, rulePrefixColor, statusRuleThick, ruleCopyColor, statusRuleThick, ruleBaseColor, statusRuleThin)
+	statusRows := 2
+	statusFormatCommands := "set -gu status-format[0]\nset -gu status-format[1]"
+	if statusLayout == "single-line" {
+		statusRows = 1
+	} else if statusSeparator == "on" {
+		if statusPosition == "bottom" {
+			statusFormatCommands = fmt.Sprintf("set -g status-format[0] %q\nset -gu status-format[1]", statusRuleExpr)
+		} else {
+			statusFormatCommands = fmt.Sprintf("set -gu status-format[0]\nset -g status-format[1] %q", statusRuleExpr)
+		}
+	}
 	return fmt.Sprintf(`# >>> MATUGEN THEME START >>>
 # Generated by %s/theme apply
 set -g status-style "bg=default,fg=%s"
-set -g status 2
+set -g status-position "%s"
+set -g status %d
 set -g @status-tmux-edge-style "%s"
 set -g @status-tmux-left-edge-style "%s"
 set -g @status-tmux-bg-left "on"
@@ -1036,12 +1200,12 @@ set -g @status-tmux-left-bg-copy "%s"
 set -g @status-tmux-left-session-pad "%s"
 set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
 set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
-set -g status-format[1] "#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#[fg=%s]%s}}"
+%s
 set -g window-status-separator ""
 set -g window-status-format "%s"
 set -g window-status-current-format "%s"
-set -g window-status-activity-style "fg=%s,bg=%s,bold"
-set -g window-status-bell-style "fg=%s,bg=%s,bold"
+set -g window-status-activity-style "fg=%s,bold"
+set -g window-status-bell-style "fg=%s,bold"
 setw -g monitor-activity on
 set -g visual-activity on
 set -g pane-border-style "fg=%s"
@@ -1100,6 +1264,8 @@ set -g @status-tmux-fg-on-accent "%s"
 # <<< MATUGEN THEME END <<<
 `, tooieConfigDir,
 		payload.Foreground,
+		statusPosition,
+		statusRows,
 		edgeStyle,
 		leftEdgeStyle,
 		bgRight,
@@ -1108,12 +1274,10 @@ set -g @status-tmux-fg-on-accent "%s"
 		copyBG,
 		leftSessionPad,
 		leftGap,
-		rulePrefixColor, statusRuleThick,
-		ruleCopyColor, statusRuleThick,
-		ruleBaseColor, statusRuleThin,
+		statusFormatCommands,
 		windowStatusFormat,
 		windowStatusCurrentFormat,
-		attentionFG, attentionBG, attentionFG, attentionBG,
+		attentionFG, attentionFG,
 		paneBorderColor, paneActiveBorderColor, payload.Foreground, payload.Foreground,
 		modeBG, modeFG,
 		matchBG, matchFG,
@@ -1169,6 +1333,86 @@ func nonBlackStatusColor(hex, fallback string) string {
 		return normalizeHexColor(blendHexColor(fallback, "#ffffff", 0.22))
 	}
 	return hex
+}
+
+func bestTextColorForBackgrounds(preferred, fallback string, minContrast float64, backgrounds ...string) string {
+	candidates := []string{
+		preferred,
+		fallback,
+		"#ffffff",
+		"#f5f7ff",
+		"#111111",
+		"#000000",
+	}
+	for _, bg := range backgrounds {
+		candidates = append(candidates, ensureReadableTextColor(bg, preferred, fallback))
+		candidates = append(candidates, ensureReadableTextColor(bg, "#ffffff", "#111111"))
+	}
+	best := normalizeHexColor(fallback)
+	bestMin := -1.0
+	for _, cand := range candidates {
+		cand = normalizeHexColor(cand)
+		if !itheme.IsHexColor(cand) {
+			continue
+		}
+		minSeen := 99.0
+		validBG := 0
+		for _, bg := range backgrounds {
+			bg = normalizeHexColor(bg)
+			if !itheme.IsHexColor(bg) {
+				continue
+			}
+			validBG++
+			r := contrastRatioHex(cand, bg)
+			if r < minSeen {
+				minSeen = r
+			}
+		}
+		if validBG == 0 {
+			return cand
+		}
+		if minSeen > bestMin {
+			bestMin = minSeen
+			best = cand
+		}
+		if minSeen >= minContrast {
+			return cand
+		}
+	}
+	return best
+}
+
+func ensureBackgroundContrastForText(bg, fg string, minContrast float64) string {
+	bg = normalizeHexColor(bg)
+	fg = normalizeHexColor(fg)
+	if !itheme.IsHexColor(bg) || !itheme.IsHexColor(fg) {
+		return bg
+	}
+	if contrastRatioHex(bg, fg) >= minContrast {
+		return bg
+	}
+	target := "#000000"
+	if relativeLuminanceHex(fg) < 0.5 {
+		target = "#ffffff"
+	}
+	best := bg
+	bestRatio := contrastRatioHex(bg, fg)
+	for i := 1; i <= 14; i++ {
+		t := 0.06 * float64(i)
+		if t > 0.92 {
+			t = 0.92
+		}
+		cand := normalizeHexColor(blendHexColor(bg, target, t))
+		r := contrastRatioHex(cand, fg)
+		if r > bestRatio {
+			best = cand
+			bestRatio = r
+		}
+		if r >= minContrast {
+			return cand
+		}
+	}
+	return best
 }
 
 func avoidRedHue(hex string, fallbacks ...string) string {
@@ -1492,6 +1736,9 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 
 	lumas := make([]float64, 0, target*target)
 	sats := make([]float64, 0, target*target)
+	const hueBins = 24
+	hist := make([]float64, hueBins)
+	histTotal := 0.0
 	grid := make([][]float64, target)
 	for y := 0; y < target; y++ {
 		grid[y] = make([]float64, target)
@@ -1515,6 +1762,21 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 			sat := 0.0
 			if maxv > 0 {
 				sat = (maxv - minv) / maxv
+			}
+			if sat > 0.12 && l > 0.06 && l < 0.94 {
+				h := hueFromRGB(r8, g8, b8)
+				bin := int(math.Round((h / 360.0) * float64(hueBins-1)))
+				if bin < 0 {
+					bin = 0
+				}
+				if bin >= hueBins {
+					bin = hueBins - 1
+				}
+				weight := sat * (0.55 + 0.45*(1.0-math.Abs(l-0.5)*2.0))
+				if weight > 0 {
+					hist[bin] += weight
+					histTotal += weight
+				}
 			}
 			lumas = append(lumas, l)
 			sats = append(sats, sat)
@@ -1564,6 +1826,25 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 	if edgeWeight > 0 {
 		edgeLuma = edgeSum / edgeWeight
 	}
+	dominantHue := -1.0
+	secondaryHue := -1.0
+	hueStrength := 0.0
+	if histTotal > 0 {
+		top1, top2 := 0, 0
+		for i := 1; i < len(hist); i++ {
+			if hist[i] > hist[top1] {
+				top2 = top1
+				top1 = i
+			} else if i != top1 && hist[i] > hist[top2] {
+				top2 = i
+			}
+		}
+		dominantHue = (float64(top1) + 0.5) * (360.0 / float64(hueBins))
+		if hist[top2] > 0 && top2 != top1 {
+			secondaryHue = (float64(top2) + 0.5) * (360.0 / float64(hueBins))
+		}
+		hueStrength = clamp01(hist[top1] / histTotal)
+	}
 	return autoDecisionMetrics{
 		MeanLuma:         mean,
 		P10:              p10,
@@ -1574,6 +1855,9 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 		EdgeWeightedLuma: edgeLuma,
 		MeanSat:          meanSat,
 		P90Sat:           p90Sat,
+		DominantHue:      dominantHue,
+		SecondaryHue:     secondaryHue,
+		HueStrength:      hueStrength,
 	}, true
 }
 
@@ -1622,6 +1906,10 @@ func hueFromHex(hex string) float64 {
 	rf := float64(r) / 255.0
 	gf := float64(g) / 255.0
 	bf := float64(b) / 255.0
+	return hueFromRGB(rf, gf, bf)
+}
+
+func hueFromRGB(rf, gf, bf float64) float64 {
 	maxv := math.Max(rf, math.Max(gf, bf))
 	minv := math.Min(rf, math.Min(gf, bf))
 	delta := maxv - minv
@@ -1642,6 +1930,14 @@ func hueFromHex(hex string) float64 {
 		h += 360.0
 	}
 	return h
+}
+
+func hueDistanceDegrees(a, b float64) float64 {
+	d := math.Abs(a - b)
+	if d > 180 {
+		d = 360 - d
+	}
+	return d
 }
 
 func saturateHexColor(hex string, boost float64) string {

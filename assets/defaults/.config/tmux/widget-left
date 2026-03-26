@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/helpers.sh"
+
+session_name="${1:-session}"
+is_prefix="${2:-0}"
+in_copy_mode="${3:-0}"
+
+edge_style="$(get_tmux_option '@status-tmux-left-edge-style' 'flat')"
+bg_session="$(get_tmux_option '@status-tmux-left-bg-session' 'colour8')"
+bg_prefix="$(get_tmux_option '@status-tmux-left-bg-prefix' "$bg_session")"
+bg_copy="$(get_tmux_option '@status-tmux-left-bg-copy' "$bg_session")"
+fg_on_accent="$(get_tmux_option '@status-tmux-fg-on-accent' 'colour15')"
+session_pad="$(get_tmux_option '@status-tmux-left-session-pad' 'none')"
+
+label=" ${session_name} "
+bg="$bg_session"
+if [ "$is_prefix" = "1" ]; then
+  label=" PRFX "
+  bg="$bg_prefix"
+elif [ "$in_copy_mode" = "1" ]; then
+  label=" COPY "
+  bg="$bg_copy"
+fi
+
+if [ "$edge_style" = "rounded" ]; then
+  out="#[fg=${bg},bg=default]#[bg=${bg},fg=${fg_on_accent}]${label}#[fg=${bg},bg=default]"
+else
+  out="#[bg=${bg},fg=${fg_on_accent}]${label}#[bg=default]"
+fi
+
+if [ "$session_pad" = "space" ]; then
+  out="${out} "
+fi
+
+printf "%s" "$out"

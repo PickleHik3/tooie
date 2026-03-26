@@ -110,9 +110,8 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	for _, want := range []string{
 		"Colors",
 		"Status Bar",
-		"Theme: Default",
-		"Battery: on",
-		"Weather: on",
+		"Theme",
+		"Battery",
 		"Wallpaper",
 	} {
 		if !strings.Contains(got, want) {
@@ -180,6 +179,26 @@ func TestKeybindsCycleThemeSettings(t *testing.T) {
 	got = next.(model)
 	if got.statusTheme == defaultStatusTheme {
 		t.Fatalf("expected t to cycle tmux theme")
+	}
+}
+
+func TestSourceAndModeDoNotMutateProfileViaHotkeys(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     "arctic-calm",
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	got := next.(model)
+	if got.profile != "arctic-calm" {
+		t.Fatalf("profile changed after source hotkey: got %q", got.profile)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got = next.(model)
+	if got.profile != "arctic-calm" {
+		t.Fatalf("profile changed after mode hotkey: got %q", got.profile)
 	}
 }
 
@@ -256,6 +275,12 @@ func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 	if got.widgetBattery {
 		t.Fatalf("widget battery should toggle off")
 	}
+	if got.switchAnimTarget != "widget_battery" {
+		t.Fatalf("switch animation target = %q, want widget_battery", got.switchAnimTarget)
+	}
+	if got.switchAnimProg != 0 {
+		t.Fatalf("switch animation progress = %v, want 0", got.switchAnimProg)
+	}
 	if cmd == nil {
 		t.Fatalf("activateSetting() should return sync command for widget toggle")
 	}
@@ -266,5 +291,123 @@ func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 	}
 	if settings.WidgetBattery {
 		t.Fatalf("persisted battery toggle should be off, got %#v", settings)
+	}
+}
+
+func TestTwoColumnWidthsBiasesLeftColumn(t *testing.T) {
+	left, right := twoColumnWidths(96)
+	if left <= 0 || right <= 0 {
+		t.Fatalf("twoColumnWidths() returned invalid widths: left=%d right=%d", left, right)
+	}
+	if left <= right {
+		t.Fatalf("expected left column wider than right: left=%d right=%d", left, right)
+	}
+	if left-right < 2 {
+		t.Fatalf("expected left column to be at least 2 chars wider: left=%d right=%d", left, right)
+	}
+}
+
+func TestWallpaperBlockFallbackUsesInsetSpacing(t *testing.T) {
+	m := model{}
+	got := m.wallpaperBlock(8, 24)
+	lines := strings.Split(got, "\n")
+	foundContent := false
+	for i, line := range lines {
+		if i < 2 {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		foundContent = true
+		if !strings.HasPrefix(line, " ") {
+			t.Fatalf("wallpaperBlock() content line missing left inset padding: %q", line)
+		}
+		break
+	}
+	if !foundContent {
+		t.Fatalf("wallpaperBlock() did not render any content lines:\n%s", got)
+	}
+}
+
+func TestAdvanceSwitchAnimationClearsTarget(t *testing.T) {
+	m := model{}
+	m.startSwitchAnimation("widget_cpu", false, true)
+	if m.switchAnimTarget != "widget_cpu" {
+		t.Fatalf("switchAnimTarget = %q", m.switchAnimTarget)
+	}
+	m.advanceSwitchAnimation(0.25)
+	if m.switchAnimTarget != "" {
+		t.Fatalf("switch animation should finish and clear target, got %q", m.switchAnimTarget)
+	}
+	if m.switchAnimProg != 1 {
+		t.Fatalf("switchAnimProg = %v, want 1", m.switchAnimProg)
+	}
+}
+
+func TestEnterOnListSettingOpensDropdown(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+	}
+	for i, item := range m.mergedPageItems() {
+		if item.Target == "theme_source" {
+			m.settingIndex = i
+			break
+		}
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.settingMenuTarget != "theme_source" {
+		t.Fatalf("settingMenuTarget = %q, want theme_source", got.settingMenuTarget)
+	}
+}
+
+func TestDropdownEnterAppliesSelection(t *testing.T) {
+	m := model{
+		page:              pageTheme,
+		themeSource:       "wallpaper",
+		settingMenuTarget: "theme_source",
+		settingMenuIndex:  1,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.themeSource != "preset" {
+		t.Fatalf("themeSource = %q, want preset", got.themeSource)
+	}
+	if got.settingMenuTarget != "" {
+		t.Fatalf("expected dropdown to close after selection")
+	}
+}
+
+func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
+	m := model{
+		page:              pageTheme,
+		themeSource:       "wallpaper",
+		mode:              "auto",
+		profile:           "studio-dark",
+		settingMenuTarget: "theme_source",
+		settingMenuIndex:  1,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.themeSource != "preset" {
+		t.Fatalf("themeSource = %q, want preset", got.themeSource)
+	}
+	if got.profile != "studio-dark" {
+		t.Fatalf("profile changed after source dropdown: got %q", got.profile)
+	}
+
+	got.settingMenuTarget = "mode"
+	got.settingMenuIndex = 1
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(model)
+	if got.mode != "dark" {
+		t.Fatalf("mode = %q, want dark", got.mode)
+	}
+	if got.profile != "studio-dark" {
+		t.Fatalf("profile changed after mode dropdown: got %q", got.profile)
 	}
 }

@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func tmuxOptionValue(block, key string) (string, bool) {
+	prefix := "set -g " + key + " \""
+	for _, line := range strings.Split(block, "\n") {
+		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, "\"") {
+			continue
+		}
+		v := strings.TrimSuffix(strings.TrimPrefix(line, prefix), "\"")
+		return strings.TrimSpace(v), true
+	}
+	return "", false
+}
+
 func testThemePayload() computedPayload {
 	p := computedPayload{}
 	p.Foreground = "#e4e3d7"
@@ -97,6 +109,14 @@ func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g window-status-activity-style "fg=`) || !strings.Contains(got, `set -g window-status-bell-style "fg=`) {
 		t.Fatalf("expected explicit bright styles for activity/bell windows, got: %s", got)
 	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, `set -g window-status-activity-style "`) && strings.Contains(line, ",bg=") {
+			t.Fatalf("expected activity style to avoid background fills, got: %s", line)
+		}
+		if strings.HasPrefix(line, `set -g window-status-bell-style "`) && strings.Contains(line, ",bg=") {
+			t.Fatalf("expected bell style to avoid background fills, got: %s", line)
+		}
+	}
 	var paneBorderLine, paneActiveBorderLine string
 	for _, line := range strings.Split(got, "\n") {
 		if strings.HasPrefix(line, `set -g pane-border-style "fg=`) {
@@ -144,6 +164,23 @@ func TestRenderTmuxBlockRectangleTheme(t *testing.T) {
 	}
 	if strings.Contains(got, `window-status-format "#[fg=`) && strings.Contains(got, ``) {
 		t.Fatalf("expected rectangle theme windows to stay rectangular, got: %s", got)
+	}
+}
+
+func TestRenderTmuxBlockStatusLayoutOptions(t *testing.T) {
+	payload := testThemePayload()
+	payload.Meta["status_position"] = "bottom"
+	payload.Meta["status_layout"] = "single-line"
+	payload.Meta["status_separator"] = "on"
+	got := renderTmuxBlock(payload)
+	if !strings.Contains(got, `set -g status-position "bottom"`) {
+		t.Fatalf("expected status-position bottom, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status 1`) {
+		t.Fatalf("expected single-line status to set status 1, got: %s", got)
+	}
+	if strings.Contains(got, `status-format[0] "`) || strings.Contains(got, `status-format[1] "`) {
+		t.Fatalf("expected single-line status to clear separator rows, got: %s", got)
 	}
 }
 
@@ -241,7 +278,7 @@ func TestScoreCandidatePrefersDarkForDarkScene(t *testing.T) {
 	light.Mode = "light"
 	light.Roles["background"] = "#eff1f5"
 	light.Roles["on_background"] = "#3a3f50"
-	if scoreCandidate(dark, metrics) <= scoreCandidate(light, metrics) {
+	if scoreCandidate(dark, metrics, "adaptive") <= scoreCandidate(light, metrics, "adaptive") {
 		t.Fatalf("expected dark candidate to win for dark scene")
 	}
 }
@@ -268,8 +305,63 @@ func TestScoreCandidatePenalizesLowContrast(t *testing.T) {
 		good.Roles[k] = v
 	}
 	good.Roles["on_background"] = "#e7e8f0"
-	if scoreCandidate(bad, metrics) >= scoreCandidate(good, metrics) {
+	if scoreCandidate(bad, metrics, "adaptive") >= scoreCandidate(good, metrics, "adaptive") {
 		t.Fatalf("expected low-contrast candidate to be penalized")
+	}
+}
+
+func TestScoreCandidateAdaptivePrefersWallpaperHueAffinity(t *testing.T) {
+	metrics := autoDecisionMetrics{
+		MeanLuma:         0.40,
+		P50:              0.38,
+		DarkPixelRatio:   0.58,
+		BrightPixelRatio: 0.06,
+		EdgeWeightedLuma: 0.36,
+		MeanSat:          0.42,
+		P90Sat:           0.70,
+		DominantHue:      30.0,
+		SecondaryHue:     285.0,
+		HueStrength:      0.72,
+	}
+	matching := matugenCandidate{
+		Mode:        "dark",
+		Scheme:      "scheme-tonal-spot",
+		SourceIndex: 1,
+		Roles: map[string]string{
+			"background":    "#111218",
+			"on_background": "#ececf2",
+			"primary":       "#f29f52",
+			"secondary":     "#d4833f",
+			"tertiary":      "#bb86f2",
+			"error":         "#e66a5c",
+		},
+		Readability: 13.4,
+	}
+	offHue := matching
+	offHue.SourceIndex = 2
+	offHue.Roles = map[string]string{
+		"background":    "#111218",
+		"on_background": "#ececf2",
+		"primary":       "#4f8cff",
+		"secondary":     "#4ac2ff",
+		"tertiary":      "#64d0ff",
+		"error":         "#39a2ff",
+	}
+	if scoreCandidate(matching, metrics, "adaptive") <= scoreCandidate(offHue, metrics, "adaptive") {
+		t.Fatalf("expected adaptive scorer to prefer wallpaper-hue-aligned candidate")
+	}
+}
+
+func TestSourceIndexCandidatesAdaptive(t *testing.T) {
+	got := sourceIndexCandidates("adaptive")
+	want := []int{0, 1, 2}
+	if len(got) != len(want) {
+		t.Fatalf("sourceIndexCandidates(adaptive) len=%d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sourceIndexCandidates(adaptive)[%d]=%d, want %d (%v)", i, got[i], want[i], got)
+		}
 	}
 }
 
@@ -381,5 +473,69 @@ func TestAutoCandidateModesForMixedScene(t *testing.T) {
 	})
 	if len(modes) != 1 || modes[0] != "dark" {
 		t.Fatalf("expected readability-first dark candidates, got %v", modes)
+	}
+}
+
+func TestPresetTmuxStatusContrastAcrossFamilies(t *testing.T) {
+	tmp := t.TempDir()
+	for _, family := range presetFamilyOrder {
+		variants := presetVariantsByFamily[family]
+		if len(variants) == 0 {
+			t.Fatalf("missing variants for family %q", family)
+		}
+		for _, variant := range variants {
+			cfg := themeApplyConfig{
+				ThemeSource:   "preset",
+				PresetFamily:  family,
+				PresetVariant: variant,
+				StatusPalette: "default",
+				StatusTheme:   "rounded",
+				StyleFamily:   "adaptive",
+				Profile:       "adaptive",
+			}
+			payload, _, err := computeThemePayload(cfg, tmp)
+			if err != nil {
+				t.Fatalf("computeThemePayload(%s:%s) error: %v", family, variant, err)
+			}
+			block := renderTmuxBlock(payload)
+			accentFG, ok := tmuxOptionValue(block, "@status-tmux-fg-on-accent")
+			if !ok {
+				t.Fatalf("missing @status-tmux-fg-on-accent for %s:%s", family, variant)
+			}
+			bgKeys := []string{
+				"@status-tmux-left-bg-session",
+				"@status-tmux-left-bg-prefix",
+				"@status-tmux-left-bg-copy",
+				"@status-tmux-bg-battery",
+				"@status-tmux-bg-charging",
+				"@status-tmux-bg-cpu",
+				"@status-tmux-bg-ram",
+				"@status-tmux-bg-weather",
+			}
+			for _, k := range bgKeys {
+				bg, ok := tmuxOptionValue(block, k)
+				if !ok {
+					t.Fatalf("missing %s for %s:%s", k, family, variant)
+				}
+				if bg == "default" {
+					bg = payload.Background
+				}
+				if got := contrastRatioHex(accentFG, bg); got < 3.6 {
+					t.Fatalf("accent contrast too low for %s:%s (%s): %.2f fg=%s bg=%s", family, variant, k, got, accentFG, bg)
+				}
+			}
+			for _, stateKey := range []string{
+				"@status-tmux-color-weather",
+				"@status-tmux-color-charging",
+			} {
+				fg, ok := tmuxOptionValue(block, stateKey)
+				if !ok {
+					t.Fatalf("missing %s for %s:%s", stateKey, family, variant)
+				}
+				if got := contrastRatioHex(fg, payload.Background); got < 4.2 {
+					t.Fatalf("%s contrast too low for %s:%s: %.2f fg=%s bg=%s", stateKey, family, variant, got, fg, payload.Background)
+				}
+			}
+		}
 	}
 }
