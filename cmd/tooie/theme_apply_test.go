@@ -198,6 +198,9 @@ func TestRenderTmuxBlockTwoLineKeepsSeparatorRule(t *testing.T) {
 	if !strings.Contains(got, `set -g status-format[1] "`) {
 		t.Fatalf("expected two-line layout to keep separator rule line, got: %s", got)
 	}
+	if strings.Contains(got, "set -gu status-format\n") {
+		t.Fatalf("expected two-line layout to avoid global status-format unset, got: %s", got)
+	}
 }
 
 func TestApplyThemeFilesCreatesBackupsAndIdempotentBlocks(t *testing.T) {

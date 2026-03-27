@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -698,6 +699,13 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	}
 
 	if settings.Modules.BtopHelper {
+		runner := normalizeRunner(settings.Privileged.Runner)
+		if err := saveHelperConfig(helperConfig{Runner: runner}); err != nil {
+			return fmt.Errorf("failed to write helper config: %w", err)
+		}
+		if err := seedHelperStats(); err != nil {
+			return fmt.Errorf("failed to seed helper stats: %w", err)
+		}
 		src, err := resolveRepoAssetPath(filepath.Join("scripts", "setup-btop-helper.sh"))
 		if err != nil {
 			return err
@@ -705,7 +713,14 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		if err := copyFile(src, currentBtopSetupScriptPath(), 0o755); err != nil {
 			return err
 		}
-		_ = exec.Command(currentBtopSetupScriptPath(), "--runner", normalizeRunner(settings.Privileged.Runner)).Run()
+		cmd := exec.Command(currentBtopSetupScriptPath(), "--runner", runner)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = err.Error()
+			}
+			fmt.Fprintf(os.Stderr, "tooie setup: warning: btop helper script failed: %s\n", msg)
+		}
 	}
 
 	themeArgs := []string{
@@ -743,6 +758,30 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	}
 
 	return nil
+}
+
+func seedHelperStats() error {
+	path := filepath.Join(homeDir, ".cache", "tooie", "helper-stats.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"cpuPercent":    0,
+		"memUsedBytes":  0,
+		"memTotalBytes": 0,
+		"battery": map[string]any{
+			"levelPercent": 0,
+			"charging":     false,
+		},
+		"source":    "btop-helper",
+		"updatedAt": "",
+	}
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
 }
 
 func installManagedPaths(home string) []string {
