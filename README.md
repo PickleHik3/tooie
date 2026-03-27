@@ -37,19 +37,25 @@ The TUI is split into 2 pages:
 
 ## Install
 
+Fresh install for `v2-dev`:
+
 ```sh
 pkg update -y
-pkg i -y git
+pkg install -y git
 termux-setup-storage
-git clone https://github.com/PickleHik3/tooie
-cd ~/tooie
+rm -rf ~/.tmp/tooie
+cd ~/.tmp
+git clone --branch v2-dev --single-branch https://github.com/PickleHik3/tooie.git
+cd tooie
 ./install.sh
-chsh -s fish
-~/.local/bin/tooie --restart
 ```
 
-> **v2 quick start:**  
-> `git clone https://github.com/PickleHik3/tooie && cd ~/tooie && git checkout v2-dev && ./install.sh`
+After setup completes, reload tmux once:
+
+```sh
+tmux kill-server 2>/dev/null || true
+tmux new -A -s main
+```
 
 ## Run
 
