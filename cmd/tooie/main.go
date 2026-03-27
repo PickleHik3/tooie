@@ -1415,6 +1415,9 @@ func syncTmuxWidgetSettingsCmd(settings persistedShellSettings) tea.Cmd {
 		for _, item := range options {
 			_ = exec.Command("tmux", "set-option", "-g", item.key, onOffFlag(item.val)).Run()
 		}
+		_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
+		_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
+		_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
 		_ = exec.Command("tmux", "set-option", "-g", "status-right", tmuxStatusRightTemplate()).Run()
 		_ = exec.Command("tmux", "refresh-client", "-S").Run()
 		return nil
