@@ -1059,12 +1059,12 @@ func renderTmuxBlock(payload computedPayload) string {
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
 	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
-	weatherColor := bestTextColorForBackgrounds(tertiaryFixedDim, payload.Foreground, 4.5, payload.Background)
+	weatherColor := ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground)
 	separatorColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48)), payload.Foreground)
 	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
 	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
 	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
-	chargingColor := bestTextColorForBackgrounds(secondaryFixed, payload.Foreground, 4.5, payload.Background)
+	chargingColor := ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground)
 	batteryRamp := []string{
 		"#ff6b6b", // red
 		"#ff8f5a", // orange-red
@@ -1075,7 +1075,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	}
 	batteryColors := make([]string, len(batteryRamp))
 	for i, c := range batteryRamp {
-		batteryColors[i] = bestTextColorForBackgrounds(saturateHexColor(c, 0.16), payload.Foreground, 4.5, payload.Background)
+		batteryColors[i] = ensureReadableTextColor(payload.Background, saturateHexColor(c, 0.16), payload.Foreground)
 	}
 	batteryFullColors := [4]string{}
 	batteryHalfColors := [4]string{}
@@ -1089,50 +1089,34 @@ func renderTmuxBlock(payload computedPayload) string {
 	for i := 0; i < 4; i++ {
 		fullT := 0.06 + (0.88 * float64(i) / 3.0)
 		halfT := 0.18 + (0.88 * float64(i) / 3.0)
-		full := bestTextColorForBackgrounds(saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground, 4.5, payload.Background)
-		half := bestTextColorForBackgrounds(saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground, 4.5, payload.Background)
-		empty := bestTextColorForBackgrounds(saturateHexColor(blendHexColor(full, surfaceHighest, 0.18), 0.14), payload.Foreground, 4.5, payload.Background)
+		full := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground)
+		half := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground)
+		empty := ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(full, surfaceHighest, 0.18), 0.14), payload.Foreground)
 		batteryFullColors[i] = full
 		batteryHalfColors[i] = half
 		batteryEmptyColors[i] = empty
 	}
 	cpuColors := []string{
-		bestTextColorForBackgrounds(primaryBase, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(primaryFixed, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(secondaryBase, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(secondaryFixed, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(tertiaryBase, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(tertiaryFixed, payload.Foreground, 4.5, payload.Background),
+		ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground),
+		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
+		ensureReadableTextColor(payload.Background, secondaryBase, payload.Foreground),
+		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
+		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
+		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
 	}
 	ramColors := []string{
-		bestTextColorForBackgrounds(tertiaryBase, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(tertiaryFixed, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(primaryFixedDim, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(primaryFixed, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(secondaryFixedDim, payload.Foreground, 4.5, payload.Background),
-		bestTextColorForBackgrounds(secondaryFixed, payload.Foreground, 4.5, payload.Background),
+		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
+		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+		ensureReadableTextColor(payload.Background, primaryFixedDim, payload.Foreground),
+		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
+		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
+		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
 	}
 	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.18, 0.24)))
 	chargingBG := nonBlackStatusColor(blendHexColor(blendHexColor(secondaryBase, primaryBase, 0.35), tertiaryBase, 0.18), payload.Foreground)
 	cpuBG := nonBlackStatusColor(blendHexColor(secondaryContainer, surfaceHighest, 0.20), payload.Foreground)
 	ramBG := nonBlackStatusColor(blendHexColor(primaryContainer, surfaceHighest, 0.22), payload.Foreground)
 	weatherBG := nonBlackStatusColor(blendHexColor(tertiaryContainer, surfaceHighest, 0.18), payload.Foreground)
-	weatherColor = bestTextColorForBackgrounds(weatherColor, payload.Foreground, 4.5, payload.Background, weatherBG)
-	chargingColor = bestTextColorForBackgrounds(chargingColor, payload.Foreground, 4.5, payload.Background, chargingBG)
-	for i := range batteryColors {
-		batteryColors[i] = bestTextColorForBackgrounds(batteryColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
-	}
-	for i := range batteryFullColors {
-		batteryFullColors[i] = bestTextColorForBackgrounds(batteryFullColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
-		batteryHalfColors[i] = bestTextColorForBackgrounds(batteryHalfColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
-		batteryEmptyColors[i] = bestTextColorForBackgrounds(batteryEmptyColors[i], payload.Foreground, 4.5, payload.Background, batteryBG)
-	}
-	for i := range cpuColors {
-		cpuColors[i] = bestTextColorForBackgrounds(cpuColors[i], payload.Foreground, 4.5, payload.Background, cpuBG)
-	}
-	for i := range ramColors {
-		ramColors[i] = bestTextColorForBackgrounds(ramColors[i], payload.Foreground, 4.5, payload.Background, ramBG)
-	}
 	widgetAccentFG := bestTextColorForBackgrounds(payload.Foreground, payload.Background, 6.0, payload.Background)
 	sessionBG = ensureBackgroundContrastForText(sessionBG, widgetAccentFG, 3.8)
 	prefixBG = ensureBackgroundContrastForText(prefixBG, widgetAccentFG, 3.8)
