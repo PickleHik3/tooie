@@ -95,7 +95,7 @@ func runSetupCommand(args []string) int {
 	}
 
 	clearSetupScreen()
-	printSetupNextSteps()
+	printSetupNextSteps(settings)
 	return 0
 }
 
@@ -476,7 +476,7 @@ func clearSetupScreen() {
 	_ = cmd.Run()
 }
 
-func printSetupNextSteps() {
+func printSetupNextSteps(settings tooieSettings) {
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render("Setup complete")
 	pathLine := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Settings: " + tooieSettingsPath())
 	cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("99")).Padding(0, 1)
@@ -485,7 +485,9 @@ func printSetupNextSteps() {
 	fmt.Println()
 	fmt.Println("Next:")
 	fmt.Printf("  %s  open the Tooie TUI\n", cmdStyle.Render("tooie"))
-	fmt.Printf("  %s  restart terminal if something looks broken\n", cmdStyle.Render("tooie restart"))
+	if normalizePlatformProfile(settings.Platform.Profile) == "termux-shizuku" {
+		fmt.Printf("  %s  restart launcher (Shizuku profile)\n", cmdStyle.Render("tooie restart"))
+	}
 }
 
 func reorderWithDefault(options []string, current string) []string {

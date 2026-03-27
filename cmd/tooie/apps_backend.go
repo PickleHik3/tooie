@@ -66,6 +66,12 @@ func runCLI(args []string) int {
 		return runUICommand(args[1:])
 	case "setup":
 		return runSetupCommand(args[1:])
+	case "restart", "--restart", "-restart":
+		if !canUseLauncherRestart() {
+			fmt.Fprintln(os.Stderr, "tooie restart: only available when setup profile is termux-shizuku")
+			return 2
+		}
+		return runRestartCommand(args[1:])
 	case "doctor":
 		return runDoctorCommand(args[1:])
 	case "helper":
@@ -81,7 +87,7 @@ func runCLI(args []string) int {
 		return 0
 	default:
 		switch strings.TrimSpace(args[0]) {
-		case "apps", "restart", "--restart", "-restart", "exec", "launch", "icon", "icons":
+		case "apps", "exec", "launch", "icon", "icons":
 			fmt.Fprintf(os.Stderr, "tooie: %q was removed in v2 portable mode\n\n", args[0])
 			printCLIUsage(os.Stderr)
 			return 2
@@ -124,6 +130,9 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "Examples")
 	fmt.Fprintln(w, "  tooie setup")
 	fmt.Fprintln(w, "  tooie doctor")
+	if canUseLauncherRestart() {
+		fmt.Fprintln(w, "  tooie restart")
+	}
 	fmt.Fprintln(w, "  tooie theme apply --theme-source preset --preset-family catppuccin --preset-variant mocha")
 	fmt.Fprintln(w, "  tooie helper btop setup --runner auto")
 	fmt.Fprintln(w)
@@ -148,6 +157,14 @@ func runUICommand(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func canUseLauncherRestart() bool {
+	settings, ok := loadTooieSettings()
+	if !ok {
+		return false
+	}
+	return normalizePlatformProfile(settings.Platform.Profile) == "termux-shizuku"
 }
 
 func isRestartCLIArgs(args []string) bool {

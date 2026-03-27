@@ -156,8 +156,8 @@ func TestRenderTmuxBlockRectangleTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g @status-tmux-edge-style "flat"`) {
 		t.Fatalf("expected rectangle theme to use flat widget edges, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}') "`) {
-		t.Fatalf("expected rectangle theme to add a gap after the left widget, got: %s", got)
+	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')"`) {
+		t.Fatalf("expected rectangle theme to keep left widget flush with windows, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g @status-tmux-widget-gap-right "none"`) {
 		t.Fatalf("expected rectangle theme to remove right widget gaps, got: %s", got)

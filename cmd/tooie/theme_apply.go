@@ -1004,23 +1004,7 @@ func renderTmuxBlock(payload computedPayload) string {
 		payload.Foreground,
 	)
 	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, "#ffffff"), payload.Foreground)
-	attentionBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffd166", 0.35),
-			"#ff7a59",
-			"#ffcc4d",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	attentionFG := bestTextColorForBackgrounds(
-		ensureReadableTextColor(attentionBG, payload.Background, payload.Foreground),
-		payload.Foreground,
-		4.5,
-		payload.Background,
-		windowInactiveBG,
-		windowActiveBG,
-	)
+	alertColor := ensureReadableTextColor(payload.Background, "#ffd75f", payload.Foreground)
 	windowAccentFG := ensureReadableTextColor(windowActiveBG, payload.Background, payload.Foreground)
 	paneBorderColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.62), payload.Foreground)
 	paneActiveBorderColor := nonBlackStatusColor(
@@ -1133,7 +1117,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	edgeStyle := "rounded"
 	leftEdgeStyle := edgeStyle
 	bgRight := "on"
-	leftGap := " "
+	leftGap := ""
 	leftSessionPad := "none"
 	rightGap := "space"
 	windowStatusFormat := fmt.Sprintf(`#[fg=%s,bg=%s,nobold,noitalics,nounderscore] #I `, windowInactiveFG, windowInactiveBG)
@@ -1143,11 +1127,11 @@ func renderTmuxBlock(payload computedPayload) string {
 		// One outer rounded capsule for the full window list, with active window inset as its own pill.
 		rightGap = "space"
 		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag,#I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
-		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG)
+		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default], }#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG)
 	case "rectangle":
 		edgeStyle = "flat"
 		leftEdgeStyle = "flat"
-		leftGap = " "
+		leftGap = ""
 		rightGap = "none"
 		leftSessionPad = "space"
 	default:
@@ -1157,7 +1141,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	}
 	statusRuleThin := strings.Repeat("─", 260)
 	statusRuleThick := strings.Repeat("━", 260)
-	statusRuleExpr := fmt.Sprintf(`#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#[fg=%s]%s}}`, rulePrefixColor, statusRuleThick, ruleCopyColor, statusRuleThick, ruleBaseColor, statusRuleThin)
+	statusRuleExpr := fmt.Sprintf(`#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#{?session_alerts,#[fg=%s,bold]%s,#[fg=%s]%s}}}`, rulePrefixColor, statusRuleThick, ruleCopyColor, statusRuleThick, alertColor, statusRuleThick, ruleBaseColor, statusRuleThin)
 	statusRows := 2
 	statusFormatCommands := "set -gu status-format\nset -gu status-format[2]"
 	if statusLayout == "single-line" {
@@ -1192,8 +1176,10 @@ set -g window-status-format "%s"
 set -g window-status-current-format "%s"
 set -g window-status-activity-style "fg=%s,bold"
 set -g window-status-bell-style "fg=%s,bold"
-setw -g monitor-activity on
-set -g visual-activity on
+setw -g monitor-activity off
+set -g visual-activity off
+setw -g monitor-bell on
+set -g visual-bell off
 set -g pane-border-style "fg=%s"
 set -g pane-active-border-style "fg=%s"
 set -g message-style "bg=default,fg=%s"
@@ -1263,7 +1249,7 @@ set -g @status-tmux-fg-on-accent "%s"
 		statusFormatCommands,
 		windowStatusFormat,
 		windowStatusCurrentFormat,
-		attentionFG, attentionFG,
+		alertColor, alertColor,
 		paneBorderColor, paneActiveBorderColor, payload.Foreground, payload.Foreground,
 		modeBG, modeFG,
 		matchBG, matchFG,
