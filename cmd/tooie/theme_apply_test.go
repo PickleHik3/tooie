@@ -141,6 +141,9 @@ func TestRenderTmuxBlockRoundedTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g @status-tmux-edge-style "rounded"`) {
 		t.Fatalf("expected rounded theme to keep rounded widget edges, got: %s", got)
 	}
+	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}') "`) {
+		t.Fatalf("expected rounded theme to keep one gap between session and windows, got: %s", got)
+	}
 	if !strings.Contains(got, `set -g window-status-format "#{?window_start_flag`) || !strings.Contains(got, ``) {
 		t.Fatalf("expected rounded theme to use rounded inactive window chips, got: %s", got)
 	}
@@ -181,6 +184,19 @@ func TestRenderTmuxBlockStatusLayoutOptions(t *testing.T) {
 	}
 	if strings.Contains(got, `status-format[0] "`) || strings.Contains(got, `status-format[1] "`) {
 		t.Fatalf("expected single-line status to clear separator rows, got: %s", got)
+	}
+}
+
+func TestRenderTmuxBlockTwoLineKeepsSeparatorRule(t *testing.T) {
+	payload := testThemePayload()
+	payload.Meta["status_layout"] = "two-line"
+	payload.Meta["status_separator"] = "off"
+	got := renderTmuxBlock(payload)
+	if !strings.Contains(got, `set -g status 2`) {
+		t.Fatalf("expected two-line status, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-format[1] "`) {
+		t.Fatalf("expected two-line layout to keep separator rule line, got: %s", got)
 	}
 }
 
