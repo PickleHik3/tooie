@@ -58,12 +58,14 @@ func runDoctorCommand(args []string) int {
 
 func runHelperCommand(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tooie helper: expected subcommand: btop")
+		fmt.Fprintln(os.Stderr, "tooie helper: expected subcommand: btop|uninstall")
 		return 2
 	}
 	switch strings.TrimSpace(args[0]) {
 	case "btop":
 		return runBtopHelperCommand(args[1:])
+	case "uninstall":
+		return runUninstallHelperCommand(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "tooie helper: unknown subcommand %q\n", args[0])
 		return 2
@@ -107,6 +109,30 @@ func runBtopHelperCommand(args []string) int {
 		}
 	}
 	fmt.Printf("btop helper configured (runner=%s)\n", r)
+	return 0
+}
+
+func runUninstallHelperCommand(args []string) int {
+	fs := flag.NewFlagSet("helper uninstall", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	snapshot := fs.String("snapshot", "latest", "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie helper uninstall: %v\n", err)
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "tooie helper uninstall: unexpected arguments")
+		return 2
+	}
+	id := strings.TrimSpace(*snapshot)
+	if id == "latest" {
+		id = ""
+	}
+	if err := restoreInstallSnapshot(id); err != nil {
+		fmt.Fprintf(os.Stderr, "tooie helper uninstall: %v\n", err)
+		return 1
+	}
+	fmt.Println("tooie uninstall restore complete")
 	return 0
 }
 

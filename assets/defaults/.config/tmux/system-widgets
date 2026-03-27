@@ -11,6 +11,7 @@ BACKEND_TIMEOUT="${STATUS_TMUX_BACKEND_TIMEOUT:-1}"
 USE_TERMUX_API_BATTERY="${STATUS_TMUX_USE_TERMUX_API_BATTERY:-0}"
 HELPER_STATS_FILE="${STATUS_TMUX_HELPER_STATS_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/tooie/helper-stats.json}"
 HELPER_STATS_TTL="${STATUS_TMUX_HELPER_STATS_TTL:-3}"
+SOURCE_MODE="${STATUS_TMUX_SOURCE_MODE:-backend-first}"
 SHOW_BATTERY="${STATUS_TMUX_SHOW_BATTERY:-on}"
 SHOW_CPU="${STATUS_TMUX_SHOW_CPU:-on}"
 SHOW_RAM="${STATUS_TMUX_SHOW_RAM:-on}"
@@ -164,13 +165,26 @@ update_cache_if_needed(){
   cleanup_stale_lock
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     tmp="$CACHE_FILE.tmp.$$"
-    if collect_backend_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-      mv "$tmp" "$CACHE_FILE"
-    elif collect_local_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-      mv "$tmp" "$CACHE_FILE"
-    else
-      rm -f "$tmp"
-    fi
+    case "$SOURCE_MODE" in
+      local-first)
+        if collect_local_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+          mv "$tmp" "$CACHE_FILE"
+        elif collect_backend_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+          mv "$tmp" "$CACHE_FILE"
+        else
+          rm -f "$tmp"
+        fi
+        ;;
+      *)
+        if collect_backend_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+          mv "$tmp" "$CACHE_FILE"
+        elif collect_local_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+          mv "$tmp" "$CACHE_FILE"
+        else
+          rm -f "$tmp"
+        fi
+        ;;
+    esac
     rmdir "$LOCK_DIR" 2>/dev/null || true
   fi
 }
@@ -216,7 +230,7 @@ render_widgets(){
   [ -n "$bat_level" ] || bat_level="$(json_get battery.level "$CACHE_FILE")"
   bat_charging="$(json_get battery.charging "$CACHE_FILE")"
   [ -n "$cpu" ] || cpu=0; [ -n "$mem_used" ] || mem_used=0; [ -n "$mem_total" ] || mem_total=0; [ -n "$bat_level" ] || bat_level=0; [ -n "$bat_charging" ] || bat_charging=false
-  if helper_stats_is_fresh; then
+  if [ "$SOURCE_MODE" = "helper-first" ] && helper_stats_is_fresh; then
     h_cpu="$(json_get cpuPercent "$HELPER_STATS_FILE")"
     h_mem_used="$(json_get memUsedBytes "$HELPER_STATS_FILE")"
     h_mem_total="$(json_get memTotalBytes "$HELPER_STATS_FILE")"

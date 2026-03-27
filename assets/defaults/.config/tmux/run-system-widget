@@ -2,6 +2,7 @@
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/helpers.sh"
+load_tmux_profile_env "$SCRIPT_DIR/profile.env"
 
 show_battery="$(get_tmux_option '@status-tmux-widget-battery' 'on')"
 show_cpu="$(get_tmux_option '@status-tmux-widget-cpu' 'on')"

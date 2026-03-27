@@ -19,6 +19,11 @@ type setupEnv struct {
 	OS       string
 }
 
+type labeledChoice struct {
+	Label string
+	Value string
+}
+
 func runSetupCommand(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -51,6 +56,10 @@ func runSetupCommand(args []string) int {
 
 	env := detectSetupEnv()
 	settings := migrateLegacyIntoTooieSettings()
+	if strings.TrimSpace(settings.Platform.Profile) == "" {
+		settings.Platform.Profile = defaultPlatformProfile(env)
+	}
+	applyProfileDefaults(&settings, settings.Platform.Profile, env)
 	if !env.IsTermux {
 		settings.Modules.TermuxAppearance = false
 	}
@@ -63,6 +72,14 @@ func runSetupCommand(args []string) int {
 		}
 		settings = next
 	}
+	normalizeTooieSettings(&settings)
+
+	snapshotID, err := captureInstallSnapshot(installManagedPaths(homeDir))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tooie setup: failed to create install snapshot: %v\n", err)
+		return 1
+	}
+	fmt.Printf("Created install snapshot: %s\n", snapshotID)
 
 	if err := saveTooieSettings(settings); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie setup: failed to write settings: %v\n", err)
@@ -97,81 +114,297 @@ func commandExists(name string) bool {
 
 func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Render("Tooie Setup")
-	sub := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Gum-powered guided setup")
+	sub := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Simple guided setup (choose and continue)")
 	fmt.Println(title)
 	fmt.Println(sub)
 	fmt.Println()
 
-	var err error
-	cur.Tmux.Mode, err = gumChoose("Tmux mode", []string{"full", "status-only"}, cur.Tmux.Mode)
-	if err != nil {
-		return cur, err
+	if strings.TrimSpace(cur.Platform.Profile) == "" {
+		cur.Platform.Profile = defaultPlatformProfile(env)
 	}
-	cur.Tmux.StatusPosition, err = gumChoose("Status position", []string{"top", "bottom"}, cur.Tmux.StatusPosition)
-	if err != nil {
-		return cur, err
-	}
-	cur.Tmux.StatusLayout, err = gumChoose("Status layout", []string{"two-line", "single-line"}, cur.Tmux.StatusLayout)
-	if err != nil {
-		return cur, err
-	}
-	if cur.Tmux.StatusLayout == "two-line" {
-		cur.Tmux.StatusSeparator, err = gumChoose("Separator line", []string{"on", "off"}, cur.Tmux.StatusSeparator)
-		if err != nil {
-			return cur, err
-		}
-	} else {
-		cur.Tmux.StatusSeparator = "off"
-	}
+	applyProfileDefaults(&cur, normalizePlatformProfile(cur.Platform.Profile), env)
 
+	step := 0
+	for {
+		switch step {
+		case 0:
+			v, back, err := gumChooseLabeled("Step 1/10: Choose your environment", platformChoices(env), cur.Platform.Profile, false)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				continue
+			}
+			applyProfileDefaults(&cur, v, env)
+			step++
+		case 1:
+			v, back, err := gumChooseSimple("Step 2/10: Tmux mode", []string{"full", "status-only"}, cur.Tmux.Mode, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Tmux.Mode = v
+			step++
+		case 2:
+			v, back, err := gumChooseSimple("Step 3/10: Status position", []string{"top", "bottom"}, cur.Tmux.StatusPosition, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Tmux.StatusPosition = v
+			step++
+		case 3:
+			v, back, err := gumChooseSimple("Step 4/10: Status layout", []string{"two-line", "single-line"}, cur.Tmux.StatusLayout, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Tmux.StatusLayout = v
+			if v == "single-line" {
+				cur.Tmux.StatusSeparator = "off"
+				step = 5
+			} else {
+				step++
+			}
+		case 4:
+			v, back, err := gumChooseSimple("Step 5/10: Separator line", []string{"on", "off"}, cur.Tmux.StatusSeparator, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Tmux.StatusSeparator = v
+			step++
+		case 5:
+			if env.IsTermux {
+				v, back, err := gumBoolWithBack("Step 6/10: Install Termux appearance files (.termux/*)?", cur.Modules.TermuxAppearance, true)
+				if err != nil {
+					return cur, err
+				}
+				if back {
+					if cur.Tmux.StatusLayout == "two-line" {
+						step = 4
+					} else {
+						step = 3
+					}
+					continue
+				}
+				cur.Modules.TermuxAppearance = v
+			} else {
+				cur.Modules.TermuxAppearance = false
+			}
+			step++
+		case 6:
+			v, back, err := gumBoolWithBack("Step 7/10: Install fish + starship theme files?", cur.Modules.ShellTheme, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Modules.ShellTheme = v
+			step++
+		case 7:
+			v, back, err := gumBoolWithBack("Step 8/10: Install peaclock theme file?", cur.Modules.PeaclockTheme, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Modules.PeaclockTheme = v
+			step++
+		case 8:
+			v, back, err := gumBoolWithBack("Step 9/10: Configure btop helper module?", cur.Modules.BtopHelper, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Modules.BtopHelper = v
+			if !cur.Modules.BtopHelper {
+				cur.Privileged.Runner = "auto"
+				step = 10
+			} else {
+				step++
+			}
+		case 9:
+			v, back, err := gumChooseSimple("Step 10/10: Privileged runner", []string{"auto", "rish", "su", "tsu"}, cur.Privileged.Runner, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Privileged.Runner = v
+			step++
+		default:
+			fmt.Println()
+			fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render("Summary"))
+			fmt.Printf("  profile: %s\n", cur.Platform.Profile)
+			fmt.Printf("  tmux mode: %s\n", cur.Tmux.Mode)
+			fmt.Printf("  status: %s, %s, separator=%s\n", cur.Tmux.StatusPosition, cur.Tmux.StatusLayout, cur.Tmux.StatusSeparator)
+			fmt.Printf("  modules: termux=%s shell=%s peaclock=%s btop=%s\n",
+				onOffFlag(cur.Modules.TermuxAppearance),
+				onOffFlag(cur.Modules.ShellTheme),
+				onOffFlag(cur.Modules.PeaclockTheme),
+				onOffFlag(cur.Modules.BtopHelper),
+			)
+			fmt.Printf("  runner: %s\n", cur.Privileged.Runner)
+			choice, err := gumChoose("Apply now?", []string{"apply", "back", "cancel"}, "apply")
+			if err != nil {
+				return cur, err
+			}
+			switch choice {
+			case "apply":
+				normalizeTooieSettings(&cur)
+				return cur, nil
+			case "back":
+				if cur.Modules.BtopHelper {
+					step = 9
+				} else {
+					step = 8
+				}
+			default:
+				return cur, fmt.Errorf("setup cancelled")
+			}
+		}
+	}
+}
+
+func defaultPlatformProfile(env setupEnv) string {
 	if env.IsTermux {
-		cur.Modules.TermuxAppearance, err = gumBool("Install Termux appearance files (.termux/*)?", cur.Modules.TermuxAppearance)
-		if err != nil {
-			return cur, err
-		}
-	} else {
+		return "termux"
+	}
+	return "linux"
+}
+
+func platformChoices(env setupEnv) []labeledChoice {
+	if !env.IsTermux {
+		return []labeledChoice{{Label: "Linux", Value: "linux"}}
+	}
+	return []labeledChoice{
+		{Label: "Termux", Value: "termux"},
+		{Label: "Termux + root", Value: "termux-root"},
+		{Label: "Termux + Shizuku", Value: "termux-shizuku"},
+		{Label: "Termux + rish", Value: "termux-rish"},
+		{Label: "Linux", Value: "linux"},
+	}
+}
+
+func applyProfileDefaults(cur *tooieSettings, profile string, env setupEnv) {
+	profile = normalizePlatformProfile(profile)
+	cur.Platform.Profile = profile
+	switch profile {
+	case "termux-root":
+		cur.Modules.TermuxAppearance = env.IsTermux
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "su"
+	case "termux-shizuku":
+		cur.Modules.TermuxAppearance = env.IsTermux
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "auto"
+	case "termux-rish":
+		cur.Modules.TermuxAppearance = env.IsTermux
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "rish"
+	case "linux":
 		cur.Modules.TermuxAppearance = false
-	}
-	cur.Modules.ShellTheme, err = gumBool("Install fish + starship theme files?", cur.Modules.ShellTheme)
-	if err != nil {
-		return cur, err
-	}
-	cur.Modules.PeaclockTheme, err = gumBool("Install peaclock theme file?", cur.Modules.PeaclockTheme)
-	if err != nil {
-		return cur, err
-	}
-	cur.Modules.BtopHelper, err = gumBool("Configure optional btop helper module?", cur.Modules.BtopHelper)
-	if err != nil {
-		return cur, err
-	}
-	if cur.Modules.BtopHelper {
-		cur.Privileged.Runner, err = gumChoose("Privileged runner", []string{"auto", "rish", "su", "tsu"}, cur.Privileged.Runner)
-		if err != nil {
-			return cur, err
-		}
-	} else {
+		cur.Modules.BtopHelper = false
+		cur.Privileged.Runner = "auto"
+	default:
+		cur.Modules.TermuxAppearance = env.IsTermux
+		cur.Modules.BtopHelper = false
 		cur.Privileged.Runner = "auto"
 	}
+}
 
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Render("Summary"))
-	fmt.Printf("  tmux mode: %s\n", cur.Tmux.Mode)
-	fmt.Printf("  status: %s, %s, separator=%s\n", cur.Tmux.StatusPosition, cur.Tmux.StatusLayout, cur.Tmux.StatusSeparator)
-	fmt.Printf("  modules: termux=%s shell=%s peaclock=%s btop=%s\n",
-		onOffFlag(cur.Modules.TermuxAppearance),
-		onOffFlag(cur.Modules.ShellTheme),
-		onOffFlag(cur.Modules.PeaclockTheme),
-		onOffFlag(cur.Modules.BtopHelper),
-	)
-	ok, err := gumConfirm("Apply this setup now?")
+func gumChooseSimple(header string, options []string, current string, allowBack bool) (string, bool, error) {
+	choices := make([]labeledChoice, 0, len(options))
+	for _, opt := range options {
+		choices = append(choices, labeledChoice{Label: opt, Value: opt})
+	}
+	return gumChooseLabeled(header, choices, current, allowBack)
+}
+
+func gumChooseLabeled(header string, options []labeledChoice, current string, allowBack bool) (string, bool, error) {
+	reordered := reorderLabeledWithDefault(options, current)
+	labels := make([]string, 0, len(reordered)+1)
+	if allowBack {
+		labels = append(labels, "< Back")
+	}
+	valueByLabel := map[string]string{}
+	for _, item := range reordered {
+		labels = append(labels, item.Label)
+		valueByLabel[item.Label] = item.Value
+	}
+	pick, err := gumChoose(header, labels, labels[0])
 	if err != nil {
-		return cur, err
+		return "", false, err
 	}
+	if allowBack && pick == "< Back" {
+		return "", true, nil
+	}
+	v, ok := valueByLabel[pick]
 	if !ok {
-		return cur, fmt.Errorf("setup cancelled")
+		return "", false, fmt.Errorf("invalid choice: %s", pick)
 	}
-	normalizeTooieSettings(&cur)
-	return cur, nil
+	return v, false, nil
+}
+
+func gumBoolWithBack(prompt string, current bool, allowBack bool) (bool, bool, error) {
+	defaultValue := "no"
+	if current {
+		defaultValue = "yes"
+	}
+	v, back, err := gumChooseSimple(prompt, []string{"yes", "no"}, defaultValue, allowBack)
+	if err != nil {
+		return current, false, err
+	}
+	if back {
+		return current, true, nil
+	}
+	return v == "yes", false, nil
+}
+
+func reorderLabeledWithDefault(options []labeledChoice, current string) []labeledChoice {
+	if len(options) == 0 {
+		return nil
+	}
+	cur := strings.ToLower(strings.TrimSpace(current))
+	if cur == "" {
+		return options
+	}
+	out := make([]labeledChoice, 0, len(options))
+	for _, opt := range options {
+		if strings.ToLower(strings.TrimSpace(opt.Value)) == cur {
+			out = append(out, opt)
+			break
+		}
+	}
+	for _, opt := range options {
+		if len(out) > 0 && opt.Value == out[0].Value {
+			continue
+		}
+		out = append(out, opt)
+	}
+	return out
 }
 
 func gumChoose(header string, options []string, current string) (string, error) {
@@ -368,6 +601,13 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	if err := copyTree(tmuxDirSrc, filepath.Join(home, ".config", "tmux")); err != nil {
 		return err
 	}
+	profileEnvSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", "profiles", normalizePlatformProfile(settings.Platform.Profile)+".env"))
+	if err != nil {
+		return err
+	}
+	if err := copyFile(profileEnvSrc, filepath.Join(home, ".config", "tmux", "profile.env"), 0o644); err != nil {
+		return err
+	}
 
 	if settings.Tmux.Mode == "full" {
 		tmuxConfSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".tmux.conf"))
@@ -430,6 +670,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		if err := copyFile(src, currentBtopSetupScriptPath(), 0o755); err != nil {
 			return err
 		}
+		_ = exec.Command(currentBtopSetupScriptPath(), "--runner", normalizeRunner(settings.Privileged.Runner)).Run()
 	}
 
 	themeArgs := []string{
@@ -456,6 +697,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		filepath.Join(home, ".config", "tmux", "run-system-widget"),
 		filepath.Join(home, ".config", "tmux", "system-widgets"),
 		filepath.Join(home, ".config", "tmux", "widget-left"),
+		filepath.Join(home, ".config", "tmux", "profile.env"),
 		installedApplyScriptPath(),
 		installedRestoreScriptPath(),
 	}
@@ -466,4 +708,20 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	}
 
 	return nil
+}
+
+func installManagedPaths(home string) []string {
+	return []string{
+		filepath.Join(home, ".local", "bin", "tooie"),
+		filepath.Join(home, ".config", "tooie"),
+		filepath.Join(home, ".config", "tmux"),
+		filepath.Join(home, ".tmux.conf"),
+		filepath.Join(home, ".config", "starship.toml"),
+		filepath.Join(home, ".config", "fish", "config.fish"),
+		filepath.Join(home, ".config", "peaclock", "config"),
+		filepath.Join(home, ".termux", "termux.properties"),
+		filepath.Join(home, ".termux", "colors.properties"),
+		filepath.Join(home, ".termux", "font.ttf"),
+		filepath.Join(home, ".termux", "font-italic.ttf"),
+	}
 }

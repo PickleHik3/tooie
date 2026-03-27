@@ -23,6 +23,10 @@ type setupModules struct {
 	BtopHelper       bool `json:"btop_helper"`
 }
 
+type setupPlatformOptions struct {
+	Profile string `json:"profile"`
+}
+
 type privilegedOptions struct {
 	Runner string `json:"runner"`
 }
@@ -32,6 +36,7 @@ type tooieSettings struct {
 	Tmux       tmuxSetupOptions      `json:"tmux"`
 	Widgets    persistedShellSettings `json:"widgets"`
 	Modules    setupModules          `json:"modules"`
+	Platform   setupPlatformOptions  `json:"platform"`
 	Privileged privilegedOptions     `json:"privileged"`
 }
 
@@ -51,6 +56,7 @@ func defaultTooieSettings() tooieSettings {
 			PeaclockTheme:    true,
 			BtopHelper:       false,
 		},
+		Platform: setupPlatformOptions{Profile: "termux"},
 		Privileged: privilegedOptions{Runner: "auto"},
 	}
 }
@@ -85,6 +91,21 @@ func normalizeRunner(raw string) string {
 	}
 }
 
+func normalizePlatformProfile(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "termux-root", "termux_root":
+		return "termux-root"
+	case "termux-shizuku", "termux_shizuku":
+		return "termux-shizuku"
+	case "termux-rish", "termux_rish":
+		return "termux-rish"
+	case "linux":
+		return "linux"
+	default:
+		return "termux"
+	}
+}
+
 func normalizeTooieSettings(s *tooieSettings) {
 	if s.Version <= 0 {
 		s.Version = tooieSettingsVersion
@@ -93,6 +114,7 @@ func normalizeTooieSettings(s *tooieSettings) {
 	s.Tmux.StatusPosition = normalizeStatusPosition(s.Tmux.StatusPosition)
 	s.Tmux.StatusLayout = normalizeStatusLayout(s.Tmux.StatusLayout)
 	s.Tmux.StatusSeparator = normalizeSeparatorMode(s.Tmux.StatusSeparator)
+	s.Platform.Profile = normalizePlatformProfile(s.Platform.Profile)
 	s.Privileged.Runner = normalizeRunner(s.Privileged.Runner)
 	if s.Tmux.StatusLayout == "single-line" {
 		s.Tmux.StatusSeparator = "off"
