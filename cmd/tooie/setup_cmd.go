@@ -94,7 +94,8 @@ func runSetupCommand(args []string) int {
 		return 1
 	}
 
-	fmt.Printf("Setup complete. Settings written to %s\n", tooieSettingsPath())
+	clearSetupScreen()
+	printSetupNextSteps()
 	return 0
 }
 
@@ -346,19 +347,19 @@ func gumChooseSimple(header string, options []string, current string, allowBack 
 func gumChooseLabeled(header string, options []labeledChoice, current string, allowBack bool) (string, bool, error) {
 	reordered := reorderLabeledWithDefault(options, current)
 	labels := make([]string, 0, len(reordered)+1)
-	if allowBack {
-		labels = append(labels, "< Back")
-	}
 	valueByLabel := map[string]string{}
 	for _, item := range reordered {
 		labels = append(labels, item.Label)
 		valueByLabel[item.Label] = item.Value
 	}
+	if allowBack {
+		labels = append(labels, "Back")
+	}
 	pick, err := gumChoose(header, labels, labels[0])
 	if err != nil {
 		return "", false, err
 	}
-	if allowBack && pick == "< Back" {
+	if allowBack && pick == "Back" {
 		return "", true, nil
 	}
 	v, ok := valueByLabel[pick]
@@ -409,7 +410,20 @@ func reorderLabeledWithDefault(options []labeledChoice, current string) []labele
 
 func gumChoose(header string, options []string, current string) (string, error) {
 	reordered := reorderWithDefault(options, current)
-	args := []string{"choose", "--header", header}
+	args := []string{
+		"choose",
+		"--header", header,
+		"--cursor", "▶ ",
+		"--cursor-prefix", " ",
+		"--selected-prefix", " ",
+		"--unselected-prefix", " ",
+		"--header.foreground", "99",
+		"--cursor.foreground", "255",
+		"--cursor.background", "99",
+		"--selected.foreground", "255",
+		"--selected.background", "141",
+		"--item.foreground", "183",
+	}
 	args = append(args, reordered...)
 	cmd := exec.Command("gum", args...)
 	cmd.Stdin = os.Stdin
@@ -453,6 +467,25 @@ func gumConfirm(prompt string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func clearSetupScreen() {
+	cmd := exec.Command("clear")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
+
+func printSetupNextSteps() {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render("Setup complete")
+	pathLine := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Settings: " + tooieSettingsPath())
+	cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("99")).Padding(0, 1)
+	fmt.Println(title)
+	fmt.Println(pathLine)
+	fmt.Println()
+	fmt.Println("Next:")
+	fmt.Printf("  %s  open the Tooie TUI\n", cmdStyle.Render("tooie"))
+	fmt.Printf("  %s  restart terminal if something looks broken\n", cmdStyle.Render("tooie restart"))
 }
 
 func reorderWithDefault(options []string, current string) []string {

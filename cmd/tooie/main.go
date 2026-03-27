@@ -2059,9 +2059,6 @@ func (m model) interactionLineCount() int {
 	if m.pickerTarget != "" {
 		return 10
 	}
-	if m.settingMenuTarget != "" {
-		return 11
-	}
 	if m.customizing {
 		return 10
 	}
@@ -2086,6 +2083,9 @@ func (m model) settingsBlock(limit, width int) string {
 	for i := start; i < end; i++ {
 		label, state, kind, toggle := m.settingsRowView(items[i].Target)
 		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, i == m.settingIndex, width))
+		if m.settingMenuTarget == items[i].Target {
+			rows = append(rows, m.renderInlineSettingMenu(items[i].Target, width)...)
+		}
 		if i < end-1 {
 			rows = append(rows, "")
 		}
@@ -2107,6 +2107,9 @@ func (m model) settingsPageBlock(limit, width int) string {
 	for i := start; i < end; i++ {
 		label, state, kind, toggle := m.settingsRowView(items[i].Target)
 		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, len(m.settings())+i == m.settingIndex, width))
+		if m.settingMenuTarget == items[i].Target {
+			rows = append(rows, m.renderInlineSettingMenu(items[i].Target, width)...)
+		}
 		if i < end-1 {
 			rows = append(rows, "")
 		}
@@ -2142,6 +2145,36 @@ func (m model) settingsCombinedBlock(limit, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) renderInlineSettingMenu(target string, width int) []string {
+	choices := m.settingMenuChoices(target)
+	if len(choices) == 0 {
+		return nil
+	}
+	menuW := max(14, width-8)
+	lines := []string{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("    choose: ↑/↓ then Enter"),
+	}
+	for i, choice := range choices {
+		prefix := "    "
+		style := lipgloss.NewStyle().
+			Width(menuW).
+			Foreground(lipgloss.Color(m.themeRoleColor("on_surface", "#d4d8e5")))
+		if i == m.settingMenuIndex {
+			bg := m.themeRoleColor("primary", "#b18cff")
+			fg := ensureReadableTextColor(bg, m.themeRoleColor("background", "#0e1016"), "#111111")
+			prefix = "    ▶ "
+			style = style.
+				Bold(true).
+				Background(lipgloss.Color(bg)).
+				Foreground(lipgloss.Color(fg))
+		} else if choice.Value == m.currentSettingChoice(target) {
+			style = style.Bold(true).Foreground(lipgloss.Color(m.themeRoleColor("secondary", "#94e2d5")))
+		}
+		lines = append(lines, style.Render(prefix+choice.Label))
+	}
+	return lines
+}
+
 func (m model) paletteBlock(limit, width int) string {
 	lines := []string{headerChip("Palette", "13"), ""}
 	lines = append(lines, m.palettePreviewLines(width)...)
@@ -2155,7 +2188,7 @@ func (m model) paletteBlock(limit, width int) string {
 }
 
 func (m model) wallpaperBlock(limit, width int) string {
-	lines := []string{headerChip("Wallpaper", "8"), ""}
+	lines := []string{headerChip("Wallpaper", "12"), ""}
 	innerWidth := max(8, width-4)
 	imageRows := max(3, limit-len(lines))
 	framePad := 1
@@ -2185,7 +2218,7 @@ func (m model) compactPaletteWallpaperBlock(limit, width int) string {
 		lines = append(lines, "")
 	}
 	if len(lines) < limit {
-		lines = append(lines, headerChip("Wallpaper", "8"), "")
+		lines = append(lines, headerChip("Wallpaper", "12"), "")
 	}
 	remaining := limit - len(lines)
 	if remaining > 0 {
@@ -2809,7 +2842,7 @@ func (m model) palettePreviewLines(width int) []string {
 }
 
 func (m model) hasActiveOverlay() bool {
-	return m.showHints || m.showBackups || m.pickerTarget != "" || m.settingMenuTarget != "" || m.customizing || m.showApplyConfirm
+	return m.showHints || m.showBackups || m.pickerTarget != "" || m.customizing || m.showApplyConfirm
 }
 
 func (m model) previewPaletteColors() []string {
@@ -4568,7 +4601,7 @@ func (m model) renderUsageProgressBar(width int, icon string, percent float64, g
 			}
 			filledColors[i] = gradientFn(t)
 		} else {
-			filledRunes[i] = '░'
+			filledRunes[i] = '.'
 			filledColors[i] = m.themeRoleColor("on_surface", "#565f89")
 		}
 	}

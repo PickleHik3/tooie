@@ -15,6 +15,10 @@ wx="$($SCRIPT_DIR/weather-cache 2>/dev/null || true)"
 weather_color="$(get_tmux_option '@status-tmux-color-weather' 'blue')"
 [ -n "$weather_color" ] || weather_color="blue"
 [ "$weather_color" = "default" ] && weather_color="blue"
+bg_weather="$(get_tmux_option '@status-tmux-bg-weather' 'colour8')"
+bg_right="$(get_tmux_option '@status-tmux-bg-right' 'off')"
+edge_style="$(get_tmux_option '@status-tmux-edge-style' 'rounded')"
+gap_right="$(get_tmux_option '@status-tmux-widget-gap-right' 'space')"
 
 sep_color="$(get_tmux_option '@status-tmux-color-separator' 'colour8')"
 show_battery="$(get_tmux_option '@status-tmux-widget-battery' 'on')"
@@ -22,8 +26,26 @@ show_cpu="$(get_tmux_option '@status-tmux-widget-cpu' 'on')"
 show_ram="$(get_tmux_option '@status-tmux-widget-ram' 'on')"
 
 prefix=""
+if is_on "$bg_right"; then
+  if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram"; then
+    case "$gap_right" in
+      none) prefix="" ;;
+      *) prefix=" " ;;
+    esac
+  fi
+  weather_body="#[fg=${weather_color}]${wx}"
+  case "$edge_style" in
+    rounded)
+      printf '%s#[fg=%s,bg=default]#[bg=%s]%s#[fg=%s,bg=default]#[default]' "$prefix" "$bg_weather" "$bg_weather" "$weather_body" "$bg_weather"
+      ;;
+    *)
+      printf '%s#[bg=%s]%s#[bg=default]#[default]' "$prefix" "$bg_weather" "$weather_body"
+      ;;
+  esac
+  exit 0
+fi
+
 if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram"; then
   prefix="#[fg=${sep_color}] |#[default] "
 fi
-
 printf '%s#[fg=%s]%s#[default]' "$prefix" "$weather_color" "$wx"

@@ -26,33 +26,33 @@ const (
 )
 
 type themeApplyConfig struct {
-	Mode          string
-	SchemeType    string
-	ThemeSource   string
-	PresetFamily  string
-	PresetVariant string
-	MatugenBin    string
-	StatusPalette string
-	StatusTheme   string
-	StatusPosition string
-	StatusLayout   string
+	Mode            string
+	SchemeType      string
+	ThemeSource     string
+	PresetFamily    string
+	PresetVariant   string
+	MatugenBin      string
+	StatusPalette   string
+	StatusTheme     string
+	StatusPosition  string
+	StatusLayout    string
 	StatusSeparator string
-	StyleFamily   string
-	Profile       string
-	TextColor     string
-	CursorColor   string
-	PreviewOnly   bool
-	ReuseBackupID string
-	AnsiRed       string
-	AnsiGreen     string
-	AnsiYellow    string
-	AnsiBlue      string
-	AnsiMagenta   string
-	AnsiCyan      string
-	WidgetBattery bool
-	WidgetCPU     bool
-	WidgetRAM     bool
-	WidgetWeather bool
+	StyleFamily     string
+	Profile         string
+	TextColor       string
+	CursorColor     string
+	PreviewOnly     bool
+	ReuseBackupID   string
+	AnsiRed         string
+	AnsiGreen       string
+	AnsiYellow      string
+	AnsiBlue        string
+	AnsiMagenta     string
+	AnsiCyan        string
+	WidgetBattery   bool
+	WidgetCPU       bool
+	WidgetRAM       bool
+	WidgetWeather   bool
 }
 
 func runThemeCommand(args []string) int {
@@ -676,22 +676,22 @@ func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg := themeApplyConfig{
-		Mode:          "auto",
-		SchemeType:    "scheme-tonal-spot",
-		ThemeSource:   "wallpaper",
-		PresetFamily:  "catppuccin",
-		PresetVariant: "mocha",
-		StatusPalette: "default",
-		StatusTheme:   "default",
-		StatusPosition: "top",
-		StatusLayout:   "two-line",
+		Mode:            "auto",
+		SchemeType:      "scheme-tonal-spot",
+		ThemeSource:     "wallpaper",
+		PresetFamily:    "catppuccin",
+		PresetVariant:   "mocha",
+		StatusPalette:   "default",
+		StatusTheme:     "default",
+		StatusPosition:  "top",
+		StatusLayout:    "two-line",
 		StatusSeparator: "on",
-		StyleFamily:   "adaptive",
-		Profile:       "adaptive",
-		WidgetBattery: true,
-		WidgetCPU:     true,
-		WidgetRAM:     true,
-		WidgetWeather: true,
+		StyleFamily:     "adaptive",
+		Profile:         "adaptive",
+		WidgetBattery:   true,
+		WidgetCPU:       true,
+		WidgetRAM:       true,
+		WidgetWeather:   true,
 	}
 	widgetBattery := "on"
 	widgetCPU := "on"
@@ -1143,7 +1143,7 @@ func renderTmuxBlock(payload computedPayload) string {
 		// One outer rounded capsule for the full window list, with active window inset as its own pill.
 		rightGap = "space"
 		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag,#I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
-		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
+		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG)
 	case "rectangle":
 		edgeStyle = "flat"
 		leftEdgeStyle = "flat"
@@ -1185,6 +1185,9 @@ set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{clien
 set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
 %s
 set -g window-status-separator ""
+set -g base-index 1
+setw -g pane-base-index 1
+set -g renumber-windows on
 set -g window-status-format "%s"
 set -g window-status-current-format "%s"
 set -g window-status-activity-style "fg=%s,bold"
