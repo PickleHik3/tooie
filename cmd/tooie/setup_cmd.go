@@ -27,6 +27,8 @@ type labeledChoice struct {
 	Value string
 }
 
+var setupUseGumUI = true
+
 func runSetupCommand(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -39,14 +41,12 @@ func runSetupCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "tooie setup: unexpected arguments")
 		return 2
 	}
+	env := detectSetupEnv()
+	setupUseGumUI = shouldUseGumUI(env)
 	if !*nonInteractive {
 		info, err := os.Stdin.Stat()
 		if err != nil || (info.Mode()&os.ModeCharDevice) == 0 {
 			fmt.Fprintln(os.Stderr, "tooie setup: interactive mode requires a TTY; rerun in a terminal or use --non-interactive")
-			return 2
-		}
-		if !commandExists("gum") {
-			fmt.Fprintln(os.Stderr, "tooie setup: gum is required for interactive setup. Install gum or use --non-interactive")
 			return 2
 		}
 	}
@@ -58,7 +58,6 @@ func runSetupCommand(args []string) int {
 		}
 	}
 
-	env := detectSetupEnv()
 	settings := migrateLegacyIntoTooieSettings()
 	if strings.TrimSpace(settings.Platform.Profile) == "" {
 		settings.Platform.Profile = defaultPlatformProfile(env)
@@ -110,6 +109,20 @@ func detectSetupEnv() setupEnv {
 		HasTmux:  commandExists("tmux"),
 		OS:       runtime.GOOS,
 	}
+}
+
+func shouldUseGumUI(env setupEnv) bool {
+	if strings.TrimSpace(os.Getenv("TOOIE_SETUP_NO_GUM")) == "1" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("TOOIE_SETUP_FORCE_GUM")) == "1" {
+		return commandExists("gum")
+	}
+	// Gum is unstable on some Termux builds; default to safe text prompts there.
+	if env.IsTermux {
+		return false
+	}
+	return commandExists("gum")
 }
 
 func commandExists(name string) bool {
@@ -414,6 +427,9 @@ func reorderLabeledWithDefault(options []labeledChoice, current string) []labele
 
 func gumChoose(header string, options []string, current string) (string, error) {
 	reordered := reorderWithDefault(options, current)
+	if !setupUseGumUI || !commandExists("gum") {
+		return promptChooseFallback(header, reordered)
+	}
 	args := []string{
 		"choose",
 		"--header", header,
