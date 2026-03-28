@@ -517,6 +517,9 @@ func reorderWithDefault(options []string, current string) []string {
 
 func resolveRepoAssetPath(rel string) (string, error) {
 	candidates := []string{}
+	if repo := strings.TrimSpace(os.Getenv("TOOIE_REPO_DIR")); repo != "" {
+		candidates = append(candidates, filepath.Join(repo, rel))
+	}
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), rel))
 	}
@@ -573,7 +576,9 @@ func buildAndReplaceInstalledBinary() error {
 	}
 	goModPath, err := resolveRepoAssetPath("go.mod")
 	if err != nil {
-		return err
+		// Setup can run from an installed binary outside a checkout.
+		// When repo assets are unavailable, skip self-rebuild.
+		return nil
 	}
 	repoRoot := filepath.Dir(goModPath)
 	home, err := os.UserHomeDir()

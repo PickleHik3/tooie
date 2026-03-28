@@ -49,4 +49,4 @@ log "Building tooie binary..."
 chmod +x "$BIN_DIR/tooie"
 
 log "Launching guided setup..."
-exec "$BIN_DIR/tooie" setup
+exec env TOOIE_REPO_DIR="$REPO_DIR" "$BIN_DIR/tooie" setup
