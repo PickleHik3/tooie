@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -432,7 +434,8 @@ func gumChoose(header string, options []string, current string) (string, error) 
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		// Fallback for environments where gum/bubbletea crashes.
+		return promptChooseFallback(header, reordered)
 	}
 	pick := strings.TrimSpace(string(out))
 	if pick == "" {
@@ -442,6 +445,32 @@ func gumChoose(header string, options []string, current string) (string, error) 
 		return "", fmt.Errorf("no choice selected")
 	}
 	return pick, nil
+}
+
+func promptChooseFallback(header string, options []string) (string, error) {
+	if len(options) == 0 {
+		return "", fmt.Errorf("no options provided")
+	}
+	fmt.Println()
+	fmt.Println(header)
+	for i, opt := range options {
+		fmt.Printf("  %d) %s\n", i+1, opt)
+	}
+	fmt.Printf("Select [1-%d] (default 1): ", len(options))
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return options[0], nil
+	}
+	n, convErr := strconv.Atoi(line)
+	if convErr != nil || n < 1 || n > len(options) {
+		return options[0], nil
+	}
+	return options[n-1], nil
 }
 
 func gumBool(prompt string, current bool) (bool, error) {
