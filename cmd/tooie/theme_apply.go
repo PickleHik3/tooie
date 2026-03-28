@@ -1126,7 +1126,7 @@ func renderTmuxBlock(payload computedPayload) string {
 		// One outer rounded capsule for the full window list, with active window inset as its own pill.
 		leftGap = " "
 		rightGap = "space"
-		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag,#I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
+		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag,#I ,#{?window_end_flag,#I,#I }}#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
 		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
 	case "rectangle":
 		edgeStyle = "flat"
