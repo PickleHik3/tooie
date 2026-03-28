@@ -49,10 +49,11 @@ func runSetupCommand(args []string) int {
 		}
 	}
 
-	// TODO(release): remove self-rebuild from setup flow once packaging is finalized.
-	if err := buildAndReplaceInstalledBinary(); err != nil {
-		fmt.Fprintf(os.Stderr, "tooie setup: failed to rebuild/install binary: %v\n", err)
-		return 1
+	// Install script already builds tooie. Keep setup rebuild opt-in for debugging only.
+	if strings.TrimSpace(os.Getenv("TOOIE_SETUP_REBUILD")) == "1" {
+		if err := buildAndReplaceInstalledBinary(); err != nil {
+			fmt.Fprintf(os.Stderr, "tooie setup: warning: rebuild skipped: %v\n", err)
+		}
 	}
 
 	env := detectSetupEnv()
