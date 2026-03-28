@@ -70,6 +70,21 @@ cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(now_epoch)
 cleanup_stale_lock(){ [ -d "$LOCK_DIR" ] || return 0; mt="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"; now="$(now_epoch)"; [ "$mt" -gt 0 ] && [ $((now-mt)) -gt "$LOCK_STALE_SECONDS" ] && rmdir "$LOCK_DIR" 2>/dev/null || true; }
 is_on(){ case "$1" in 1|on|true|yes|enabled) return 0;; *) return 1;; esac; }
 
+is_waydroid_env(){
+  if [ -f "/run/waydroid-container" ] || [ -d "/run/waydroid" ]; then
+    return 0
+  fi
+  if command -v getprop >/dev/null 2>&1; then
+    for k in ro.hardware ro.product.manufacturer ro.product.brand ro.product.device ro.build.display.id; do
+      v="$(getprop "$k" 2>/dev/null || true)"
+      case "$v" in
+        *[Ww]aydroid*|*[Ww]AYDROID*) return 0 ;;
+      esac
+    done
+  fi
+  return 1
+}
+
 helper_stats_is_fresh(){
   [ -f "$HELPER_STATS_FILE" ] || return 1
   now="$(now_epoch)"
@@ -212,6 +227,11 @@ collect_local_json(){
   mem_total_b=$((mem_total_kb * 1024)); mem_avail_b=$((mem_avail_kb * 1024)); mem_used_b=$((mem_total_b - mem_avail_b)); [ "$mem_used_b" -lt 0 ] && mem_used_b=0
   bat_level=0; bat_charging=false
   if [ "$want_bat" = "1" ]; then
+    use_termux_api="$USE_TERMUX_API_BATTERY"
+    if [ "$use_termux_api" = "0" ] && is_waydroid_env; then
+      use_termux_api=1
+    fi
+
     # Prefer sysfs battery info to avoid noisy Termux:API socket failures from background tmux updates.
     binfo="$(read_sysfs_battery 2>/dev/null || true)"
     if [ -n "$binfo" ]; then
@@ -222,7 +242,7 @@ collect_local_json(){
       fi
     fi
 
-    if [ "$bat_level" -eq 0 ] && [ "$USE_TERMUX_API_BATTERY" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
+    if [ "$bat_level" -eq 0 ] && [ "$use_termux_api" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
       if command -v timeout >/dev/null 2>&1; then bjson="$(timeout 1 termux-battery-status 2>/dev/null || true)"; else bjson="$(termux-battery-status 2>/dev/null || true)"; fi
       if [ -n "$bjson" ]; then
         if command -v jq >/dev/null 2>&1; then
