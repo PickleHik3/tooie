@@ -88,6 +88,80 @@ json_get(){
   fi
 }
 
+find_sysfs_battery_dir(){
+  for d in /sys/class/power_supply/*; do
+    [ -d "$d" ] || continue
+    if [ -r "$d/type" ]; then
+      t="$(cat "$d/type" 2>/dev/null || true)"
+      case "$t" in
+        [Bb][Aa][Tt][Tt][Ee][Rr][Yy]) printf "%s" "$d"; return 0 ;;
+      esac
+    fi
+  done
+  for n in battery Battery BAT0 bat0 bms BMS; do
+    d="/sys/class/power_supply/$n"
+    if [ -d "$d" ]; then
+      printf "%s" "$d"
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_sysfs_battery(){
+  bdir="$(find_sysfs_battery_dir 2>/dev/null || true)"
+  [ -n "$bdir" ] || return 1
+
+  level=""
+  charging=0
+
+  if [ -r "$bdir/capacity" ]; then
+    lvl="$(cat "$bdir/capacity" 2>/dev/null || true)"
+    case "$lvl" in ''|*[!0-9]*) lvl="";; esac
+    if [ -n "$lvl" ]; then
+      level="$lvl"
+    fi
+  fi
+
+  if [ -z "$level" ]; then
+    now=""
+    full=""
+    for f in charge_now energy_now; do
+      if [ -r "$bdir/$f" ]; then
+        v="$(cat "$bdir/$f" 2>/dev/null || true)"
+        case "$v" in ''|*[!0-9]*) v="";; esac
+        if [ -n "$v" ]; then
+          now="$v"
+          break
+        fi
+      fi
+    done
+    for f in charge_full energy_full; do
+      if [ -r "$bdir/$f" ]; then
+        v="$(cat "$bdir/$f" 2>/dev/null || true)"
+        case "$v" in ''|*[!0-9]*) v="";; esac
+        if [ -n "$v" ] && [ "$v" -gt 0 ]; then
+          full="$v"
+          break
+        fi
+      fi
+    done
+    if [ -n "$now" ] && [ -n "$full" ] && [ "$full" -gt 0 ]; then
+      level="$(awk -v n="$now" -v f="$full" 'BEGIN{p=(n*100)/f; if(p<0)p=0; if(p>100)p=100; printf "%.0f", p}')"
+    fi
+  fi
+
+  if [ -r "$bdir/status" ]; then
+    st="$(cat "$bdir/status" 2>/dev/null || true)"
+    case "$st" in
+      [Cc][Hh][Aa][Rr][Gg][Ii][Nn][Gg]|[Ff][Uu][Ll][Ll]) charging=1 ;;
+    esac
+  fi
+
+  [ -n "$level" ] || return 1
+  printf "%s|%s" "$level" "$charging"
+}
+
 collect_backend_json(){
   want_bat="$1"
   command -v launcherctl >/dev/null 2>&1 || return 1
@@ -139,15 +213,12 @@ collect_local_json(){
   bat_level=0; bat_charging=false
   if [ "$want_bat" = "1" ]; then
     # Prefer sysfs battery info to avoid noisy Termux:API socket failures from background tmux updates.
-    cap_file="/sys/class/power_supply/battery/capacity"
-    status_file="/sys/class/power_supply/battery/status"
-    if [ -r "$cap_file" ]; then
-      lvl="$(cat "$cap_file" 2>/dev/null || true)"
-      case "$lvl" in ''|*[!0-9]*) lvl="";; esac
-      if [ -n "$lvl" ]; then
-        bat_level="$lvl"
-        st="$(cat "$status_file" 2>/dev/null || true)"
-        case "$st" in [Cc][Hh][Aa][Rr][Gg][Ii][Nn][Gg]|[Ff][Uu][Ll][Ll]) bat_charging=true;; esac
+    binfo="$(read_sysfs_battery 2>/dev/null || true)"
+    if [ -n "$binfo" ]; then
+      bat_level="${binfo%%|*}"
+      bchg="${binfo#*|}"
+      if [ "$bchg" = "1" ]; then
+        bat_charging=true
       fi
     fi
 
