@@ -297,7 +297,7 @@ render_widgets(){
       flat)
         battery_body=" ${battery_segment} "
         if [ "$bat_charging" = "true" ]; then
-          battery_body="#[bg=${BG_CHARGING},fg=${FG_ON_ACCENT}] ${BAT_CHARGING_ICON} #[bg=${BG_BATTERY}] ${battery_segment} "
+          battery_body="#[bg=${BG_BATTERY},fg=${FG_ON_ACCENT}] ${BAT_CHARGING_ICON} #[bg=${BG_BATTERY}] ${battery_segment} "
         fi
         battery_segment="$(pill_wrap "$BG_BATTERY" "$battery_body")"
         cpu_segment="$(pill_wrap "$BG_CPU" " ${cpu_segment} ")"
@@ -306,7 +306,7 @@ render_widgets(){
       *)
         battery_body="${battery_segment} "
         if [ "$bat_charging" = "true" ]; then
-          battery_body="#[bg=${BG_CHARGING},fg=${FG_ON_ACCENT}]${BAT_CHARGING_ICON} #[bg=${BG_BATTERY}]${battery_segment} "
+          battery_body="#[bg=${BG_BATTERY},fg=${FG_ON_ACCENT}]${BAT_CHARGING_ICON} #[bg=${BG_BATTERY}]${battery_segment} "
         fi
         battery_segment="$(pill_wrap "$BG_BATTERY" "$battery_body")"
         cpu_segment="$(pill_wrap "$BG_CPU" "$cpu_segment")"
