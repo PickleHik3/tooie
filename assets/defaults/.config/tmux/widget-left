@@ -16,13 +16,25 @@ bg_copy="$(get_tmux_option '@status-tmux-left-bg-copy' "$bg_session")"
 fg_on_accent="$(get_tmux_option '@status-tmux-fg-on-accent' 'colour15')"
 session_pad="$(get_tmux_option '@status-tmux-left-session-pad' 'none')"
 
-label=" ${session_name} "
+if [ "$edge_style" = "rounded" ]; then
+  label="${session_name}"
+else
+  label=" ${session_name} "
+fi
 bg="$bg_session"
 if [ "$is_prefix" = "1" ]; then
-  label=" PRFX "
+  if [ "$edge_style" = "rounded" ]; then
+    label="PRFX"
+  else
+    label=" PRFX "
+  fi
   bg="$bg_prefix"
 elif [ "$in_copy_mode" = "1" ]; then
-  label=" COPY "
+  if [ "$edge_style" = "rounded" ]; then
+    label="COPY"
+  else
+    label=" COPY "
+  fi
   bg="$bg_copy"
 fi
 
