@@ -58,3 +58,15 @@ func TestApplyInstallPlanLinuxRejectsTermuxItem(t *testing.T) {
 		t.Fatalf("expected linux + termux item to fail")
 	}
 }
+
+func TestApplyInstallPlanLinuxNoneKeepsCPUWidgetOn(t *testing.T) {
+	settings := defaultTooieSettings()
+	env := setupEnv{IsTermux: false}
+	plan := setupInstallPlan{Platform: "linux", Backend: "none", ThemeItems: "all"}
+	if err := applyInstallPlan(&settings, env, plan); err != nil {
+		t.Fatalf("applyInstallPlan() error: %v", err)
+	}
+	if !settings.Widgets.WidgetCPU {
+		t.Fatalf("linux + backend none should keep cpu widget on")
+	}
+}

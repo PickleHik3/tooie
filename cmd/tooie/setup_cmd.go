@@ -124,7 +124,11 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 	case "none":
 		cur.Modules.BtopHelper = false
 		cur.Privileged.Runner = "auto"
-		cur.Widgets.WidgetCPU = false
+		if plan.Platform == "termux" {
+			cur.Widgets.WidgetCPU = false
+		} else {
+			cur.Widgets.WidgetCPU = true
+		}
 	case "rish":
 		cur.Modules.BtopHelper = true
 		cur.Privileged.Runner = "rish"
