@@ -3826,12 +3826,8 @@ func wallpaperCacheFingerprint() string {
 }
 
 func preferredWallpaperPath() string {
-	if st, err := os.Stat(defaultWall); err == nil && st.Size() > 0 {
-		return defaultWall
-	}
-	fallback := filepath.Join(homeDir, ".termux", "background", "background.jpeg")
-	if st, err := os.Stat(fallback); err == nil && st.Size() > 0 {
-		return fallback
+	if wall, ok := bestWallpaperPath(homeDir); ok {
+		return wall
 	}
 	return defaultWall
 }

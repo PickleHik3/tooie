@@ -1789,34 +1789,10 @@ func pruneOldBackups(root string, keep int) error {
 }
 
 func resolveWallpaperPath() (string, error) {
-	if _, err := os.Stat(defaultWall); err == nil {
-		return defaultWall, nil
+	if wall, ok := bestWallpaperPath(homeDir); ok {
+		return wall, nil
 	}
-	bgDir := filepath.Join(homeDir, ".termux", "background")
-	ents, err := os.ReadDir(bgDir)
-	if err != nil {
-		return "", fmt.Errorf("wallpaper not found at %s", defaultWall)
-	}
-	type fi struct {
-		name string
-		mod  time.Time
-	}
-	items := []fi{}
-	for _, e := range ents {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		items = append(items, fi{name: e.Name(), mod: info.ModTime()})
-	}
-	if len(items) == 0 {
-		return "", fmt.Errorf("no wallpapers found in %s", bgDir)
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].mod.After(items[j].mod) })
-	return filepath.Join(bgDir, items[0].name), nil
+	return "", fmt.Errorf("wallpaper not found; set TOOIE_WALLPAPER=/path/to/image or place one in ~/Pictures")
 }
 
 func resolveMatugen(given string) (string, error) {

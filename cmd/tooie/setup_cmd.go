@@ -881,6 +881,12 @@ source-file "$HOME/.config/tooie/configs/tmux/tmux.conf"
 }
 
 func stageManagedConfigs(settings tooieSettings) error {
+	fontsSrc, err := resolveRepoAssetPath("fonts")
+	if err == nil {
+		if err := copyTree(fontsSrc, filepath.Join(tooieConfigDir, "fonts")); err != nil {
+			return err
+		}
+	}
 	tmuxDirSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux"))
 	if err != nil {
 		return err
