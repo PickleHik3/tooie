@@ -70,6 +70,19 @@ detect_pm() {
   return 1
 }
 
+pm_has_package() {
+  pm="$1"
+  pkg_name="$2"
+  case "$pm" in
+    pacman)
+      pacman -Si "$pkg_name" >/dev/null 2>&1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 map_pkg_name() {
   pm="$1"
   logical="$2"
@@ -254,13 +267,18 @@ fi
 
 logical_deps="$(resolve_logical_deps "$theme_items")"
 resolved_pkgs=""
+missing_pkgs=""
 for logical in $logical_deps; do
   pkg_name="$(map_pkg_name "$pm" "$logical")"
   if [ -z "$pkg_name" ]; then
     err "No package mapping for '$logical' on '$pm'."
     exit 1
   fi
-  resolved_pkgs="$(append_unique_word "$resolved_pkgs" "$pkg_name")"
+  if pm_has_package "$pm" "$pkg_name"; then
+    resolved_pkgs="$(append_unique_word "$resolved_pkgs" "$pkg_name")"
+  else
+    missing_pkgs="$(append_unique_word "$missing_pkgs" "$pkg_name")"
+  fi
 done
 
 printf '\nInstallation summary\n'
@@ -271,6 +289,9 @@ fi
 printf '  themed items:  %s\n' "$theme_items"
 printf '  package mgr:   %s\n' "$pm"
 printf '  packages:      %s\n' "$resolved_pkgs"
+if [ -n "$missing_pkgs" ]; then
+  printf '  unavailable:   %s (will be skipped)\n' "$missing_pkgs"
+fi
 printf '  binary target: %s\n' "$BIN_DIR/tooie"
 printf '  config root:   %s\n' "$HOME_DIR/.config/tooie"
 
