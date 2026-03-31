@@ -16,13 +16,13 @@ prompt_menu() {
   if [ "$#" -eq 0 ]; then
     return 1
   fi
-  printf '\n%s\n' "$prompt"
+  printf '\n%s\n' "$prompt" >&2
   idx=1
   for item in "$@"; do
-    printf '  %d) %s\n' "$idx" "$item"
+    printf '  %d) %s\n' "$idx" "$item" >&2
     idx=$((idx + 1))
   done
-  printf 'Select [1-%d] (default %s): ' "$#" "$default_idx"
+  printf 'Select [1-%d] (default %s): ' "$#" "$default_idx" >&2
   IFS= read -r choice || choice=""
   if [ -z "$choice" ]; then
     choice="$default_idx"
@@ -42,7 +42,7 @@ prompt_menu() {
 
 confirm_yes_no() {
   prompt="$1"
-  printf '%s ' "$prompt"
+  printf '%s ' "$prompt" >&2
   IFS= read -r answer || answer=""
   case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
     y|yes) return 0 ;;
