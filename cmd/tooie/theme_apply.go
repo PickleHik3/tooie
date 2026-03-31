@@ -26,33 +26,37 @@ const (
 )
 
 type themeApplyConfig struct {
-	Mode            string
-	SchemeType      string
-	ThemeSource     string
-	PresetFamily    string
-	PresetVariant   string
-	MatugenBin      string
-	StatusPalette   string
-	StatusTheme     string
-	StatusPosition  string
-	StatusLayout    string
-	StatusSeparator string
-	StyleFamily     string
-	Profile         string
-	TextColor       string
-	CursorColor     string
-	PreviewOnly     bool
-	ReuseBackupID   string
-	AnsiRed         string
-	AnsiGreen       string
-	AnsiYellow      string
-	AnsiBlue        string
-	AnsiMagenta     string
-	AnsiCyan        string
-	WidgetBattery   bool
-	WidgetCPU       bool
-	WidgetRAM       bool
-	WidgetWeather   bool
+	Mode                 string
+	SchemeType           string
+	ThemeSource          string
+	PresetFamily         string
+	PresetVariant        string
+	MatugenBin           string
+	StatusPalette        string
+	StatusTheme          string
+	StatusPosition       string
+	StatusLayout         string
+	StatusSeparator      string
+	StyleFamily          string
+	Profile              string
+	ExtractSourceIndex   int
+	ExtractPrefer        string
+	ExtractFallbackColor string
+	ExtractResizeFilter  string
+	TextColor            string
+	CursorColor          string
+	PreviewOnly          bool
+	ReuseBackupID        string
+	AnsiRed              string
+	AnsiGreen            string
+	AnsiYellow           string
+	AnsiBlue             string
+	AnsiMagenta          string
+	AnsiCyan             string
+	WidgetBattery        bool
+	WidgetCPU            bool
+	WidgetRAM            bool
+	WidgetWeather        bool
 }
 
 func runThemeCommand(args []string) int {
@@ -131,7 +135,7 @@ func runThemeApplyCommand(args []string) int {
 	meta["theme_source"] = cfg.ThemeSource
 	meta["mode"] = cfg.Mode
 	meta["effective_mode"] = payload.EffectiveMode
-	meta["type"] = cfg.SchemeType
+	meta["type"] = schemeTypeLabel(cfg.SchemeType)
 	meta["matugen_bin"] = cfg.MatugenBin
 	meta["text_color_override"] = strings.TrimSpace(cfg.TextColor)
 	meta["cursor_color_override"] = strings.TrimSpace(cfg.CursorColor)
@@ -140,15 +144,20 @@ func runThemeApplyCommand(args []string) int {
 	meta["status_position"] = cfg.StatusPosition
 	meta["status_layout"] = cfg.StatusLayout
 	meta["status_separator"] = cfg.StatusSeparator
+	meta["extract_source_index"] = fmt.Sprintf("%d", cfg.ExtractSourceIndex)
+	meta["extract_prefer"] = strings.TrimSpace(cfg.ExtractPrefer)
+	meta["extract_fallback_color"] = strings.TrimSpace(cfg.ExtractFallbackColor)
+	meta["extract_resize_filter"] = strings.TrimSpace(cfg.ExtractResizeFilter)
 	meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
 	meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	if cfg.ThemeSource != "preset" {
 		family := canonicalProfile(cfg.StyleFamily)
-		meta["style_family"] = family
-		meta["style_family_version"] = "1"
+		meta["style_family"] = family // backward compatibility for existing readers
+		meta["style_family_version"] = "2"
 		meta["profile"] = family // backward compatibility for existing readers
+		meta["extraction_preset"] = family
 	}
 	meta["ansi_red_override"] = strings.TrimSpace(cfg.AnsiRed)
 	meta["ansi_green_override"] = strings.TrimSpace(cfg.AnsiGreen)
@@ -340,7 +349,19 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	metrics := analyzeWallpaperLuma(wallpaper)
 	candidates, err := collectMatugenCandidates(cfg, wallpaper, mode, metrics)
 	if err != nil {
-		return nil, "", nil, err
+		fallback := normalizeSchemeType(defaultPaletteType)
+		if normalizeSchemeType(cfg.SchemeType) != fallback {
+			cfg2 := cfg
+			cfg2.SchemeType = fallback
+			candidates, err = collectMatugenCandidates(cfg2, wallpaper, mode, metrics)
+			if err == nil {
+				meta["palette_fallback"] = schemeTypeLabel(fallback)
+				meta["palette_requested"] = schemeTypeLabel(cfg.SchemeType)
+			}
+		}
+		if err != nil {
+			return nil, "", nil, err
+		}
 	}
 	if len(candidates) == 0 {
 		return nil, "", nil, fmt.Errorf("no matugen candidates evaluated")
@@ -373,7 +394,7 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	meta["auto_scene_class"] = sceneClass
 	meta["auto_mode_gate"] = modeGate
 	meta["auto_decision_reason"] = "deep-score"
-	meta["auto_selected_scheme"] = best.Scheme
+	meta["auto_selected_scheme"] = schemeTypeLabel(best.Scheme)
 	meta["auto_selected_source_index"] = fmt.Sprintf("%d", best.SourceIndex)
 	meta["auto_selected_score"] = fmt.Sprintf("%.4f", best.Score)
 	meta["auto_selected_readability"] = fmt.Sprintf("%.4f", best.Readability)
@@ -445,13 +466,13 @@ type matugenCandidate struct {
 func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metrics autoDecisionMetrics) ([]matugenCandidate, error) {
 	schemes := pickSchemeCandidates(cfg.SchemeType)
 	modes := autoCandidateModes(mode, metrics)
-	indices := sourceIndexCandidates(cfg.StyleFamily)
+	indices := sourceIndexCandidates(cfg)
 	candidates := make([]matugenCandidate, 0, len(modes)*len(schemes)*len(indices))
 	var lastErr error
 	for _, m := range modes {
 		for _, s := range schemes {
 			for _, idx := range indices {
-				raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, m, s, idx)
+				raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, m, s, idx, cfg.ExtractPrefer, cfg.ExtractFallbackColor, cfg.ExtractResizeFilter)
 				if err != nil {
 					lastErr = err
 					continue
@@ -470,7 +491,7 @@ func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metr
 					Roles:       roles,
 					Readability: readability,
 				}
-				c.Score = scoreCandidate(c, metrics, cfg.StyleFamily)
+				c.Score = scoreCandidate(c, metrics)
 				candidates = append(candidates, c)
 			}
 		}
@@ -488,8 +509,7 @@ func autoCandidateModes(mode string, metrics autoDecisionMetrics) []string {
 	if mode != "auto" {
 		return []string{mode}
 	}
-	// Readability-first policy for terminal use: auto always resolves to dark candidates.
-	return []string{"dark"}
+	return []string{"dark", "light"}
 }
 
 func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string) {
@@ -506,23 +526,34 @@ func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string
 }
 
 func pickSchemeCandidates(schemeType string) []string {
-	s := strings.TrimSpace(schemeType)
+	s := normalizeSchemeType(schemeType)
 	if s != "" {
 		return []string{s}
 	}
-	return []string{"scheme-expressive", "scheme-tonal-spot", "scheme-fidelity", "scheme-content"}
+	return []string{
+		"scheme-tonal-spot",
+		"scheme-expressive",
+		"scheme-fidelity",
+		"scheme-content",
+		"scheme-vibrant",
+		"scheme-neutral",
+		"scheme-monochrome",
+		"scheme-rainbow",
+		"scheme-fruit-salad",
+	}
 }
 
-func sourceIndexCandidates(styleFamily string) []int {
-	if canonicalProfile(styleFamily) == "adaptive" {
-		// Keep adaptive anchored to the strongest wallpaper seed colors.
-		return []int{0, 1, 2}
+func sourceIndexCandidates(cfg themeApplyConfig) []int {
+	if cfg.ExtractSourceIndex >= 0 {
+		return []int{cfg.ExtractSourceIndex}
+	}
+	if strings.TrimSpace(cfg.ExtractPrefer) != "" {
+		return []int{-1}
 	}
 	return []int{0, 1, 2, 3, 4}
 }
 
-func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics, styleFamily string) float64 {
-	isAdaptive := canonicalProfile(styleFamily) == "adaptive"
+func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	bg := getRoleOr(c.Roles, "background", "#1a1b26")
 	fg := getRoleOr(c.Roles, "on_background", "#c0caf5")
 	fgContrast := contrastRatioHex(fg, bg)
@@ -552,9 +583,7 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics, styleFamily
 	sourcePenalty := 0.0
 	if c.SourceIndex > 0 {
 		sourcePenalty = 0.22 * float64(c.SourceIndex)
-		if isAdaptive {
-			sourcePenalty = 0.42 * float64(c.SourceIndex)
-		} else if metrics.P90Sat > 0.45 {
+		if metrics.P90Sat > 0.45 {
 			sourcePenalty *= 0.65
 		}
 	}
@@ -562,18 +591,22 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics, styleFamily
 	switch c.Scheme {
 	case "scheme-expressive":
 		schemeBias = 0.22 + (0.35 * clamp01(metrics.P90Sat-0.32))
-		if isAdaptive {
-			schemeBias -= 0.20
-		}
 	case "scheme-fidelity", "scheme-content":
 		schemeBias = 0.16 + (0.28 * clamp01(metrics.P90Sat-0.28))
+	case "scheme-vibrant":
+		schemeBias = 0.25 + (0.24 * clamp01(metrics.P90Sat-0.30))
+	case "scheme-neutral":
+		schemeBias = 0.14 + (0.12 * clamp01(0.42-metrics.P90Sat))
+	case "scheme-monochrome":
+		schemeBias = 0.12 + (0.10 * clamp01(0.44-metrics.P90Sat))
+	case "scheme-rainbow":
+		schemeBias = 0.20 + (0.20 * clamp01(metrics.P90Sat-0.24))
+	case "scheme-fruit-salad":
+		schemeBias = 0.18 + (0.20 * clamp01(metrics.P90Sat-0.24))
 	case "scheme-tonal-spot":
 		schemeBias = 0.18 + (0.25 * clamp01(0.40-metrics.P90Sat))
 	}
-	affinityWeight := 0.75
-	if isAdaptive {
-		affinityWeight = 1.45
-	}
+	affinityWeight := 1.0
 	return (c.Readability * 1.85) + (fgContrast * 0.9) + (accentMin * 0.85) + (ansiSep * 0.8) + (wallpaperAffinity * affinityWeight) + sceneFit + schemeBias - sourcePenalty - modePenalty
 }
 
@@ -676,22 +709,23 @@ func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg := themeApplyConfig{
-		Mode:            "auto",
-		SchemeType:      "scheme-tonal-spot",
-		ThemeSource:     "wallpaper",
-		PresetFamily:    "catppuccin",
-		PresetVariant:   "mocha",
-		StatusPalette:   "default",
-		StatusTheme:     "default",
-		StatusPosition:  "top",
-		StatusLayout:    "two-line",
-		StatusSeparator: "on",
-		StyleFamily:     "adaptive",
-		Profile:         "adaptive",
-		WidgetBattery:   true,
-		WidgetCPU:       true,
-		WidgetRAM:       true,
-		WidgetWeather:   true,
+		Mode:               "auto",
+		SchemeType:         "tonal-spot",
+		ThemeSource:        "wallpaper",
+		PresetFamily:       "catppuccin",
+		PresetVariant:      "mocha",
+		StatusPalette:      "default",
+		StatusTheme:        "default",
+		StatusPosition:     "top",
+		StatusLayout:       "two-line",
+		StatusSeparator:    "on",
+		StyleFamily:        "auto",
+		Profile:            "auto",
+		ExtractSourceIndex: -1,
+		WidgetBattery:      true,
+		WidgetCPU:          true,
+		WidgetRAM:          true,
+		WidgetWeather:      true,
 	}
 	widgetBattery := "on"
 	widgetCPU := "on"
@@ -717,6 +751,10 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.StatusSeparator, "status-separator", cfg.StatusSeparator, "")
 	fs.StringVar(&cfg.StyleFamily, "style-family", cfg.StyleFamily, "")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "")
+	fs.IntVar(&cfg.ExtractSourceIndex, "source-color-index", cfg.ExtractSourceIndex, "")
+	fs.StringVar(&cfg.ExtractPrefer, "prefer", cfg.ExtractPrefer, "")
+	fs.StringVar(&cfg.ExtractFallbackColor, "fallback-color", cfg.ExtractFallbackColor, "")
+	fs.StringVar(&cfg.ExtractResizeFilter, "resize-filter", cfg.ExtractResizeFilter, "")
 	fs.BoolVar(&cfg.PreviewOnly, "preview-only", false, "")
 	fs.StringVar(&cfg.ReuseBackupID, "reuse-backup", "", "")
 	fs.StringVar(&cfg.AnsiRed, "ansi-red", "", "")
@@ -740,6 +778,11 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	if cfg.ThemeSource != "wallpaper" && cfg.ThemeSource != "preset" {
 		return cfg, fmt.Errorf("invalid theme source: %s", cfg.ThemeSource)
 	}
+	rawSchemeType := strings.TrimSpace(cfg.SchemeType)
+	cfg.SchemeType = normalizeSchemeType(cfg.SchemeType)
+	if cfg.SchemeType == "" {
+		return cfg, fmt.Errorf("invalid --type value: %s", rawSchemeType)
+	}
 	cfg.StatusPalette = strings.TrimSpace(strings.ToLower(cfg.StatusPalette))
 	if cfg.StatusPalette != "default" && cfg.StatusPalette != "vibrant" {
 		return cfg, fmt.Errorf("invalid status palette: %s", cfg.StatusPalette)
@@ -755,9 +798,16 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		cfg.StatusSeparator = "off"
 	}
 	styleFamilySet := false
+	sourceIndexSet := false
+	preferSet := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "style-family" {
+		switch f.Name {
+		case "style-family":
 			styleFamilySet = true
+		case "source-color-index":
+			sourceIndexSet = true
+		case "prefer":
+			preferSet = true
 		}
 	})
 	if !styleFamilySet || strings.TrimSpace(cfg.StyleFamily) == "" {
@@ -767,6 +817,31 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg.Profile = cfg.StyleFamily // keep both fields normalized the same
 	if !contains(profilePresets, cfg.StyleFamily) {
 		return cfg, fmt.Errorf("invalid style family: %s", cfg.StyleFamily)
+	}
+	if cfg.ExtractSourceIndex < -1 || cfg.ExtractSourceIndex > 4 {
+		return cfg, fmt.Errorf("invalid --source-color-index value: %d (expected -1..4)", cfg.ExtractSourceIndex)
+	}
+	rawPrefer := strings.TrimSpace(cfg.ExtractPrefer)
+	cfg.ExtractPrefer = normalizeMatugenPrefer(cfg.ExtractPrefer)
+	if rawPrefer != "" && cfg.ExtractPrefer == "" {
+		return cfg, fmt.Errorf("invalid --prefer value: %s", rawPrefer)
+	}
+	rawFilter := strings.TrimSpace(cfg.ExtractResizeFilter)
+	cfg.ExtractResizeFilter = normalizeResizeFilter(cfg.ExtractResizeFilter)
+	if rawFilter != "" && cfg.ExtractResizeFilter == "" {
+		return cfg, fmt.Errorf("invalid --resize-filter value: %s", rawFilter)
+	}
+	cfg.ExtractFallbackColor = strings.TrimSpace(cfg.ExtractFallbackColor)
+	if cfg.ExtractFallbackColor != "" && !itheme.IsHexColor(cfg.ExtractFallbackColor) {
+		return cfg, fmt.Errorf("invalid --fallback-color value: %s (expected #rrggbb)", cfg.ExtractFallbackColor)
+	}
+	if !sourceIndexSet && !preferSet {
+		presetIndex, presetPrefer := extractionPresetSelection(cfg.StyleFamily)
+		cfg.ExtractSourceIndex = presetIndex
+		cfg.ExtractPrefer = presetPrefer
+	}
+	if cfg.ExtractPrefer == "closest-to-fallback" && cfg.ExtractFallbackColor == "" {
+		cfg.ExtractFallbackColor = "#6750A4"
 	}
 	for _, item := range []struct {
 		v    string
@@ -816,6 +891,91 @@ func parseOnOffValue(raw string) (bool, error) {
 	}
 }
 
+func normalizeSchemeType(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	v = strings.TrimPrefix(v, "scheme-")
+	switch v {
+	case "tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "monochrome", "rainbow", "fruit-salad":
+		return "scheme-" + v
+	default:
+		return ""
+	}
+}
+
+func schemeTypeLabel(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	return strings.TrimPrefix(v, "scheme-")
+}
+
+func normalizeMatugenPrefer(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "none":
+		return ""
+	case "darkness":
+		return "darkness"
+	case "lightness":
+		return "lightness"
+	case "saturation":
+		return "saturation"
+	case "less-saturation", "less_saturation":
+		return "less-saturation"
+	case "value":
+		return "value"
+	case "closest-to-fallback", "closest_to_fallback":
+		return "closest-to-fallback"
+	default:
+		return ""
+	}
+}
+
+func normalizeResizeFilter(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "default":
+		return ""
+	case "nearest":
+		return "nearest"
+	case "triangle":
+		return "triangle"
+	case "catmull-rom", "catmull_rom":
+		return "catmull-rom"
+	case "gaussian":
+		return "gaussian"
+	case "lanczos3":
+		return "lanczos3"
+	default:
+		return ""
+	}
+}
+
+func extractionPresetSelection(preset string) (int, string) {
+	switch canonicalProfile(preset) {
+	case "source-0":
+		return 0, ""
+	case "source-1":
+		return 1, ""
+	case "source-2":
+		return 2, ""
+	case "source-3":
+		return 3, ""
+	case "source-4":
+		return 4, ""
+	case "prefer-darkness":
+		return -1, "darkness"
+	case "prefer-lightness":
+		return -1, "lightness"
+	case "prefer-saturation":
+		return -1, "saturation"
+	case "prefer-less-saturation":
+		return -1, "less-saturation"
+	case "prefer-value":
+		return -1, "value"
+	case "prefer-closest-fallback":
+		return -1, "closest-to-fallback"
+	default:
+		return 0, ""
+	}
+}
+
 func normalizeStatusTheme(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", "default":
@@ -857,10 +1017,10 @@ func normalizeSeparatorMode(raw string) string {
 }
 
 func applyThemeFiles(payload computedPayload, backupDir string) error {
-	termuxColors := filepath.Join(homeDir, ".termux", "colors.properties")
-	tmuxConf := filepath.Join(homeDir, ".tmux.conf")
-	peaclockCfg := filepath.Join(homeDir, ".config", "peaclock", "config")
-	starshipCfg := filepath.Join(homeDir, ".config", "starship.toml")
+	termuxColors := managedTermuxFilePath("colors.properties")
+	tmuxConf := managedTmuxConfPath()
+	peaclockCfg := managedPeaclockPath()
+	starshipCfg := managedStarshipPath()
 
 	if err := os.MkdirAll(filepath.Dir(termuxColors), 0o755); err != nil {
 		return err
@@ -918,7 +1078,7 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 		_ = exec.Command("termux-reload-settings").Run()
 	}
 	if _, err := exec.LookPath("tmux"); err == nil {
-		_ = exec.Command("tmux", "source-file", tmuxConf).Run()
+		_ = exec.Command("tmux", "source-file", filepath.Join(homeDir, ".tmux.conf")).Run()
 		_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
 		_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
 		_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
@@ -1042,12 +1202,13 @@ func renderTmuxBlock(payload computedPayload) string {
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
 	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
-	weatherColor := ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground)
-	separatorColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48)), payload.Foreground)
+	weatherColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground), tertiaryFixedDim, payload.Background, 4.2)
+	separatorBase := getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48))
+	separatorColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, separatorBase, payload.Foreground), separatorBase, payload.Background, 3.2)
 	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
 	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
 	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
-	chargingColor := ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground)
+	chargingColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 4.2)
 	batteryRamp := []string{
 		"#ff6b6b", // red
 		"#ff8f5a", // orange-red
@@ -1058,42 +1219,42 @@ func renderTmuxBlock(payload computedPayload) string {
 	}
 	batteryColors := make([]string, len(batteryRamp))
 	for i, c := range batteryRamp {
-		batteryColors[i] = ensureReadableTextColor(payload.Background, saturateHexColor(c, 0.16), payload.Foreground)
+		base := saturateHexColor(c, 0.16)
+		batteryColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, base, payload.Foreground), base, payload.Background, 3.6)
 	}
 	batteryFullColors := [4]string{}
 	batteryHalfColors := [4]string{}
 	batteryEmptyColors := [4]string{}
-	batAnchors := []string{
-		batteryColors[0],
-		batteryColors[1],
-		batteryColors[3],
-		batteryColors[5],
-	}
 	for i := 0; i < 4; i++ {
-		fullT := 0.06 + (0.88 * float64(i) / 3.0)
-		halfT := 0.18 + (0.88 * float64(i) / 3.0)
-		full := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(fullT)), 0.26), payload.Foreground)
-		half := ensureReadableTextColor(payload.Background, saturateHexColor(sampleGradientColor(batAnchors, clamp01(halfT)), 0.30), payload.Foreground)
-		empty := ensureReadableTextColor(payload.Background, saturateHexColor(blendHexColor(full, surfaceHighest, 0.18), 0.14), payload.Foreground)
+		fullT := 0.10 + (0.84 * float64(i) / 3.0)
+		halfT := 0.10 + (0.84 * (float64(i) + 0.5) / 4.0)
+		emptyT := 0.06 + (0.52 * float64(i) / 3.0)
+		fullBase := saturateHexColor(sampleGradientColor(batteryColors, clamp01(fullT)), 0.26)
+		halfBase := saturateHexColor(sampleGradientColor(batteryColors, clamp01(halfT)), 0.30)
+		full := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, fullBase, payload.Foreground), fullBase, payload.Background, 3.6)
+		half := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, halfBase, payload.Foreground), halfBase, payload.Background, 3.6)
+		emptyBase := sampleGradientColor(batteryColors, clamp01(emptyT))
+		emptyPrefer := saturateHexColor(blendHexColor(emptyBase, surfaceHighest, 0.30), 0.12)
+		empty := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, emptyPrefer, payload.Foreground), emptyPrefer, payload.Background, 3.2)
 		batteryFullColors[i] = full
 		batteryHalfColors[i] = half
 		batteryEmptyColors[i] = empty
 	}
 	cpuColors := []string{
-		ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground), primaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground), primaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryBase, payload.Foreground), secondaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground), tertiaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground), tertiaryFixed, payload.Background, 3.6),
 	}
 	ramColors := []string{
-		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground), tertiaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground), tertiaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryFixedDim, payload.Foreground), primaryFixedDim, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground), primaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground), secondaryFixedDim, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 3.6),
 	}
 	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.18, 0.24)))
 	chargingBG := nonBlackStatusColor(blendHexColor(blendHexColor(secondaryBase, primaryBase, 0.35), tertiaryBase, 0.18), payload.Foreground)
@@ -1163,8 +1324,8 @@ set -g @status-tmux-left-bg-session "%s"
 set -g @status-tmux-left-bg-prefix "%s"
 set -g @status-tmux-left-bg-copy "%s"
 set -g @status-tmux-left-session-pad "%s"
-set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
-set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
+set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
+set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\$HOME/.config/tooie/configs/tmux/widget-weather)"
 %s
 set -g window-status-separator ""
 set -g base-index 1
@@ -1301,6 +1462,30 @@ func nonBlackStatusColor(hex, fallback string) string {
 	if maxInt(r, maxInt(g, b)) < 96 {
 		// Avoid near-black status text on transparent bars.
 		return normalizeHexColor(blendHexColor(fallback, "#ffffff", 0.22))
+	}
+	return hex
+}
+
+func nonBlackStatusColorForBG(hex, fallback, bg string, minContrast float64) string {
+	hex = normalizeHexColor(hex)
+	fallback = normalizeHexColor(fallback)
+	bg = normalizeHexColor(bg)
+	if !itheme.IsHexColor(bg) {
+		return nonBlackStatusColor(hex, fallback)
+	}
+	cand := nonBlackStatusColor(hex, fallback)
+	if contrastRatioHex(cand, bg) >= minContrast {
+		return cand
+	}
+	if contrastRatioHex(fallback, bg) >= minContrast {
+		return fallback
+	}
+	for i := 1; i <= 16; i++ {
+		t := float64(i) / 16.0
+		darker := normalizeHexColor(blendHexColor(fallback, "#000000", t))
+		if contrastRatioHex(darker, bg) >= minContrast {
+			return darker
+		}
 	}
 	return hex
 }
@@ -1651,12 +1836,25 @@ func resolveMatugen(given string) (string, error) {
 	return "", fmt.Errorf("matugen binary not found. Set --matugen-bin or install matugen")
 }
 
-func runMatugenImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int) ([]byte, error) {
-	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex), "-j", "hex", "--dry-run"}
+func runMatugenImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
+	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType}
+	if sourceColorIndex >= 0 {
+		args = append(args, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex))
+	}
+	if strings.TrimSpace(prefer) != "" {
+		args = append(args, "--prefer", strings.TrimSpace(prefer))
+	}
+	if strings.TrimSpace(fallbackColor) != "" {
+		args = append(args, "--fallback-color", strings.TrimSpace(fallbackColor))
+	}
+	if strings.TrimSpace(resizeFilter) != "" {
+		args = append(args, "--resize-filter", strings.TrimSpace(resizeFilter))
+	}
+	args = append(args, "-j", "hex", "--dry-run")
 	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("matugen failed for mode=%s scheme=%s idx=%d: %v (%s)", mode, schemeType, sourceColorIndex, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("matugen failed for mode=%s scheme=%s idx=%d prefer=%s: %v (%s)", mode, schemeType, sourceColorIndex, strings.TrimSpace(prefer), err, strings.TrimSpace(string(out)))
 	}
 	return bytes.TrimSpace(out), nil
 }

@@ -118,9 +118,6 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 			t.Fatalf("renderThemePage() missing %q in:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "Palette") {
-		t.Fatalf("renderThemePage() unexpectedly contains Palette in:\n%s", got)
-	}
 	for _, unwanted := range []string{"Details", "Current Theme", "Setup Btop", "Reset Bootstrap"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("renderThemePage() unexpectedly contains %q in:\n%s", unwanted, got)
@@ -182,22 +179,54 @@ func TestKeybindsCycleThemeSettings(t *testing.T) {
 	}
 }
 
+func TestKeybindPCyclesPaletteType(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+		paletteType: defaultPaletteType,
+		statusTheme: defaultStatusTheme,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	got := next.(model)
+	if got.paletteType == defaultPaletteType {
+		t.Fatalf("expected p to cycle palette type")
+	}
+}
+
+func TestKeybindPDoesNotCyclePaletteTypeForPreset(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: "preset",
+		mode:        defaultMode,
+		profile:     defaultProfile,
+		paletteType: defaultPaletteType,
+		statusTheme: defaultStatusTheme,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	got := next.(model)
+	if got.paletteType != defaultPaletteType {
+		t.Fatalf("paletteType changed for preset source: %q", got.paletteType)
+	}
+}
+
 func TestSourceAndModeDoNotMutateProfileViaHotkeys(t *testing.T) {
 	m := model{
 		page:        pageTheme,
 		themeSource: defaultSource,
 		mode:        defaultMode,
-		profile:     "arctic-calm",
+		profile:     "source-3",
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	got := next.(model)
-	if got.profile != "arctic-calm" {
+	if got.profile != "source-3" {
 		t.Fatalf("profile changed after source hotkey: got %q", got.profile)
 	}
 
 	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	got = next.(model)
-	if got.profile != "arctic-calm" {
+	if got.profile != "source-3" {
 		t.Fatalf("profile changed after mode hotkey: got %q", got.profile)
 	}
 }
@@ -387,7 +416,7 @@ func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
 		page:              pageTheme,
 		themeSource:       "wallpaper",
 		mode:              "auto",
-		profile:           "studio-dark",
+		profile:           "source-3",
 		settingMenuTarget: "theme_source",
 		settingMenuIndex:  1,
 	}
@@ -396,7 +425,7 @@ func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
 	if got.themeSource != "preset" {
 		t.Fatalf("themeSource = %q, want preset", got.themeSource)
 	}
-	if got.profile != "studio-dark" {
+	if got.profile != "source-3" {
 		t.Fatalf("profile changed after source dropdown: got %q", got.profile)
 	}
 
@@ -407,7 +436,7 @@ func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
 	if got.mode != "dark" {
 		t.Fatalf("mode = %q, want dark", got.mode)
 	}
-	if got.profile != "studio-dark" {
+	if got.profile != "source-3" {
 		t.Fatalf("profile changed after mode dropdown: got %q", got.profile)
 	}
 }

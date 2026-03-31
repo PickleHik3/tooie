@@ -69,7 +69,7 @@ func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g @status-tmux-edge-style "rounded"`) {
 		t.Fatalf("expected default theme to keep rounded widget edges, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')`) {
+	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')`) {
 		t.Fatalf("expected status-left to use the widget-left helper, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g window-status-separator ""`) {
@@ -84,7 +84,7 @@ func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g mode-style "bg=`) || strings.Contains(got, `set -g mode-style "bg=default`) {
 		t.Fatalf("expected copy mode to use explicit highlight background, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"`) {
+	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\$HOME/.config/tooie/configs/tmux/widget-weather)"`) {
 		t.Fatalf("expected canonical status-right widget pipeline, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g @status-tmux-widget-gap-right "space"`) {
@@ -141,7 +141,7 @@ func TestRenderTmuxBlockRoundedTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g @status-tmux-edge-style "rounded"`) {
 		t.Fatalf("expected rounded theme to keep rounded widget edges, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}') "`) {
+	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}') "`) {
 		t.Fatalf("expected rounded theme to keep one gap between session and windows, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g window-status-format "#{?window_start_flag`) || !strings.Contains(got, ``) {
@@ -162,7 +162,7 @@ func TestRenderTmuxBlockRectangleTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g @status-tmux-edge-style "flat"`) {
 		t.Fatalf("expected rectangle theme to use flat widget edges, got: %s", got)
 	}
-	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')"`) {
+	if !strings.Contains(got, `set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')"`) {
 		t.Fatalf("expected rectangle theme to keep left widget flush with windows, got: %s", got)
 	}
 	if !strings.Contains(got, `set -g @status-tmux-widget-gap-right "none"`) {
@@ -216,10 +216,10 @@ func TestApplyThemeFilesCreatesBackupsAndIdempotentBlocks(t *testing.T) {
 		tooieConfigDir = oldCfg
 	})
 
-	termuxColors := filepath.Join(tmp, ".termux", "colors.properties")
-	tmuxConf := filepath.Join(tmp, ".tmux.conf")
-	peaclockCfg := filepath.Join(tmp, ".config", "peaclock", "config")
-	starshipCfg := filepath.Join(tmp, ".config", "starship.toml")
+	termuxColors := managedTermuxFilePath("colors.properties")
+	tmuxConf := managedTmuxConfPath()
+	peaclockCfg := managedPeaclockPath()
+	starshipCfg := managedStarshipPath()
 
 	mustWrite := func(path, data string) {
 		t.Helper()
@@ -300,7 +300,7 @@ func TestScoreCandidatePrefersDarkForDarkScene(t *testing.T) {
 	light.Mode = "light"
 	light.Roles["background"] = "#eff1f5"
 	light.Roles["on_background"] = "#3a3f50"
-	if scoreCandidate(dark, metrics, "adaptive") <= scoreCandidate(light, metrics, "adaptive") {
+	if scoreCandidate(dark, metrics) <= scoreCandidate(light, metrics) {
 		t.Fatalf("expected dark candidate to win for dark scene")
 	}
 }
@@ -327,7 +327,7 @@ func TestScoreCandidatePenalizesLowContrast(t *testing.T) {
 		good.Roles[k] = v
 	}
 	good.Roles["on_background"] = "#e7e8f0"
-	if scoreCandidate(bad, metrics, "adaptive") >= scoreCandidate(good, metrics, "adaptive") {
+	if scoreCandidate(bad, metrics) >= scoreCandidate(good, metrics) {
 		t.Fatalf("expected low-contrast candidate to be penalized")
 	}
 }
@@ -369,33 +369,33 @@ func TestScoreCandidateAdaptivePrefersWallpaperHueAffinity(t *testing.T) {
 		"tertiary":      "#64d0ff",
 		"error":         "#39a2ff",
 	}
-	if scoreCandidate(matching, metrics, "adaptive") <= scoreCandidate(offHue, metrics, "adaptive") {
+	if scoreCandidate(matching, metrics) <= scoreCandidate(offHue, metrics) {
 		t.Fatalf("expected adaptive scorer to prefer wallpaper-hue-aligned candidate")
 	}
 }
 
-func TestSourceIndexCandidatesAdaptive(t *testing.T) {
-	got := sourceIndexCandidates("adaptive")
-	want := []int{0, 1, 2}
+func TestSourceIndexCandidatesDefault(t *testing.T) {
+	got := sourceIndexCandidates(themeApplyConfig{ExtractSourceIndex: -1})
+	want := []int{0, 1, 2, 3, 4}
 	if len(got) != len(want) {
-		t.Fatalf("sourceIndexCandidates(adaptive) len=%d, want %d (%v)", len(got), len(want), got)
+		t.Fatalf("sourceIndexCandidates(default) len=%d, want %d (%v)", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("sourceIndexCandidates(adaptive)[%d]=%d, want %d (%v)", i, got[i], want[i], got)
+			t.Fatalf("sourceIndexCandidates(default)[%d]=%d, want %d (%v)", i, got[i], want[i], got)
 		}
 	}
 }
 
 func TestCanonicalProfileMapsLegacyStyles(t *testing.T) {
-	if got := canonicalProfile("balanced"); got != "adaptive" {
-		t.Fatalf("balanced should map to adaptive, got %q", got)
+	if got := canonicalProfile("balanced"); got != "auto" {
+		t.Fatalf("balanced should map to auto, got %q", got)
 	}
-	if got := canonicalProfile("mellow"); got != "adaptive" {
-		t.Fatalf("mellow should map to adaptive, got %q", got)
+	if got := canonicalProfile("mellow"); got != "auto" {
+		t.Fatalf("mellow should map to auto, got %q", got)
 	}
-	if got := canonicalProfile("tokyonight"); got != "neon-night" {
-		t.Fatalf("tokyonight should map to neon-night, got %q", got)
+	if got := canonicalProfile("tokyonight"); got != "auto" {
+		t.Fatalf("tokyonight should map to auto, got %q", got)
 	}
 }
 
@@ -428,7 +428,7 @@ func TestParseThemeApplyFlagsStyleFamilyAndProfileAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseThemeApplyFlags() style-family error: %v", err)
 	}
-	if cfg.StyleFamily != "warm-retro" || cfg.Profile != "warm-retro" {
+	if cfg.StyleFamily != "auto" || cfg.Profile != "auto" {
 		t.Fatalf("expected style family normalization, got style=%q profile=%q", cfg.StyleFamily, cfg.Profile)
 	}
 
@@ -436,7 +436,7 @@ func TestParseThemeApplyFlagsStyleFamilyAndProfileAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseThemeApplyFlags() profile alias error: %v", err)
 	}
-	if cfg.StyleFamily != "vivid-noir" || cfg.Profile != "vivid-noir" {
+	if cfg.StyleFamily != "auto" || cfg.Profile != "auto" {
 		t.Fatalf("expected profile alias to map to style-family, got style=%q profile=%q", cfg.StyleFamily, cfg.Profile)
 	}
 }
@@ -480,8 +480,8 @@ func TestAutoCandidateModesForDarkScene(t *testing.T) {
 		DarkPixelRatio:   0.72,
 		EdgeWeightedLuma: 0.31,
 	})
-	if len(modes) != 1 || modes[0] != "dark" {
-		t.Fatalf("expected forced dark mode candidates, got %v", modes)
+	if len(modes) != 2 || modes[0] != "dark" || modes[1] != "light" {
+		t.Fatalf("expected dark+light mode candidates, got %v", modes)
 	}
 }
 
@@ -493,8 +493,8 @@ func TestAutoCandidateModesForMixedScene(t *testing.T) {
 		BrightPixelRatio: 0.20,
 		EdgeWeightedLuma: 0.50,
 	})
-	if len(modes) != 1 || modes[0] != "dark" {
-		t.Fatalf("expected readability-first dark candidates, got %v", modes)
+	if len(modes) != 2 || modes[0] != "dark" || modes[1] != "light" {
+		t.Fatalf("expected dark+light candidates, got %v", modes)
 	}
 }
 
@@ -512,8 +512,8 @@ func TestPresetTmuxStatusContrastAcrossFamilies(t *testing.T) {
 				PresetVariant: variant,
 				StatusPalette: "default",
 				StatusTheme:   "rounded",
-				StyleFamily:   "adaptive",
-				Profile:       "adaptive",
+				StyleFamily:   "auto",
+				Profile:       "auto",
 			}
 			payload, _, err := computeThemePayload(cfg, tmp)
 			if err != nil {

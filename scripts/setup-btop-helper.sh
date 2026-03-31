@@ -20,6 +20,15 @@ done
 
 mkdir -p "$TOOIE_DIR" "$CACHE_DIR"
 
+if [ "$RUNNER" = "root" ]; then
+  if ! command -v su >/dev/null 2>&1 \
+    && ! command -v tsu >/dev/null 2>&1 \
+    && ! command -v sudo >/dev/null 2>&1; then
+    echo "setup-btop-helper: runner=root requires su, tsu, or sudo in PATH" >&2
+    exit 1
+  fi
+fi
+
 cat > "$TOOIE_DIR/helper.json" <<JSON
 {
   "runner": "${RUNNER}"

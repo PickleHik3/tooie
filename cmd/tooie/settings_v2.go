@@ -7,16 +7,17 @@ import (
 	"strings"
 )
 
-const tooieSettingsVersion = 2
+const tooieSettingsVersion = 3
 
 type tmuxSetupOptions struct {
-	Mode          string `json:"mode"`
-	StatusPosition string `json:"status_position"`
-	StatusLayout   string `json:"status_layout"`
+	Mode            string `json:"mode"`
+	StatusPosition  string `json:"status_position"`
+	StatusLayout    string `json:"status_layout"`
 	StatusSeparator string `json:"status_separator"`
 }
 
 type setupModules struct {
+	TmuxTheme        bool `json:"tmux_theme"`
 	TermuxAppearance bool `json:"termux_appearance"`
 	ShellTheme       bool `json:"shell_theme"`
 	PeaclockTheme    bool `json:"peaclock_theme"`
@@ -32,12 +33,12 @@ type privilegedOptions struct {
 }
 
 type tooieSettings struct {
-	Version    int                   `json:"version"`
-	Tmux       tmuxSetupOptions      `json:"tmux"`
+	Version    int                    `json:"version"`
+	Tmux       tmuxSetupOptions       `json:"tmux"`
 	Widgets    persistedShellSettings `json:"widgets"`
-	Modules    setupModules          `json:"modules"`
-	Platform   setupPlatformOptions  `json:"platform"`
-	Privileged privilegedOptions     `json:"privileged"`
+	Modules    setupModules           `json:"modules"`
+	Platform   setupPlatformOptions   `json:"platform"`
+	Privileged privilegedOptions      `json:"privileged"`
 }
 
 func defaultTooieSettings() tooieSettings {
@@ -51,12 +52,13 @@ func defaultTooieSettings() tooieSettings {
 		},
 		Widgets: defaultShellSettings(),
 		Modules: setupModules{
+			TmuxTheme:        true,
 			TermuxAppearance: true,
 			ShellTheme:       true,
 			PeaclockTheme:    true,
 			BtopHelper:       false,
 		},
-		Platform: setupPlatformOptions{Profile: "termux"},
+		Platform:   setupPlatformOptions{Profile: "termux"},
 		Privileged: privilegedOptions{Runner: "auto"},
 	}
 }
@@ -82,10 +84,14 @@ func normalizeRunner(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "rish":
 		return "rish"
+	case "root":
+		return "root"
 	case "su":
 		return "su"
 	case "tsu":
 		return "tsu"
+	case "sudo":
+		return "sudo"
 	default:
 		return "auto"
 	}
@@ -108,6 +114,12 @@ func normalizePlatformProfile(raw string) string {
 
 func normalizeTooieSettings(s *tooieSettings) {
 	if s.Version <= 0 {
+		s.Version = tooieSettingsVersion
+	}
+	if s.Version < 3 && !s.Modules.TmuxTheme {
+		s.Modules.TmuxTheme = true
+	}
+	if s.Version < tooieSettingsVersion {
 		s.Version = tooieSettingsVersion
 	}
 	s.Tmux.Mode = normalizeTmuxMode(s.Tmux.Mode)

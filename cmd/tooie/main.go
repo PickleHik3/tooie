@@ -35,7 +35,8 @@ const (
 	defaultMode        = "auto"
 	defaultPalette     = "default"
 	defaultStatusTheme = "default"
-	defaultProfile     = "adaptive"
+	defaultProfile     = "auto"
+	defaultPaletteType = "tonal-spot"
 	defaultSource      = "wallpaper"
 	themeCacheSchema   = "2026-03-20-v2"
 	pageHome           = 0
@@ -45,7 +46,21 @@ const (
 
 var modePresets = []string{"auto", "dark", "light"}
 var statusThemePresets = []string{"default", "rounded", "rectangle"}
-var profilePresets = []string{"adaptive", "soft-pastel", "studio-dark", "neon-night", "warm-retro", "vivid-noir", "arctic-calm"}
+var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "monochrome", "rainbow", "fruit-salad"}
+var profilePresets = []string{
+	"auto",
+	"source-0",
+	"source-1",
+	"source-2",
+	"source-3",
+	"source-4",
+	"prefer-saturation",
+	"prefer-lightness",
+	"prefer-darkness",
+	"prefer-less-saturation",
+	"prefer-value",
+	"prefer-closest-fallback",
+}
 var themeSources = []string{"wallpaper", "preset"}
 var presetFamilyOrder = []string{"catppuccin", "rose-pine", "tokyo-night", "synthwave-84", "dracula", "gruvbox", "nord"}
 var presetVariantsByFamily = map[string][]string{
@@ -181,6 +196,7 @@ type model struct {
 	customIndex       int
 	mode              string
 	palette           string
+	paletteType       string
 	statusTheme       string
 	profile           string
 	themeSource       string
@@ -202,6 +218,10 @@ type model struct {
 	showBackups       bool
 	showApplyConfirm  bool
 	applyConfirmIdx   int
+	extractSwatches   map[string]string
+	extractSwatchKey  string
+	extractLoading    bool
+	extractError      string
 	selectedHexes     map[string]string
 	metricsErr        error
 	applying          bool
@@ -264,36 +284,38 @@ func initialModel() model {
 		}
 	}
 	m := model{
-		page:          pageHome,
-		backups:       bs,
-		now:           now,
-		lastTick:      now,
-		uptimeText:    "--",
-		mode:          defaultMode,
-		palette:       defaultPalette,
-		statusTheme:   defaultStatusTheme,
-		profile:       defaultProfile,
-		themeSource:   defaultSource,
-		presetFamily:  presetFamilyOrder[0],
-		presetVariant: presetVariantsByFamily[presetFamilyOrder[0]][0],
-		lastStatus:    "Ready",
-		textColor:     "",
-		cursorColor:   "",
-		ansiRed:       "",
-		ansiGreen:     "",
-		ansiYellow:    "",
-		ansiBlue:      "",
-		ansiMagenta:   "",
-		ansiCyan:      "",
-		barSpring:     harmonica.NewSpring(harmonica.FPS(20), 4.6, 0.90),
-		clockFontDefs: fontDefs,
-		clockFontIdx:  clockFontIdx,
-		clockPatterns: []string{"wave", "stripes", "pulse", "solid", "outline", "sweep", "neon", "calm", "shimmer"},
-		clockLoc:      clockLoc,
-		widgetBattery: true,
-		widgetCPU:     true,
-		widgetRAM:     true,
-		widgetWeather: true,
+		page:            pageHome,
+		backups:         bs,
+		now:             now,
+		lastTick:        now,
+		uptimeText:      "--",
+		mode:            defaultMode,
+		palette:         defaultPalette,
+		paletteType:     defaultPaletteType,
+		statusTheme:     defaultStatusTheme,
+		profile:         defaultProfile,
+		themeSource:     defaultSource,
+		presetFamily:    presetFamilyOrder[0],
+		presetVariant:   presetVariantsByFamily[presetFamilyOrder[0]][0],
+		lastStatus:      "Ready",
+		textColor:       "",
+		cursorColor:     "",
+		ansiRed:         "",
+		ansiGreen:       "",
+		ansiYellow:      "",
+		ansiBlue:        "",
+		ansiMagenta:     "",
+		ansiCyan:        "",
+		barSpring:       harmonica.NewSpring(harmonica.FPS(20), 4.6, 0.90),
+		clockFontDefs:   fontDefs,
+		clockFontIdx:    clockFontIdx,
+		clockPatterns:   []string{"wave", "stripes", "pulse", "solid", "outline", "sweep", "neon", "calm", "shimmer"},
+		clockLoc:        clockLoc,
+		widgetBattery:   true,
+		widgetCPU:       true,
+		widgetRAM:       true,
+		widgetWeather:   true,
+		extractSwatches: map[string]string{},
 	}
 	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
 	if strings.TrimSpace(savedClock.Pattern) != "" {
@@ -307,6 +329,9 @@ func initialModel() model {
 	m.loadThemeStateFromBackups()
 	m.loadShellSettings()
 	m.loadPreviewColors()
+	if m.themeSource == "wallpaper" {
+		m.extractLoading = true
+	}
 	m.lastAppliedTheme = m.applyCacheSignature()
 	m.startHomeIntro()
 	return m
@@ -360,32 +385,34 @@ func initialMiniModel(showClock, showCal bool) model {
 		showClock = true
 	}
 	m := model{
-		page:          pageHome,
-		now:           now,
-		lastTick:      now,
-		uptimeText:    "--",
-		mode:          defaultMode,
-		palette:       defaultPalette,
-		statusTheme:   defaultStatusTheme,
-		profile:       defaultProfile,
-		themeSource:   defaultSource,
-		presetFamily:  presetFamilyOrder[0],
-		presetVariant: presetVariantsByFamily[presetFamilyOrder[0]][0],
-		lastStatus:    "Ready",
-		barSpring:     harmonica.NewSpring(harmonica.FPS(20), 4.6, 0.90),
-		clockFontDefs: fontDefs,
-		clockFontIdx:  clockFontIdx,
-		clockPatterns: []string{"wave", "stripes", "pulse", "solid", "outline", "sweep", "neon", "calm", "shimmer"},
-		clockLoc:      clockLoc,
-		clockOnly:     true,
-		miniShowClock: showClock,
-		miniShowCal:   showCal,
-		calFontDefs:   calDefs,
-		calFontIdx:    calFontIdx,
-		widgetBattery: true,
-		widgetCPU:     true,
-		widgetRAM:     true,
-		widgetWeather: true,
+		page:            pageHome,
+		now:             now,
+		lastTick:        now,
+		uptimeText:      "--",
+		mode:            defaultMode,
+		palette:         defaultPalette,
+		paletteType:     defaultPaletteType,
+		statusTheme:     defaultStatusTheme,
+		profile:         defaultProfile,
+		themeSource:     defaultSource,
+		presetFamily:    presetFamilyOrder[0],
+		presetVariant:   presetVariantsByFamily[presetFamilyOrder[0]][0],
+		lastStatus:      "Ready",
+		barSpring:       harmonica.NewSpring(harmonica.FPS(20), 4.6, 0.90),
+		clockFontDefs:   fontDefs,
+		clockFontIdx:    clockFontIdx,
+		clockPatterns:   []string{"wave", "stripes", "pulse", "solid", "outline", "sweep", "neon", "calm", "shimmer"},
+		clockLoc:        clockLoc,
+		clockOnly:       true,
+		miniShowClock:   showClock,
+		miniShowCal:     showCal,
+		calFontDefs:     calDefs,
+		calFontIdx:      calFontIdx,
+		widgetBattery:   true,
+		widgetCPU:       true,
+		widgetRAM:       true,
+		widgetWeather:   true,
+		extractSwatches: map[string]string{},
 	}
 	if strings.TrimSpace(savedClock.Pattern) != "" {
 		for i, p := range m.clockPatterns {
@@ -400,6 +427,9 @@ func initialMiniModel(showClock, showCal bool) model {
 	m.loadThemeStateFromBackups()
 	m.loadShellSettings()
 	m.loadPreviewColors()
+	if m.themeSource == "wallpaper" {
+		m.extractLoading = true
+	}
 	m.lastAppliedTheme = m.applyCacheSignature()
 	return m
 }
@@ -421,6 +451,11 @@ func (m *model) loadThemeStateFromBackups() {
 	}
 	if v := strings.TrimSpace(meta["status_theme"]); v != "" {
 		m.statusTheme = v
+	}
+	if v := strings.TrimSpace(meta["type"]); v != "" {
+		m.paletteType = canonicalPaletteType(v)
+	} else if v := strings.TrimSpace(meta["auto_selected_scheme"]); v != "" {
+		m.paletteType = canonicalPaletteType(v)
 	}
 	if v := strings.TrimSpace(meta["style_family"]); v != "" {
 		m.profile = v
@@ -465,6 +500,7 @@ func (m *model) loadThemeStateFromBackups() {
 func (m *model) normalizeThemeSelection() {
 	m.mode = canonicalMode(m.mode)
 	m.profile = canonicalProfile(m.profile)
+	m.paletteType = canonicalPaletteType(m.paletteType)
 	m.statusTheme = normalizeStatusTheme(m.statusTheme)
 	if !contains(themeSources, m.themeSource) {
 		m.themeSource = defaultSource
@@ -474,6 +510,9 @@ func (m *model) normalizeThemeSelection() {
 	}
 	if !contains(profilePresets, m.profile) {
 		m.profile = defaultProfile
+	}
+	if !contains(paletteTypePresets, m.paletteType) {
+		m.paletteType = defaultPaletteType
 	}
 	if !contains(statusThemePresets, m.statusTheme) {
 		m.statusTheme = defaultStatusTheme
@@ -606,26 +645,43 @@ func canonicalMode(mode string) string {
 	}
 }
 
+func canonicalPaletteType(name string) string {
+	v := strings.ToLower(strings.TrimSpace(name))
+	v = strings.TrimPrefix(v, "scheme-")
+	switch v {
+	case "", "default", "auto":
+		return defaultPaletteType
+	case "tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "monochrome", "rainbow", "fruit-salad":
+		return v
+	default:
+		return v
+	}
+}
+
 func canonicalProfile(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "", "adaptive":
-		return "adaptive"
-	case "soft-pastel", "studio-dark", "neon-night", "warm-retro", "vivid-noir", "arctic-calm":
+	case "", "auto", "adaptive":
+		return "auto"
+	case "source-0", "source-1", "source-2", "source-3", "source-4":
 		return strings.ToLower(strings.TrimSpace(name))
-	case "catppuccin":
-		return "soft-pastel"
-	case "onedark":
-		return "studio-dark"
-	case "tokyonight":
-		return "neon-night"
-	case "gruvbox":
-		return "warm-retro"
-	case "dracula":
-		return "vivid-noir"
-	case "nord":
-		return "arctic-calm"
+	case "prefer-saturation", "prefer-lightness", "prefer-darkness", "prefer-less-saturation", "prefer-value", "prefer-closest-fallback":
+		return strings.ToLower(strings.TrimSpace(name))
+	case "dominant":
+		return "source-0"
+	case "alt-1":
+		return "source-1"
+	case "alt-2":
+		return "source-2"
+	case "alt-3":
+		return "source-3"
+	case "alt-4":
+		return "source-4"
 	case "default", "balanced", "vivid", "mellow", "friendly", "positive", "punchy", "playful", "energetic", "creative":
-		return "adaptive"
+		return "auto"
+	case "soft-pastel", "studio-dark", "neon-night", "warm-retro", "vivid-noir", "arctic-calm":
+		return "auto"
+	case "catppuccin", "onedark", "tokyonight", "gruvbox", "dracula", "nord":
+		return "auto"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}
@@ -649,6 +705,9 @@ func (m model) Init() tea.Cmd {
 		pollMetrics(),
 		loadSystemInfoCmd(),
 		syncTmuxWidgetSettingsCmd(m.currentShellSettings()),
+	}
+	if m.themeSource == "wallpaper" {
+		cmds = append(cmds, loadExtractSwatchesCmd(m.mode, m.paletteType))
 	}
 	if !m.metricsPaused {
 		cmds = append(cmds, tickMetrics())
@@ -909,6 +968,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.loadPreviewColors()
+		if m.themeSource == "wallpaper" {
+			return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
+		}
+		return m, nil
+	case extractSwatchesMsg:
+		m.extractLoading = false
+		if msg.err != nil {
+			m.extractError = msg.err.Error()
+			return m, nil
+		}
+		m.extractError = ""
+		m.extractSwatchKey = msg.Key
+		m.extractSwatches = msg.Swatches
 		return m, nil
 	case statusMsg:
 		m.lastStatus = string(msg)
@@ -927,6 +999,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loadPreviewColors()
 		m.lastAppliedTheme = m.applyCacheSignature()
+		if m.themeSource == "wallpaper" {
+			if post != nil {
+				return m, tea.Batch(post, loadExtractSwatchesCmd(m.mode, m.paletteType))
+			}
+			return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
+		}
 		return m, post
 	case tea.KeyMsg:
 		if m.clockOnly {
@@ -1038,6 +1116,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "enter":
+				target := m.settingMenuTarget
 				opts := m.settingMenuChoices(m.settingMenuTarget)
 				if len(opts) == 0 {
 					m.settingMenuTarget = ""
@@ -1051,6 +1130,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.applySettingChoice(m.settingMenuTarget, selected.Value)
 				m.settingMenuTarget = ""
 				m.settingMenuIndex = 0
+				if m.themeSource == "wallpaper" && (target == "mode" || target == "palette_type" || target == "theme_source") {
+					m.extractLoading = true
+					return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
+				}
 				return m, nil
 			}
 			return m, nil
@@ -1202,19 +1285,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			m.themeSource = nextThemeSource(m.themeSource)
 			m.clampMergedSettingIndex()
+			if m.themeSource == "wallpaper" {
+				m.extractLoading = true
+				return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
+			}
 			return m, nil
 		case "m":
 			if m.themeSource == "preset" {
 				return m, nil
 			}
 			m.mode = nextMode(m.mode)
-			return m, nil
+			m.extractLoading = true
+			return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
 		case "f":
 			if m.themeSource == "preset" {
 				return m, nil
 			}
 			m.profile = nextProfile(m.profile)
 			return m, nil
+		case "p", "P":
+			if m.themeSource == "preset" {
+				return m, nil
+			}
+			m.paletteType = nextPaletteType(m.paletteType)
+			m.extractLoading = true
+			return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
 		case "t", "T":
 			m.statusTheme = nextStatusTheme(m.statusTheme)
 			return m, nil
@@ -1249,7 +1344,8 @@ func (m model) settings() []settingItem {
 	} else {
 		items = append(items,
 			settingItem{Label: hotkeyLabel("Mode", "m", "5") + ": " + displayMode(m.mode), Target: "mode"},
-			settingItem{Label: hotkeyLabel("Family", "f", "2") + ": " + displayProfile(m.profile), Target: "profile"},
+			settingItem{Label: hotkeyLabel("Primary", "f", "2") + ": " + m.extractStateLabel(), Target: "profile"},
+			settingItem{Label: hotkeyLabel("Palette", "p", "13") + ": " + displayPaletteType(m.paletteType), Target: "palette_type"},
 		)
 	}
 	items = append(items,
@@ -1315,6 +1411,9 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		return m, nil
 	case "profile":
 		m.openSettingMenu("profile")
+		return m, nil
+	case "palette_type":
+		m.openSettingMenu("palette_type")
 		return m, nil
 	case "preset_family":
 		m.openSettingMenu("preset_family")
@@ -1395,7 +1494,7 @@ func onOffFlag(v bool) string {
 }
 
 func tmuxStatusRightTemplate() string {
-	return "#($HOME/.config/tmux/run-system-widget all)#($HOME/.config/tmux/widget-weather)"
+	return "#($HOME/.config/tooie/configs/tmux/run-system-widget all)#($HOME/.config/tooie/configs/tmux/widget-weather)"
 }
 
 func syncTmuxWidgetSettingsCmd(settings persistedShellSettings) tea.Cmd {
@@ -2295,6 +2394,8 @@ func (m model) currentSettingChoice(target string) string {
 		return canonicalMode(m.mode)
 	case "profile":
 		return canonicalProfile(m.profile)
+	case "palette_type":
+		return canonicalPaletteType(m.paletteType)
 	case "preset_family":
 		return m.presetFamily
 	case "preset_variant":
@@ -2326,7 +2427,13 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 	case "profile":
 		out := make([]settingChoice, 0, len(profilePresets))
 		for _, p := range profilePresets {
-			out = append(out, settingChoice{Value: p, Label: displayProfile(p)})
+			out = append(out, settingChoice{Value: p, Label: m.extractChoiceLabel(p)})
+		}
+		return out
+	case "palette_type":
+		out := make([]settingChoice, 0, len(paletteTypePresets))
+		for _, p := range paletteTypePresets {
+			out = append(out, settingChoice{Value: p, Label: displayPaletteType(p)})
 		}
 		return out
 	case "preset_family":
@@ -2364,6 +2471,9 @@ func (m *model) applySettingChoice(target, value string) {
 	case "profile":
 		m.profile = value
 		m.normalizeThemeSelection()
+	case "palette_type":
+		m.paletteType = value
+		m.normalizeThemeSelection()
 	case "preset_family":
 		m.presetFamily = value
 		m.normalizeThemeSelection()
@@ -2382,7 +2492,9 @@ func settingMenuLabel(target string) string {
 	case "mode":
 		return "Mode"
 	case "profile":
-		return "Flavor"
+		return "Primary"
+	case "palette_type":
+		return "Palette"
 	case "preset_family":
 		return "Preset"
 	case "preset_variant":
@@ -2401,7 +2513,9 @@ func (m model) settingsRowView(target string) (label, state, kind string, toggle
 	case "mode":
 		return hotkeyLabel("Mode", "m", "5"), displayMode(m.mode) + " ▾", "info", false
 	case "profile":
-		return hotkeyLabel("Family", "f", "2"), displayProfile(m.profile) + " ▾", "info", false
+		return hotkeyLabel("Primary", "f", "2"), m.extractStateLabel(), "swatch", false
+	case "palette_type":
+		return hotkeyLabel("Palette", "p", "13"), displayPaletteType(m.paletteType) + " ▾", "info", false
 	case "preset_family":
 		return "Preset", displayPresetFamily(m.presetFamily) + " ▾", "info", false
 	case "preset_variant":
@@ -2456,10 +2570,24 @@ func (m model) renderSettingsMenuRow(label, state, kind, target string, toggle b
 	stateCell := ""
 	if kind == "toggle" {
 		stateCell = m.renderToggleStateCell(target, toggle, stateW, selected)
+	} else if kind == "swatch" {
+		stateCell = m.renderSwatchStateCell(state, stateW, selected)
 	} else {
 		stateCell = m.renderInfoStateCell(state, kind, stateW, selected)
 	}
 	return labelBody + "  " + stateCell
+}
+
+func (m model) renderSwatchStateCell(state string, width int, selected bool) string {
+	width = max(10, width)
+	if strings.TrimSpace(state) == "" {
+		state = renderSwatchChip("")
+	}
+	return lipgloss.NewStyle().
+		Width(width).
+		Align(lipgloss.Left).
+		Bold(selected).
+		Render(state)
 }
 
 func (m model) renderInfoStateCell(state, kind string, width int, selected bool) string {
@@ -2795,11 +2923,11 @@ func (m model) interactionBlock(limit int) string {
 				}
 				if b.Meta["theme_source"] != "preset" {
 					if v, ok := b.Meta["style_family"]; ok && v != "" {
-						line += " (" + canonicalProfile(v) + ")"
+						line += " (" + displayProfile(canonicalProfile(v)) + ")"
 					} else if v, ok := b.Meta["profile"]; ok && v != "" {
-						line += " (" + v + ")"
+						line += " (" + displayProfile(canonicalProfile(v)) + ")"
 					} else if v, ok := b.Meta["style_preset"]; ok && v != "" {
-						line += " (" + canonicalProfile(v) + ")"
+						line += " (" + displayProfile(canonicalProfile(v)) + ")"
 					}
 				}
 				lines = append(lines, line)
@@ -3532,7 +3660,11 @@ func (m model) applyArgs(includeOverrides bool) []string {
 	if m.themeSource == "preset" {
 		args = append(args, "--preset-family", m.presetFamily, "--preset-variant", m.presetVariant)
 	} else {
-		args = append(args, "-m", m.mode, "--style-family", m.profile)
+		paletteType := canonicalPaletteType(m.paletteType)
+		if !contains(paletteTypePresets, paletteType) {
+			paletteType = defaultPaletteType
+		}
+		args = append(args, "-m", m.mode, "--style-family", m.profile, "--type", paletteType)
 	}
 	if includeOverrides {
 		if strings.TrimSpace(m.textColor) != "" {
@@ -3771,6 +3903,19 @@ func nextProfile(cur string) string {
 	return profilePresets[0]
 }
 
+func nextPaletteType(cur string) string {
+	if len(paletteTypePresets) == 0 {
+		return cur
+	}
+	cur = canonicalPaletteType(cur)
+	for i, p := range paletteTypePresets {
+		if p == cur {
+			return paletteTypePresets[(i+1)%len(paletteTypePresets)]
+		}
+	}
+	return paletteTypePresets[0]
+}
+
 func nextMode(cur string) string {
 	if len(modePresets) == 0 {
 		return cur
@@ -3864,27 +4009,78 @@ func nextPresetVariant(family, cur string) string {
 
 func displayProfile(name string) string {
 	switch canonicalProfile(name) {
-	case "adaptive":
-		return "Adaptive"
-	case "soft-pastel":
-		return "Soft Pastel"
-	case "studio-dark":
-		return "Studio Dark"
-	case "neon-night":
-		return "Neon Night"
-	case "warm-retro":
-		return "Warm Retro"
-	case "vivid-noir":
-		return "Vivid Noir"
-	case "arctic-calm":
-		return "Arctic Calm"
+	case "auto":
+		return "Dominant (Idx 0)"
+	case "source-0":
+		return "Source Index 0"
+	case "source-1":
+		return "Source Index 1"
+	case "source-2":
+		return "Source Index 2"
+	case "source-3":
+		return "Source Index 3"
+	case "source-4":
+		return "Source Index 4"
+	case "prefer-saturation":
+		return "Prefer Saturation"
+	case "prefer-lightness":
+		return "Prefer Lightness"
+	case "prefer-darkness":
+		return "Prefer Darkness"
+	case "prefer-less-saturation":
+		return "Prefer Less Saturation"
+	case "prefer-value":
+		return "Prefer Value"
+	case "prefer-closest-fallback":
+		return "Prefer Closest Fallback"
 	default:
 		name = strings.TrimSpace(name)
 		if name == "" || name == "default" {
-			return "Adaptive"
+			return "Dominant (Idx 0)"
 		}
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
+}
+
+func (m model) extractColor(profile string) string {
+	key := canonicalProfile(profile)
+	if m.extractSwatches != nil {
+		if c := strings.TrimSpace(m.extractSwatches[key]); internaltheme.IsHexColor(c) {
+			return normalizeHexColor(c)
+		}
+	}
+	return ""
+}
+
+func renderSwatchChip(hex string) string {
+	hex = normalizeHexColor(strings.TrimSpace(hex))
+	if !internaltheme.IsHexColor(hex) {
+		hex = "#5a606f"
+	}
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(hex)).
+		Width(7).
+		Render("       ")
+}
+
+func (m model) extractChoiceLabel(profile string) string {
+	if c := m.extractColor(profile); c != "" {
+		return renderSwatchChip(c)
+	}
+	if m.extractLoading {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("loading")
+	}
+	return renderSwatchChip("")
+}
+
+func (m model) extractStateLabel() string {
+	if c := m.extractColor(m.profile); c != "" {
+		return renderSwatchChip(c) + " ▾"
+	}
+	if m.extractLoading {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("loading") + " ▾"
+	}
+	return renderSwatchChip("") + " ▾"
 }
 
 func displayMode(mode string) string {
@@ -3906,6 +4102,42 @@ func displayThemeSource(source string) string {
 		return "Preset"
 	default:
 		return "Wallpaper"
+	}
+}
+
+func displayPaletteType(name string) string {
+	switch canonicalPaletteType(name) {
+	case "tonal-spot":
+		return "Tonal Spot"
+	case "expressive":
+		return "Expressive"
+	case "fidelity":
+		return "Fidelity"
+	case "content":
+		return "Content"
+	case "vibrant":
+		return "Vibrant"
+	case "neutral":
+		return "Neutral"
+	case "monochrome":
+		return "Monochrome"
+	case "rainbow":
+		return "Rainbow"
+	case "fruit-salad":
+		return "Fruit Salad"
+	default:
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return "Tonal Spot"
+		}
+		parts := strings.Split(name, "-")
+		for i := range parts {
+			if parts[i] == "" {
+				continue
+			}
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+		return strings.Join(parts, " ")
 	}
 }
 
@@ -4671,13 +4903,25 @@ func ensureReadableTextColor(bg, preferred, fallback string) string {
 	if contrastRatioHex(preferred, bg) >= 4.5 {
 		return preferred
 	}
+	if contrastRatioHex(fallback, bg) >= 4.5 {
+		return fallback
+	}
 	if contrastRatioHex("#ffffff", bg) >= 4.5 {
 		return "#ffffff"
 	}
 	if contrastRatioHex("#000000", bg) >= 4.5 {
 		return "#000000"
 	}
-	return fallback
+	best := fallback
+	bestRatio := contrastRatioHex(fallback, bg)
+	for _, cand := range []string{preferred, "#ffffff", "#000000"} {
+		r := contrastRatioHex(cand, bg)
+		if r > bestRatio {
+			best = cand
+			bestRatio = r
+		}
+	}
+	return best
 }
 
 func (m model) clockPalette() []string {

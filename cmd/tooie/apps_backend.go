@@ -115,7 +115,7 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  tooie doctor")
 	fmt.Fprintln(w, "      Show environment capability checks and dependency guidance.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie helper btop setup [--runner auto|rish|su|tsu]")
+	fmt.Fprintln(w, "  tooie helper btop setup [--runner auto|rish|root|su|tsu|sudo]")
 	fmt.Fprintln(w, "      Configure optional btop helper integration.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie helper uninstall [--snapshot latest|<id>]")

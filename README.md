@@ -15,7 +15,7 @@ Press keybind "prefix + i" to bring up quick reference to the tmux keybinds. The
 The TUI is split into 2 pages:
 - First page includes the clock and live system stats.
 - Second page is a merged theme/status screen. The top row contains theme controls and the generated palette view. The bottom row contains tmux status widget toggles (`battery`, `cpu`, `ram`, `weather`) and their current on/off state summary.
-- Theme generation still uses `matugen` against the terminal background at `~/.termux/background/`, with adaptive/curated profiles and fixed preset themes available from the merged page.
+- Theme generation still uses `matugen` against the terminal background at `~/.termux/background/`, now with native extraction controls (source index / prefer modes) and fixed preset themes available from the merged page.
 
 ## Screenshots
 
@@ -36,33 +36,33 @@ The TUI is split into 2 pages:
 
 ## Install
 
-Fresh install for `v2-dev`:
+Quick install from `v2-dev`:
 
 ```sh
-pkg update -y
-pkg install -y git
-termux-setup-storage
-rm -rf ~/.tmp/tooie
-cd ~/.tmp
 git clone --branch v2-dev --single-branch https://github.com/PickleHik3/tooie.git
 cd tooie
 ./install.sh
 ```
 
-Setup wizard (interactive) now starts with platform profile selection:
-- `termux`
-- `termux-root`
-- `termux-shizuku`
-- `termux-rish`
-- `linux`
+`install.sh` now asks:
+- platform (`termux` or `linux`)
+- termux backend (if termux): `none`, `rish`, `root`, `shizuku`
+- themed items (single choice)
+- final summary + confirm
 
-The wizard supports `< Back` on steps so you can revise previous answers.
-
-After setup completes, reload tmux once:
+## Clone + Build Binary Only
 
 ```sh
-tmux kill-server 2>/dev/null || true
-tmux new -A -s main
+git clone --branch v2-dev --single-branch https://github.com/PickleHik3/tooie.git
+cd tooie
+go build -o ~/.local/bin/tooie ./cmd/tooie
+chmod +x ~/.local/bin/tooie
+```
+
+Then run:
+
+```sh
+~/.local/bin/tooie
 ```
 
 ## Run
@@ -91,30 +91,29 @@ tooie theme apply --theme-source wallpaper --mode auto --status-palette vibrant
 The installer places files here:
 
 - binary: `~/.local/bin/tooie`
-- Tooie helper scripts and state files: `~/.config/tooie/`
+- Tooie managed root: `~/.config/tooie/`
+- managed config container: `~/.config/tooie/configs/`
 - theme backups: `~/.config/tooie/backups/`
 - install snapshots (for restore on uninstall): `~/.local/state/tooie/install/snapshots/<timestamp>/`
 
 ## What `install.sh` Deploys
 
-- `~/.tmux.conf`
-- `~/.termux/termux.properties`
-- `~/.termux/colors.properties`
-- `~/.termux/font.ttf`
-- `~/.termux/font-italic.ttf`
-- `~/.config/starship.toml`
-- `~/.config/fish/config.fish`
-- `~/.config/peaclock/config`
-- `~/.config/tmux/`
-- `~/.config/tmux/profile.env`
+- `~/.config/tooie/configs/tmux/`
+- `~/.config/tooie/configs/tmux/tmux.conf`
+- `~/.config/tooie/configs/termux/*`
+- `~/.config/tooie/configs/fish/config.fish`
+- `~/.config/tooie/configs/starship.toml`
+- `~/.config/tooie/configs/peaclock/config`
+- tmux bootstrap in `~/.tmux.conf`
+- fish snippet in `~/.config/fish/conf.d/tooie.fish` (when shell theming is selected)
+- symlinked fixed-path consumers (`~/.termux/*`, `~/.config/peaclock/config`) when selected
 - `~/.config/tooie/apply-material.sh`
 - `~/.config/tooie/restore-material.sh`
 - `~/.config/tooie/list-material-backups.sh`
 - `~/.config/tooie/reset-bootstrap-defaults.sh`
 - `~/.config/tooie/setup-btop-helper.sh`
-- `~/.config/tooie/bootstrap-defaults/`
 
-It supports both `pkg` and `pacman`.
+Supported package managers in installer: `pkg`, `pacman`, `apt`, `dnf`.
 
 ## CLI Notes
 

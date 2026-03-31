@@ -259,7 +259,7 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 		mode:          "mocha",
 		presetFamily:  "catppuccin",
 		presetVariant: "mocha",
-		profile:       "adaptive",
+		profile:       "auto",
 	}
 
 	m.normalizeThemeSelection()
@@ -273,7 +273,7 @@ func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 	m := model{
 		themeSource:   "wallpaper",
 		mode:          "auto",
-		profile:       "neon-night",
+		profile:       "source-2",
 		palette:       "vibrant",
 		widgetBattery: false,
 		widgetCPU:     true,
@@ -289,7 +289,8 @@ func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 		"--status-layout", "two-line",
 		"--status-separator", "on",
 		"-m", "auto",
-		"--style-family", "neon-night",
+		"--style-family", "source-2",
+		"--type", "tonal-spot",
 		"--widget-battery", "off",
 		"--widget-cpu", "on",
 		"--widget-ram", "off",

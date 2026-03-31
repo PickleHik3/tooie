@@ -40,6 +40,7 @@ func runDoctorCommand(args []string) int {
 	fmt.Printf("  rish:     %s\n", yesNo(commandExists("rish")))
 	fmt.Printf("  tsu:      %s\n", yesNo(commandExists("tsu")))
 	fmt.Printf("  su:       %s\n", yesNo(commandExists("su")))
+	fmt.Printf("  sudo:     %s\n", yesNo(commandExists("sudo")))
 
 	fmt.Println()
 	fmt.Println("Dependency guidance (no automatic install):")

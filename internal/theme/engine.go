@@ -124,15 +124,8 @@ func BuildRolesJSON(roles map[string]string) ([]byte, error) {
 func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	roles := normalizeRoleMap(rolesInput)
 	mode := canonicalMode(opts.Mode)
-	styleFamily := canonicalStyleFamily(opts.StyleFamily)
-	if styleFamily == "adaptive" && strings.TrimSpace(opts.StyleFamily) == "" {
-		styleFamily = canonicalStyleFamily(opts.Profile)
-	}
 	if mode == "" {
 		mode = "dark"
-	}
-	if opts.Source == SourceWallpaper {
-		roles = applyStyleFamily(roles, styleFamily, mode)
 	}
 
 	bg := role(roles, "background", tern(mode == "dark", "#1a1b26", "#eff1f5"))
@@ -259,8 +252,8 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		"effective_tertiary":        roles["tertiary"],
 		"effective_error":           roles["error"],
 		"contrast_guard_background": NormalizeHex(guard),
-		"style_family":              styleFamily,
-		"style_family_version":      "1",
+		"style_family":              "native",
+		"style_family_version":      "2",
 	}
 
 	return Result{

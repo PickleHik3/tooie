@@ -29,10 +29,125 @@ type labeledChoice struct {
 
 var setupUseGumUI = true
 
+type setupInstallPlan struct {
+	Platform   string
+	Backend    string
+	ThemeItems string
+}
+
+func normalizeInstallPlatform(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "linux":
+		return "linux"
+	default:
+		return "termux"
+	}
+}
+
+func normalizeInstallBackend(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "rish":
+		return "rish"
+	case "root":
+		return "root"
+	case "shizuku":
+		return "shizuku"
+	default:
+		return "none"
+	}
+}
+
+func normalizeInstallItems(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "tmux":
+		return "tmux"
+	case "termux":
+		return "termux"
+	case "shell":
+		return "shell"
+	default:
+		return "all"
+	}
+}
+
+func profileForInstallPlan(platform, backend string) string {
+	if platform == "linux" {
+		return "linux"
+	}
+	switch backend {
+	case "rish":
+		return "termux-rish"
+	case "root":
+		return "termux-root"
+	case "shizuku":
+		return "termux-shizuku"
+	default:
+		return "termux"
+	}
+}
+
+func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) error {
+	plan.Platform = normalizeInstallPlatform(plan.Platform)
+	plan.Backend = normalizeInstallBackend(plan.Backend)
+	plan.ThemeItems = normalizeInstallItems(plan.ThemeItems)
+	if plan.Platform == "linux" && plan.Backend != "none" {
+		return fmt.Errorf("install backend %q is only valid for termux", plan.Backend)
+	}
+	if plan.Platform != "termux" && plan.ThemeItems == "termux" {
+		return fmt.Errorf("install items 'termux' are only valid when platform is termux")
+	}
+
+	applyProfileDefaults(cur, profileForInstallPlan(plan.Platform, plan.Backend), env)
+	cur.Modules.TmuxTheme = false
+	cur.Modules.TermuxAppearance = false
+	cur.Modules.ShellTheme = false
+	cur.Modules.PeaclockTheme = false
+
+	switch plan.ThemeItems {
+	case "all":
+		cur.Modules.TmuxTheme = true
+		cur.Modules.ShellTheme = true
+		cur.Modules.PeaclockTheme = true
+		if plan.Platform == "termux" {
+			cur.Modules.TermuxAppearance = true
+		}
+	case "tmux":
+		cur.Modules.TmuxTheme = true
+	case "termux":
+		cur.Modules.TermuxAppearance = true
+	case "shell":
+		cur.Modules.ShellTheme = true
+		cur.Modules.PeaclockTheme = true
+	}
+
+	switch plan.Backend {
+	case "none":
+		cur.Modules.BtopHelper = false
+		cur.Privileged.Runner = "auto"
+		cur.Widgets.WidgetCPU = false
+	case "rish":
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "rish"
+		cur.Widgets.WidgetCPU = true
+	case "root":
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "root"
+		cur.Widgets.WidgetCPU = true
+	case "shizuku":
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "auto"
+		cur.Widgets.WidgetCPU = true
+	}
+	return nil
+}
+
 func runSetupCommand(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	nonInteractive := fs.Bool("non-interactive", false, "")
+	installPlatform := fs.String("install-platform", "", "")
+	installBackend := fs.String("install-backend", "", "")
+	installItems := fs.String("install-items", "", "")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie setup: %v\n", err)
 		return 2
@@ -65,6 +180,17 @@ func runSetupCommand(args []string) int {
 	applyProfileDefaults(&settings, settings.Platform.Profile, env)
 	if !env.IsTermux {
 		settings.Modules.TermuxAppearance = false
+	}
+	if strings.TrimSpace(*installPlatform) != "" || strings.TrimSpace(*installBackend) != "" || strings.TrimSpace(*installItems) != "" {
+		plan := setupInstallPlan{
+			Platform:   *installPlatform,
+			Backend:    *installBackend,
+			ThemeItems: *installItems,
+		}
+		if err := applyInstallPlan(&settings, env, plan); err != nil {
+			fmt.Fprintf(os.Stderr, "tooie setup: invalid install selection: %v\n", err)
+			return 2
+		}
 	}
 
 	if !*nonInteractive {
@@ -262,7 +388,7 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 				step++
 			}
 		case 9:
-			v, back, err := gumChooseSimple("Step 10/10: Privileged runner", []string{"auto", "rish", "su", "tsu"}, cur.Privileged.Runner, true)
+			v, back, err := gumChooseSimple("Step 10/10: Privileged runner", []string{"auto", "rish", "root", "su", "tsu", "sudo"}, cur.Privileged.Runner, true)
 			if err != nil {
 				return cur, err
 			}
@@ -329,11 +455,12 @@ func platformChoices(env setupEnv) []labeledChoice {
 func applyProfileDefaults(cur *tooieSettings, profile string, env setupEnv) {
 	profile = normalizePlatformProfile(profile)
 	cur.Platform.Profile = profile
+	cur.Modules.TmuxTheme = true
 	switch profile {
 	case "termux-root":
 		cur.Modules.TermuxAppearance = env.IsTermux
 		cur.Modules.BtopHelper = true
-		cur.Privileged.Runner = "su"
+		cur.Privileged.Runner = "root"
 	case "termux-shizuku":
 		cur.Modules.TermuxAppearance = env.IsTermux
 		cur.Modules.BtopHelper = true
@@ -675,77 +802,163 @@ func installSupportScriptsFromRepo() error {
 	return nil
 }
 
-func applySetupSelection(settings tooieSettings, env setupEnv) error {
-	home := homeDir
-	if err := installSupportScriptsFromRepo(); err != nil {
+func managedConfigsDir() string {
+	return filepath.Join(tooieConfigDir, "configs")
+}
+
+func managedTmuxDir() string {
+	return filepath.Join(managedConfigsDir(), "tmux")
+}
+
+func managedTmuxConfPath() string {
+	return filepath.Join(managedTmuxDir(), "tmux.conf")
+}
+
+func managedStarshipPath() string {
+	return filepath.Join(managedConfigsDir(), "starship.toml")
+}
+
+func managedFishConfigPath() string {
+	return filepath.Join(managedConfigsDir(), "fish", "config.fish")
+}
+
+func managedPeaclockPath() string {
+	return filepath.Join(managedConfigsDir(), "peaclock", "config")
+}
+
+func managedTermuxFilePath(name string) string {
+	return filepath.Join(managedConfigsDir(), "termux", name)
+}
+
+func installFishBootstrap(home string, enable bool) error {
+	snippetPath := filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish")
+	if !enable {
+		return nil
+	}
+	snippet := `# tooie managed snippet
+set -gx STARSHIP_CONFIG "$HOME/.config/tooie/configs/starship.toml"
+if test -f "$HOME/.config/tooie/configs/fish/config.fish"
+    source "$HOME/.config/tooie/configs/fish/config.fish"
+end
+`
+	if err := os.MkdirAll(filepath.Dir(snippetPath), 0o755); err != nil {
 		return err
 	}
+	return os.WriteFile(snippetPath, []byte(snippet), 0o644)
+}
 
+func relinkPath(dst, target string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if cur, err := os.Readlink(dst); err == nil {
+		if cur == target {
+			return nil
+		}
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	return os.Symlink(target, dst)
+}
+
+func installTmuxBootstrap(home string, enable bool) error {
+	if !enable {
+		return nil
+	}
+	tmuxConf := filepath.Join(home, ".tmux.conf")
+	if err := ensureFileWithDirs(tmuxConf); err != nil {
+		return err
+	}
+	block := `# >>> TOOIE TMUX BOOTSTRAP START >>>
+source-file "$HOME/.config/tooie/configs/tmux/tmux.conf"
+# <<< TOOIE TMUX BOOTSTRAP END <<<`
+	return replaceBlock(tmuxConf, "# >>> TOOIE TMUX BOOTSTRAP START >>>", "# <<< TOOIE TMUX BOOTSTRAP END <<<", block)
+}
+
+func stageManagedConfigs(settings tooieSettings) error {
 	tmuxDirSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux"))
 	if err != nil {
 		return err
 	}
-	if err := copyTree(tmuxDirSrc, filepath.Join(home, ".config", "tmux")); err != nil {
+	if err := copyTree(tmuxDirSrc, managedTmuxDir()); err != nil {
 		return err
 	}
 	profileEnvSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", "profiles", normalizePlatformProfile(settings.Platform.Profile)+".env"))
 	if err != nil {
 		return err
 	}
-	if err := copyFile(profileEnvSrc, filepath.Join(home, ".config", "tmux", "profile.env"), 0o644); err != nil {
+	if err := copyFile(profileEnvSrc, filepath.Join(managedTmuxDir(), "profile.env"), 0o644); err != nil {
 		return err
 	}
-
-	if settings.Tmux.Mode == "full" {
-		tmuxConfSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".tmux.conf"))
+	tmuxConfSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".tmux.conf"))
+	if err != nil {
+		return err
+	}
+	if err := copyFile(tmuxConfSrc, managedTmuxConfPath(), 0o644); err != nil {
+		return err
+	}
+	starshipSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "starship.toml"))
+	if err != nil {
+		return err
+	}
+	if err := copyFile(starshipSrc, managedStarshipPath(), 0o644); err != nil {
+		return err
+	}
+	fishSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "fish", "config.fish"))
+	if err != nil {
+		return err
+	}
+	if err := copyFile(fishSrc, managedFishConfigPath(), 0o644); err != nil {
+		return err
+	}
+	peaclockSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "peaclock", "config"))
+	if err != nil {
+		return err
+	}
+	if err := copyFile(peaclockSrc, managedPeaclockPath(), 0o644); err != nil {
+		return err
+	}
+	for _, name := range []string{"termux.properties", "colors.properties", "font.ttf", "font-italic.ttf"} {
+		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".termux", name))
 		if err != nil {
 			return err
 		}
-		if err := copyFile(tmuxConfSrc, filepath.Join(home, ".tmux.conf"), 0o644); err != nil {
-			return err
+		perm := os.FileMode(0o644)
+		if strings.HasSuffix(name, ".ttf") {
+			perm = 0o644
 		}
-	} else {
-		if err := ensureFileWithDirs(filepath.Join(home, ".tmux.conf")); err != nil {
+		if err := copyFile(src, managedTermuxFilePath(name), perm); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
+func applySetupSelection(settings tooieSettings, env setupEnv) error {
+	home := homeDir
+	if err := installSupportScriptsFromRepo(); err != nil {
+		return err
+	}
+	if err := stageManagedConfigs(settings); err != nil {
+		return err
+	}
+	if err := installTmuxBootstrap(home, settings.Modules.TmuxTheme); err != nil {
+		return err
+	}
+	if err := installFishBootstrap(home, settings.Modules.ShellTheme); err != nil {
+		return err
+	}
+	if settings.Modules.PeaclockTheme {
+		if err := relinkPath(filepath.Join(home, ".config", "peaclock", "config"), managedPeaclockPath()); err != nil {
+			return err
+		}
+	}
 	if settings.Modules.TermuxAppearance && env.IsTermux {
 		for _, name := range []string{"termux.properties", "colors.properties", "font.ttf", "font-italic.ttf"} {
-			src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".termux", name))
-			if err != nil {
+			if err := relinkPath(filepath.Join(home, ".termux", name), managedTermuxFilePath(name)); err != nil {
 				return err
 			}
-			if err := copyFile(src, filepath.Join(home, ".termux", name), 0o644); err != nil {
-				return err
-			}
-		}
-	}
-
-	if settings.Modules.ShellTheme {
-		starshipSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "starship.toml"))
-		if err != nil {
-			return err
-		}
-		if err := copyFile(starshipSrc, filepath.Join(home, ".config", "starship.toml"), 0o644); err != nil {
-			return err
-		}
-		fishSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "fish", "config.fish"))
-		if err != nil {
-			return err
-		}
-		if err := copyFile(fishSrc, filepath.Join(home, ".config", "fish", "config.fish"), 0o644); err != nil {
-			return err
-		}
-	}
-
-	if settings.Modules.PeaclockTheme {
-		peaclockSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "peaclock", "config"))
-		if err != nil {
-			return err
-		}
-		if err := copyFile(peaclockSrc, filepath.Join(home, ".config", "peaclock", "config"), 0o644); err != nil {
-			return err
 		}
 	}
 
@@ -795,10 +1008,10 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	}
 
 	required := []string{
-		filepath.Join(home, ".config", "tmux", "run-system-widget"),
-		filepath.Join(home, ".config", "tmux", "system-widgets"),
-		filepath.Join(home, ".config", "tmux", "widget-left"),
-		filepath.Join(home, ".config", "tmux", "profile.env"),
+		filepath.Join(managedTmuxDir(), "run-system-widget"),
+		filepath.Join(managedTmuxDir(), "system-widgets"),
+		filepath.Join(managedTmuxDir(), "widget-left"),
+		filepath.Join(managedTmuxDir(), "profile.env"),
 		installedApplyScriptPath(),
 		installedRestoreScriptPath(),
 	}
@@ -839,10 +1052,8 @@ func installManagedPaths(home string) []string {
 	return []string{
 		filepath.Join(home, ".local", "bin", "tooie"),
 		filepath.Join(home, ".config", "tooie"),
-		filepath.Join(home, ".config", "tmux"),
 		filepath.Join(home, ".tmux.conf"),
-		filepath.Join(home, ".config", "starship.toml"),
-		filepath.Join(home, ".config", "fish", "config.fish"),
+		filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish"),
 		filepath.Join(home, ".config", "peaclock", "config"),
 		filepath.Join(home, ".termux", "termux.properties"),
 		filepath.Join(home, ".termux", "colors.properties"),
