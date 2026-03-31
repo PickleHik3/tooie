@@ -85,6 +85,35 @@ is_waydroid_env(){
   return 1
 }
 
+read_cpu_stat(){
+  awk '/^cpu / {print $2, $3, $4, $5, $6, $7, $8, $9, $10, $11; exit}' /proc/stat 2>/dev/null || true
+}
+
+cpu_percent_from_procstat(){
+  s1="$(read_cpu_stat)"
+  [ -n "$s1" ] || return 1
+  sleep "${STATUS_TMUX_CPU_SAMPLE_SEC:-0.2}"
+  s2="$(read_cpu_stat)"
+  [ -n "$s2" ] || return 1
+
+  # shellcheck disable=SC2086
+  set -- $s1
+  u1=${1:-0}; n1=${2:-0}; sy1=${3:-0}; i1=${4:-0}; w1=${5:-0}; ir1=${6:-0}; si1=${7:-0}; st1=${8:-0}; g1=${9:-0}; gn1=${10:-0}
+  # shellcheck disable=SC2086
+  set -- $s2
+  u2=${1:-0}; n2=${2:-0}; sy2=${3:-0}; i2=${4:-0}; w2=${5:-0}; ir2=${6:-0}; si2=${7:-0}; st2=${8:-0}; g2=${9:-0}; gn2=${10:-0}
+
+  t1=$((u1+n1+sy1+i1+w1+ir1+si1+st1+g1+gn1))
+  t2=$((u2+n2+sy2+i2+w2+ir2+si2+st2+g2+gn2))
+  idle1=$((i1+w1))
+  idle2=$((i2+w2))
+  dt=$((t2-t1))
+  didle=$((idle2-idle1))
+  [ "$dt" -gt 0 ] || return 1
+
+  awk -v dt="$dt" -v didle="$didle" 'BEGIN{u=((dt-didle)/dt)*100; if(u<0)u=0; if(u>100)u=100; printf "%.2f", u}'
+}
+
 helper_stats_is_fresh(){
   [ -f "$HELPER_STATS_FILE" ] || return 1
   now="$(now_epoch)"
@@ -219,9 +248,12 @@ collect_backend_json(){
 
 collect_local_json(){
   want_bat="$1"
-  cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"; [ -n "$cores" ] || cores=1; [ "$cores" -gt 0 ] || cores=1
-  load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
-  cpu_pct="$(awk -v l="$load1" -v c="$cores" 'BEGIN{v=(l/c)*100; if(v<0)v=0; if(v>100)v=100; printf "%.2f", v}')"
+  cpu_pct="$(cpu_percent_from_procstat 2>/dev/null || true)"
+  if [ -z "$cpu_pct" ]; then
+    cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"; [ -n "$cores" ] || cores=1; [ "$cores" -gt 0 ] || cores=1
+    load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
+    cpu_pct="$(awk -v l="$load1" -v c="$cores" 'BEGIN{v=(l/c)*100; if(v<0)v=0; if(v>100)v=100; printf "%.2f", v}')"
+  fi
   mem_total_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   mem_avail_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   mem_total_b=$((mem_total_kb * 1024)); mem_avail_b=$((mem_avail_kb * 1024)); mem_used_b=$((mem_total_b - mem_avail_b)); [ "$mem_used_b" -lt 0 ] && mem_used_b=0
