@@ -46,15 +46,26 @@ if status is-interactive
     and not set -q SSH_CONNECTION
     and not set -q SSH_CLIENT
     and not set -q SSH_TTY
-    set -l __tooie_tty (tty 2>/dev/null)
-    if test -n "$__tooie_tty"
-        set -l __tooie_leaf (string split "/" "$__tooie_tty")[-1]
-        set -l __tooie_name "tty-$__tooie_leaf"
-        set __tooie_name (string replace -a "." "-" "$__tooie_name")
-        exec tmux new-session -s "$__tooie_name" 2>/dev/null
-    else
-        exec tmux new-session 2>/dev/null
+    set -l __tooie_purpose shell
+    if set -q TOOIE_TMUX_PURPOSE
+        set __tooie_purpose (string trim -- "$TOOIE_TMUX_PURPOSE")
     end
+    if test -z "$__tooie_purpose"
+        set __tooie_purpose shell
+    end
+    set __tooie_purpose (string lower -- "$__tooie_purpose")
+    set __tooie_purpose (string replace -ra '[^a-z0-9_-]+' '-' -- "$__tooie_purpose")
+    if test -z "$__tooie_purpose"
+        set __tooie_purpose shell
+    end
+
+    set -l __tooie_name "$__tooie_purpose"
+    set -l __tooie_idx 2
+    while tmux has-session -t "$__tooie_name" >/dev/null 2>&1
+        set __tooie_name "$__tooie_purpose-$__tooie_idx"
+        set __tooie_idx (math "$__tooie_idx + 1")
+    end
+    exec tmux new-session -s "$__tooie_name" 2>/dev/null
 end
 
 # --- 3. Shell Customization ---
