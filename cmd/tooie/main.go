@@ -750,6 +750,9 @@ func pollMetrics() tea.Cmd {
 		h := (up % 86400) / 3600
 
 		cpuPct, memUsedBytes, memTotalBytes, backendOK := readTooieResources(900 * time.Millisecond)
+		if !isTermuxRuntime() {
+			backendOK = false
+		}
 		if !backendOK {
 			cpuVals, cpuErr := cpu.Percent(250*time.Millisecond, false)
 			if cpuErr != nil {
@@ -762,7 +765,7 @@ func pollMetrics() tea.Cmd {
 			if len(cpuVals) > 0 {
 				cpuPct = cpuVals[0]
 			}
-			memUsedBytes = vm.Used
+			memUsedBytes = effectiveMemoryUsedBytes(vm.Total, vm.Available, vm.Used)
 			memTotalBytes = vm.Total
 		}
 		if cpuPct > 0 && cpuPct <= 1 {
@@ -794,6 +797,20 @@ func pollMetrics() tea.Cmd {
 			uptimeText:  fmt.Sprintf("%dd %dh", d, h),
 		}
 	}
+}
+
+func isTermuxRuntime() bool {
+	if strings.Contains(homeDir, "/data/data/com.termux") {
+		return true
+	}
+	return strings.TrimSpace(os.Getenv("PREFIX")) == "/data/data/com.termux/files/usr"
+}
+
+func effectiveMemoryUsedBytes(total, available, used uint64) uint64 {
+	if total > 0 && available > 0 && total >= available {
+		return total - available
+	}
+	return used
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
