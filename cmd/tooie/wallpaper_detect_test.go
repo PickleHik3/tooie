@@ -41,3 +41,26 @@ func TestBestWallpaperPathFallsBackToPictures(t *testing.T) {
 		t.Fatalf("bestWallpaperPath() = %q, want %q", got, img)
 	}
 }
+
+func TestBestWallpaperPathFilteredPicturesSkipsProfileNames(t *testing.T) {
+	tmp := t.TempDir()
+	pics := filepath.Join(tmp, "Pictures")
+	if err := os.MkdirAll(pics, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := filepath.Join(pics, "profile.png")
+	if err := os.WriteFile(profile, make([]byte, 300*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wall := filepath.Join(pics, "mountains_wallpaper.jpg")
+	if err := os.WriteFile(wall, make([]byte, 350*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := bestWallpaperPath(tmp)
+	if !ok {
+		t.Fatalf("expected fallback wallpaper to resolve")
+	}
+	if got != wall {
+		t.Fatalf("bestWallpaperPath() = %q, want %q", got, wall)
+	}
+}

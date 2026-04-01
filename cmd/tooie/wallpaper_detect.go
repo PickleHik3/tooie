@@ -29,10 +29,16 @@ func bestWallpaperPath(home string) (string, bool) {
 	if hypr := detectHyprpaperWallpaper(home); hypr != "" {
 		candidates = append(candidates, hypr)
 	}
+	if sway := detectSwayWallpaper(home); sway != "" {
+		candidates = append(candidates, sway)
+	}
 	if feh := detectFehWallpaper(home); feh != "" {
 		candidates = append(candidates, feh)
 	}
 	if latest := newestImageFromCommonDirs(home); latest != "" {
+		candidates = append(candidates, latest)
+	}
+	if latest := newestImageFromPicturesFiltered(home); latest != "" {
 		candidates = append(candidates, latest)
 	}
 	for _, c := range candidates {
@@ -161,6 +167,29 @@ func detectFehWallpaper(home string) string {
 	return ""
 }
 
+func detectSwayWallpaper(home string) string {
+	path := filepath.Join(home, ".config", "sway", "config")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "output ") || !strings.Contains(line, " bg ") {
+			continue
+		}
+		parts := strings.Fields(line)
+		for i := 0; i < len(parts); i++ {
+			if parts[i] == "bg" && i+1 < len(parts) {
+				if wall := canonicalWallpaperCandidate(parts[i+1]); wall != "" {
+					return wall
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func newestImageFromCommonDirs(home string) string {
 	dirs := []string{
 		filepath.Join(home, "Pictures", "Wallpapers"),
@@ -191,6 +220,41 @@ func newestImageFromCommonDirs(home string) string {
 			}
 			all = append(all, candidate{path: filepath.Join(dir, e.Name()), mod: info.ModTime().UnixNano()})
 		}
+	}
+	if len(all) == 0 {
+		return ""
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].mod > all[j].mod })
+	return all[0].path
+}
+
+func newestImageFromPicturesFiltered(home string) string {
+	dir := filepath.Join(home, "Pictures")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	type candidate struct {
+		path string
+		mod  int64
+	}
+	all := []candidate{}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.ToLower(e.Name())
+		if !(strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") || strings.HasSuffix(name, ".png") || strings.HasSuffix(name, ".webp") || strings.HasSuffix(name, ".bmp")) {
+			continue
+		}
+		if strings.Contains(name, "profile") || strings.Contains(name, "avatar") || strings.Contains(name, "face") || strings.Contains(name, "icon") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Size() < 200*1024 {
+			continue
+		}
+		all = append(all, candidate{path: filepath.Join(dir, e.Name()), mod: info.ModTime().UnixNano()})
 	}
 	if len(all) == 0 {
 		return ""
