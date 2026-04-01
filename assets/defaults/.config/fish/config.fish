@@ -37,20 +37,7 @@ end
 
 set -g fish_greeting ""
 
-# --- 2. Tmux Auto-Start ---
-if status is-interactive
-    and not set -q TMUX
-    and type -q tmux # Check if tmux exists to prevent crash loop
-
-    # Skip tmux when connected over SSH; auto-start only for local shells.
-    if not set -q SSH_CONNECTION
-        and not set -q SSH_CLIENT
-        and not set -q SSH_TTY
-        exec tmux new-session -A -s main
-    end
-end
-
-# --- 3. Shell Customization ---
+# --- 2. Shell Customization ---
 
 function clear
     command clear
@@ -138,7 +125,7 @@ function cd
     and ls
 end
 
-# --- 4. Starship & Zoxide ---
+# --- 3. Starship & Zoxide ---
 if status --is-interactive
     if type -q starship
         starship init fish | source
