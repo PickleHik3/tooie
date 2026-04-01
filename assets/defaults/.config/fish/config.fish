@@ -47,6 +47,9 @@ if status is-interactive
     and not set -q SSH_CLIENT
     and not set -q SSH_TTY
     set -l __tooie_purpose shell
+    if test "$PREFIX" = "/data/data/com.termux/files/usr"
+        set __tooie_purpose termux
+    end
     if set -q TOOIE_TMUX_PURPOSE
         set __tooie_purpose (string trim -- "$TOOIE_TMUX_PURPOSE")
     end
