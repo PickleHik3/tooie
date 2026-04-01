@@ -974,7 +974,11 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	}
 	if settings.Modules.TermuxAppearance && env.IsTermux {
 		for _, name := range []string{"termux.properties", "colors.properties", "font.ttf", "font-italic.ttf"} {
-			if err := relinkPath(filepath.Join(home, ".termux", name), managedTermuxFilePath(name)); err != nil {
+			src := managedTermuxFilePath(name)
+			if err := copyFile(src, filepath.Join(home, ".termux", name), 0o644); err != nil {
+				return err
+			}
+			if err := copyFile(src, filepath.Join(home, ".config", "termux", name), 0o644); err != nil {
 				return err
 			}
 		}
@@ -1083,6 +1087,10 @@ func installManagedPaths(home string, settings tooieSettings, env setupEnv) []st
 			filepath.Join(home, ".termux", "colors.properties"),
 			filepath.Join(home, ".termux", "font.ttf"),
 			filepath.Join(home, ".termux", "font-italic.ttf"),
+			filepath.Join(home, ".config", "termux", "termux.properties"),
+			filepath.Join(home, ".config", "termux", "colors.properties"),
+			filepath.Join(home, ".config", "termux", "font.ttf"),
+			filepath.Join(home, ".config", "termux", "font-italic.ttf"),
 		)
 	}
 	return paths

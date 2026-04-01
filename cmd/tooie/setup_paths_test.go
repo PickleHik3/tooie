@@ -29,11 +29,12 @@ func TestInstallManagedPathsTermuxIncludesTermuxFiles(t *testing.T) {
 	paths := installManagedPaths(home, settings, env)
 	var termuxCount int
 	for _, p := range paths {
-		if strings.Contains(p, string(filepath.Separator)+".termux"+string(filepath.Separator)) {
+		if strings.Contains(p, string(filepath.Separator)+".termux"+string(filepath.Separator)) ||
+			strings.Contains(p, string(filepath.Separator)+".config"+string(filepath.Separator)+"termux"+string(filepath.Separator)) {
 			termuxCount++
 		}
 	}
-	if termuxCount != 4 {
-		t.Fatalf("expected 4 termux paths, got %d (%v)", termuxCount, paths)
+	if termuxCount != 8 {
+		t.Fatalf("expected 8 termux paths, got %d (%v)", termuxCount, paths)
 	}
 }
