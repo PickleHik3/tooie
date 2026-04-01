@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +36,9 @@ func bestWallpaperPath(home string) (string, bool) {
 	if feh := detectFehWallpaper(home); feh != "" {
 		candidates = append(candidates, feh)
 	}
+	if state := detectWallpaperFromStateFiles(home); state != "" {
+		candidates = append(candidates, state)
+	}
 	if latest := newestImageFromCommonDirs(home); latest != "" {
 		candidates = append(candidates, latest)
 	}
@@ -43,8 +47,12 @@ func bestWallpaperPath(home string) (string, bool) {
 	}
 	for _, c := range candidates {
 		if wall := canonicalWallpaperCandidate(c); wall != "" {
+			rememberWallpaperPath(home, wall)
 			return wall, true
 		}
+	}
+	if cached := rememberedWallpaperPath(home); cached != "" {
+		return cached, true
 	}
 	return "", false
 }
@@ -188,6 +196,82 @@ func detectSwayWallpaper(home string) string {
 		}
 	}
 	return ""
+}
+
+func detectWallpaperFromStateFiles(home string) string {
+	paths := []string{
+		filepath.Join(home, ".cache", "wal", "wal"),
+		filepath.Join(home, ".cache", "wallust", "wallpaper"),
+		filepath.Join(home, ".cache", "swww", "wallpaper"),
+		filepath.Join(home, ".config", "dms", "wallpaper"),
+		filepath.Join(home, ".config", "dank-material-shell", "wallpaper"),
+		filepath.Join(home, ".config", "dank-material-shell", "state"),
+		filepath.Join(home, ".config", "dank-material-shell", "state.json"),
+	}
+	for _, path := range paths {
+		if wall := parseWallpaperPathFromFile(path); wall != "" {
+			return wall
+		}
+	}
+	return ""
+}
+
+func parseWallpaperPathFromFile(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		if wall := canonicalWallpaperCandidate(line); wall != "" {
+			return wall
+		}
+		if i := strings.Index(line, "="); i > 0 {
+			if wall := canonicalWallpaperCandidate(strings.TrimSpace(line[i+1:])); wall != "" {
+				return wall
+			}
+		}
+		if i := strings.Index(line, ":"); i > 0 {
+			if wall := canonicalWallpaperCandidate(strings.TrimSpace(line[i+1:])); wall != "" {
+				return wall
+			}
+		}
+		for _, token := range strings.Fields(line) {
+			if wall := canonicalWallpaperCandidate(token); wall != "" {
+				return wall
+			}
+		}
+	}
+	return ""
+}
+
+func rememberedWallpaperPath(home string) string {
+	path := filepath.Join(home, ".config", "tooie", "cache", "wallpaper-path.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return canonicalWallpaperCandidate(string(raw))
+}
+
+func rememberWallpaperPath(home, wall string) {
+	wall = canonicalWallpaperCandidate(wall)
+	if wall == "" {
+		return
+	}
+	path := filepath.Join(home, ".config", "tooie", "cache", "wallpaper-path.txt")
+	if cur := rememberedWallpaperPath(home); cur == wall {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte(wall+"\n"), 0o644)
 }
 
 func newestImageFromCommonDirs(home string) string {
