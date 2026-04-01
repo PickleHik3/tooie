@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	itheme "github.com/PickleHik3/tooie/internal/theme"
@@ -24,6 +25,59 @@ import (
 const (
 	themeBackupKeep = 5
 )
+
+var matugenResultCache = struct {
+	mu sync.Mutex
+	m  map[string][]byte
+}{
+	m: map[string][]byte{},
+}
+
+const matugenRolesTemplate = `{
+  "colors": {
+    "dark": {
+      "background": "{{colors.background.dark.hex}}",
+      "surface": "{{colors.surface.dark.hex}}",
+      "surface_container": "{{colors.surface_container.dark.hex}}",
+      "surface_container_high": "{{colors.surface_container_high.dark.hex}}",
+      "surface_dim": "{{colors.surface_dim.dark.hex}}",
+      "surface_bright": "{{colors.surface_bright.dark.hex}}",
+      "surface_variant": "{{colors.surface_variant.dark.hex}}",
+      "on_background": "{{colors.on_background.dark.hex}}",
+      "on_surface": "{{colors.on_surface.dark.hex}}",
+      "on_surface_variant": "{{colors.on_surface_variant.dark.hex}}",
+      "outline": "{{colors.outline.dark.hex}}",
+      "outline_variant": "{{colors.outline_variant.dark.hex}}",
+      "primary": "{{colors.primary.dark.hex}}",
+      "secondary": "{{colors.secondary.dark.hex}}",
+      "tertiary": "{{colors.tertiary.dark.hex}}",
+      "error": "{{colors.error.dark.hex}}",
+      "secondary_fixed": "{{colors.secondary_fixed.dark.hex}}",
+      "tertiary_fixed": "{{colors.tertiary_fixed.dark.hex}}"
+    },
+    "light": {
+      "background": "{{colors.background.light.hex}}",
+      "surface": "{{colors.surface.light.hex}}",
+      "surface_container": "{{colors.surface_container.light.hex}}",
+      "surface_container_high": "{{colors.surface_container_high.light.hex}}",
+      "surface_dim": "{{colors.surface_dim.light.hex}}",
+      "surface_bright": "{{colors.surface_bright.light.hex}}",
+      "surface_variant": "{{colors.surface_variant.light.hex}}",
+      "on_background": "{{colors.on_background.light.hex}}",
+      "on_surface": "{{colors.on_surface.light.hex}}",
+      "on_surface_variant": "{{colors.on_surface_variant.light.hex}}",
+      "outline": "{{colors.outline.light.hex}}",
+      "outline_variant": "{{colors.outline_variant.light.hex}}",
+      "primary": "{{colors.primary.light.hex}}",
+      "secondary": "{{colors.secondary.light.hex}}",
+      "tertiary": "{{colors.tertiary.light.hex}}",
+      "error": "{{colors.error.light.hex}}",
+      "secondary_fixed": "{{colors.secondary_fixed.light.hex}}",
+      "tertiary_fixed": "{{colors.tertiary_fixed.light.hex}}"
+    }
+  }
+}
+`
 
 type themeApplyConfig struct {
 	Mode                 string
@@ -277,7 +331,7 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 			effectiveMode = mode
 			autoMeta = meta
 		}
-		parsed, err := itheme.ParseMatugenColors(matugenRaw)
+		parsed, err := itheme.ParseMatugenColorsForMode(matugenRaw, effectiveMode)
 		if err != nil {
 			return out, nil, err
 		}
@@ -467,35 +521,68 @@ func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metr
 	schemes := pickSchemeCandidates(cfg.SchemeType)
 	modes := autoCandidateModes(mode, metrics)
 	indices := sourceIndexCandidates(cfg)
-	candidates := make([]matugenCandidate, 0, len(modes)*len(schemes)*len(indices))
-	var lastErr error
+	type combo struct {
+		mode   string
+		scheme string
+		index  int
+	}
+	jobs := make([]combo, 0, len(modes)*len(schemes)*len(indices))
 	for _, m := range modes {
 		for _, s := range schemes {
 			for _, idx := range indices {
-				raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, m, s, idx, cfg.ExtractPrefer, cfg.ExtractFallbackColor, cfg.ExtractResizeFilter)
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				roles, err := itheme.ParseMatugenColors(raw)
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				readability := readabilityScore(roles)
-				c := matugenCandidate{
-					Raw:         raw,
-					Mode:        m,
-					Scheme:      s,
-					SourceIndex: idx,
-					Roles:       roles,
-					Readability: readability,
-				}
-				c.Score = scoreCandidate(c, metrics)
-				candidates = append(candidates, c)
+				jobs = append(jobs, combo{mode: m, scheme: s, index: idx})
 			}
 		}
 	}
+	candidates := make([]matugenCandidate, 0, len(jobs))
+	var lastErr error
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	parallel := 4
+	if len(jobs) < parallel {
+		parallel = len(jobs)
+	}
+	if parallel <= 0 {
+		return nil, fmt.Errorf("no matugen candidates requested")
+	}
+	sem := make(chan struct{}, parallel)
+	for _, job := range jobs {
+		job := job
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, job.mode, job.scheme, job.index, cfg.ExtractPrefer, cfg.ExtractFallbackColor, cfg.ExtractResizeFilter)
+			if err != nil {
+				mu.Lock()
+				lastErr = err
+				mu.Unlock()
+				return
+			}
+			roles, err := itheme.ParseMatugenColorsForMode(raw, job.mode)
+			if err != nil {
+				mu.Lock()
+				lastErr = err
+				mu.Unlock()
+				return
+			}
+			readability := readabilityScore(roles)
+			c := matugenCandidate{
+				Raw:         raw,
+				Mode:        job.mode,
+				Scheme:      job.scheme,
+				SourceIndex: job.index,
+				Roles:       roles,
+				Readability: readability,
+			}
+			c.Score = scoreCandidate(c, metrics)
+			mu.Lock()
+			candidates = append(candidates, c)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
 	if len(candidates) == 0 {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("failed to evaluate any matugen candidates")
@@ -509,7 +596,8 @@ func autoCandidateModes(mode string, metrics autoDecisionMetrics) []string {
 	if mode != "auto" {
 		return []string{mode}
 	}
-	return []string{"dark", "light"}
+	sceneMode, _ := autoSceneDecision(metrics, mode)
+	return []string{sceneMode}
 }
 
 func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string) {
@@ -520,9 +608,9 @@ func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string
 		return "dark", "forced-dark"
 	}
 	if brightDominantScene(metrics) {
-		return "bright", "forced-light"
+		return "light", "forced-light"
 	}
-	return "mixed", "dual"
+	return "dark", "fallback-dark"
 }
 
 func pickSchemeCandidates(schemeType string) []string {
@@ -569,6 +657,14 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	if accentMin < 3.0 {
 		return -800 + accentMin
 	}
+	mutedContrast := contrastRatioHex(getRoleOr(c.Roles, "on_surface_variant", fg), bg)
+	if mutedContrast < 3.2 {
+		return -700 + mutedContrast
+	}
+	outlineContrast := contrastRatioHex(getRoleOr(c.Roles, "outline", fg), bg)
+	if outlineContrast < 2.8 {
+		return -650 + outlineContrast
+	}
 
 	sceneFit := sceneFitScore(c.Mode, metrics)
 	ansiSep := ansiSeparationScore(c.Roles)
@@ -607,7 +703,7 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 		schemeBias = 0.18 + (0.25 * clamp01(0.40-metrics.P90Sat))
 	}
 	affinityWeight := 1.0
-	return (c.Readability * 1.85) + (fgContrast * 0.9) + (accentMin * 0.85) + (ansiSep * 0.8) + (wallpaperAffinity * affinityWeight) + sceneFit + schemeBias - sourcePenalty - modePenalty
+	return (c.Readability * 2.05) + (fgContrast * 1.05) + (accentMin * 1.00) + (mutedContrast * 0.70) + (outlineContrast * 0.45) + (ansiSep * 0.95) + (wallpaperAffinity * affinityWeight) + sceneFit + schemeBias - sourcePenalty - modePenalty
 }
 
 func wallpaperHueAffinityScore(roles map[string]string, metrics autoDecisionMetrics) float64 {
@@ -646,15 +742,13 @@ func sceneFitScore(mode string, metrics autoDecisionMetrics) float64 {
 }
 
 func darkDominantScene(metrics autoDecisionMetrics) bool {
-	return (metrics.DarkPixelRatio > 0.45 && (metrics.P50 < 0.50 || metrics.MeanLuma < 0.48)) ||
-		(metrics.P50 < 0.40 && metrics.DarkPixelRatio > 0.52) ||
-		(metrics.MeanLuma < 0.43 && metrics.EdgeWeightedLuma < 0.50)
+	return metrics.DarkPixelRatio >= 0.45 ||
+		metrics.P50 <= 0.38 ||
+		(metrics.MeanLuma <= 0.35 && metrics.BrightPixelRatio < 0.08)
 }
 
 func brightDominantScene(metrics autoDecisionMetrics) bool {
-	return (metrics.BrightPixelRatio > 0.28 && (metrics.P50 > 0.56 || metrics.MeanLuma > 0.56)) ||
-		(metrics.P50 > 0.60 && metrics.DarkPixelRatio < 0.36) ||
-		(metrics.MeanLuma > 0.63 && metrics.BrightPixelRatio > 0.22)
+	return metrics.BrightPixelRatio >= 0.28 && metrics.P50 >= 0.52
 }
 
 func ansiSeparationScore(roles map[string]string) float64 {
@@ -907,6 +1001,71 @@ func schemeTypeLabel(raw string) string {
 	return strings.TrimPrefix(v, "scheme-")
 }
 
+type statusSchemeTuning struct {
+	Lift          float64
+	AccentSat     float64
+	ChipMixA      float64
+	ChipMixB      float64
+	ChipMixC      float64
+	WidgetMix     float64
+	WindowActive  float64
+	WindowInactive float64
+}
+
+func statusSchemeTuningFor(scheme, mode string) statusSchemeTuning {
+	t := statusSchemeTuning{
+		Lift:           0.24,
+		AccentSat:      0.18,
+		ChipMixA:       0.62,
+		ChipMixB:       0.58,
+		ChipMixC:       0.60,
+		WidgetMix:      0.64,
+		WindowActive:   0.36,
+		WindowInactive: 0.52,
+	}
+	if mode == "light" {
+		t.Lift = 0.14
+		t.AccentSat = 0.14
+	}
+	switch normalizeSchemeType(scheme) {
+	case "scheme-expressive", "scheme-rainbow", "scheme-fruit-salad":
+		t.AccentSat += 0.08
+		t.ChipMixA += 0.08
+		t.ChipMixB += 0.08
+		t.ChipMixC += 0.08
+		t.WidgetMix += 0.06
+		t.WindowActive += 0.04
+	case "scheme-vibrant":
+		t.AccentSat += 0.06
+		t.ChipMixA += 0.06
+		t.ChipMixB += 0.06
+		t.ChipMixC += 0.06
+		t.WidgetMix += 0.05
+	case "scheme-fidelity", "scheme-content":
+		t.AccentSat -= 0.03
+		t.ChipMixA -= 0.04
+		t.ChipMixB -= 0.04
+		t.ChipMixC -= 0.04
+		t.WidgetMix -= 0.03
+	case "scheme-neutral", "scheme-monochrome":
+		t.AccentSat -= 0.08
+		t.ChipMixA -= 0.08
+		t.ChipMixB -= 0.08
+		t.ChipMixC -= 0.08
+		t.WidgetMix -= 0.06
+		t.WindowActive -= 0.04
+	}
+	t.Lift = clamp01(t.Lift)
+	t.AccentSat = clamp01(t.AccentSat)
+	t.ChipMixA = clamp01(t.ChipMixA)
+	t.ChipMixB = clamp01(t.ChipMixB)
+	t.ChipMixC = clamp01(t.ChipMixC)
+	t.WidgetMix = clamp01(t.WidgetMix)
+	t.WindowActive = clamp01(t.WindowActive)
+	t.WindowInactive = clamp01(t.WindowInactive)
+	return t
+}
+
 func normalizeMatugenPrefer(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case "", "none":
@@ -1034,6 +1193,8 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 	}
 
 	_ = writeApplyProgress("Writing tmux theme", 0.56)
+	_ = syncManagedTmuxRuntimeFilesFromRepo()
+	_ = syncManagedFishConfigFromRepo()
 	if err := ensureFileWithDirs(tmuxConf); err != nil {
 		return err
 	}
@@ -1086,6 +1247,46 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 	return nil
 }
 
+func syncManagedTmuxRuntimeFilesFromRepo() error {
+	if err := os.MkdirAll(managedTmuxDir(), 0o755); err != nil {
+		return err
+	}
+	files := []string{
+		"helpers.sh",
+		"run-system-widget",
+		"system-widgets",
+		"widget-left",
+		"widget-weather",
+		"widget-cpu",
+		"widget-ram",
+		"widget-battery",
+	}
+	for _, name := range files {
+		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", name))
+		if err != nil {
+			// Applying a theme should still succeed from installed-only environments.
+			continue
+		}
+		dst := filepath.Join(managedTmuxDir(), name)
+		if err := copyFile(src, dst, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncManagedFishConfigFromRepo() error {
+	src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "fish", "config.fish"))
+	if err != nil {
+		// Applying a theme should still succeed from installed-only environments.
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(managedFishConfigPath()), 0o755); err != nil {
+		return err
+	}
+	return copyFile(src, managedFishConfigPath(), 0o644)
+}
+
 func renderColorsProperties(payload computedPayload) string {
 	c := payload.Colors
 	return fmt.Sprintf(`# Generated by %s/theme apply
@@ -1122,51 +1323,46 @@ color21=%s
 
 func renderTmuxBlock(payload computedPayload) string {
 	tmuxRamp := tmuxGradientRamp(payload)
-	sessionBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[16]), "#b889ff", 0.55),
-			tmuxRamp[16],
-			"#a678ff",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	prefixBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffb347", 0.55),
-			"#ff6f61",
-			"#ffb347",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	copyBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#00d5ff", 0.42),
-			"#00c96b",
-			"#2dd4ff",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	modeBG := nonBlackStatusColor(blendHexColor(copyBG, payload.Background, 0.15), copyBG)
+	primaryRole := getRoleOr(payload.Roles, "primary", tmuxRamp[8])
+	secondaryRole := getRoleOr(payload.Roles, "secondary", tmuxRamp[10])
+	tertiaryRole := getRoleOr(payload.Roles, "tertiary", tmuxRamp[16])
+	primaryContainerRole := getRoleOr(payload.Roles, "primary_container", blendHexColor(primaryRole, payload.Background, 0.35))
+	secondaryContainerRole := getRoleOr(payload.Roles, "secondary_container", blendHexColor(secondaryRole, payload.Background, 0.35))
+	tertiaryContainerRole := getRoleOr(payload.Roles, "tertiary_container", blendHexColor(tertiaryRole, payload.Background, 0.35))
+	schemeName := strings.TrimSpace(payload.Meta["type"])
+	if schemeName == "" {
+		schemeName = strings.TrimSpace(payload.Meta["auto_selected_scheme"])
+	}
+	tuning := statusSchemeTuningFor(schemeName, payload.EffectiveMode)
+	statusBaseBG := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container", blendHexColor(payload.Background, payload.Foreground, 0.12)), payload.Foreground)
+	statusElevatedBG := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_high", blendHexColor(statusBaseBG, payload.Foreground, 0.10)), payload.Foreground)
+	statusHighestBG := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_highest", blendHexColor(statusElevatedBG, payload.Foreground, 0.12)), payload.Foreground)
+	statusLift := tuning.Lift
+	statusAccentA := nonBlackStatusColor(saturateHexColor(blendHexColor(primaryContainerRole, statusElevatedBG, 0.18), tuning.AccentSat), payload.Foreground)
+	statusAccentB := nonBlackStatusColor(saturateHexColor(blendHexColor(secondaryContainerRole, statusElevatedBG, 0.20), tuning.AccentSat), payload.Foreground)
+	statusAccentC := nonBlackStatusColor(saturateHexColor(blendHexColor(tertiaryContainerRole, statusElevatedBG, 0.22), tuning.AccentSat), payload.Foreground)
+	statusAccentD := nonBlackStatusColor(saturateHexColor(blendHexColor(statusAccentA, statusAccentC, 0.52), 0.14), payload.Foreground)
+	sessionBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentA, tuning.ChipMixA), 0.08), statusLift), payload.Foreground)
+	prefixBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentB, tuning.ChipMixB), 0.08), statusLift), payload.Foreground)
+	copyBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentC, tuning.ChipMixC), 0.08), statusLift), payload.Foreground)
+	modeBG := nonBlackStatusColor(blendHexColor(statusHighestBG, payload.Background, 0.35), statusElevatedBG)
 	modeFG := ensureReadableTextColor(modeBG, payload.Background, payload.Foreground)
-	matchBG := nonBlackStatusColor(blendHexColor(tmuxRamp[12], payload.Background, 0.25), modeBG)
+	matchBG := nonBlackStatusColor(blendHexColor(statusAccentA, statusHighestBG, 0.18), modeBG)
 	matchFG := ensureReadableTextColor(matchBG, payload.Background, payload.Foreground)
-	currentMatchBG := nonBlackStatusColor(tmuxRamp[15], matchBG)
+	currentMatchBG := nonBlackStatusColor(blendHexColor(statusAccentB, statusHighestBG, 0.16), matchBG)
 	currentMatchFG := ensureReadableTextColor(currentMatchBG, payload.Background, payload.Foreground)
-	windowInactiveBG := blendHexColor(tmuxRamp[4], payload.Background, 0.90)
+	windowInactiveBG := nonBlackStatusColor(lightenHexColor(blendHexColor(statusBaseBG, statusElevatedBG, tuning.WindowInactive), statusLift*0.72), statusBaseBG)
 	windowInactiveFG := ensureReadableTextColor(windowInactiveBG, getRoleOr(payload.Roles, "on_surface_variant", payload.Foreground), payload.Foreground)
 	windowActiveBG := nonBlackStatusColor(
 		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "primary", tmuxRamp[8]), getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), 0.28),
+			blendHexColor(statusAccentA, statusAccentD, tuning.WindowActive),
 			tmuxRamp[9],
 			tmuxRamp[7],
 			payload.Foreground,
 		),
 		payload.Foreground,
 	)
-	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, "#ffffff"), payload.Foreground)
+	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, getRoleOr(payload.Roles, "on_primary", payload.Foreground)), payload.Foreground)
 	alertColor := ensureReadableTextColor(payload.Background, "#ffd75f", payload.Foreground)
 	windowAccentFG := ensureReadableTextColor(windowActiveBG, payload.Background, payload.Foreground)
 	paneBorderColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.62), payload.Foreground)
@@ -1188,27 +1384,23 @@ func renderTmuxBlock(payload computedPayload) string {
 	widgetCPU := onOffFlag(parseOnOffDefault(payload.Meta["widget_cpu"], true))
 	widgetRAM := onOffFlag(parseOnOffDefault(payload.Meta["widget_ram"], true))
 	widgetWeather := onOffFlag(parseOnOffDefault(payload.Meta["widget_weather"], true))
-	surfaceHigh := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_high", windowInactiveBG), payload.Foreground)
-	surfaceHighest := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_highest", blendHexColor(surfaceHigh, payload.Foreground, 0.10)), payload.Foreground)
-	primaryBase := nonBlackStatusColor(getRoleOr(payload.Roles, "primary", tmuxRamp[8]), payload.Foreground)
+	surfaceHighest := statusHighestBG
+	primaryBase := nonBlackStatusColor(primaryRole, payload.Foreground)
 	primaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_fixed", primaryBase), payload.Foreground)
 	primaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_fixed_dim", primaryFixed), payload.Foreground)
-	primaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_container", windowActiveBG), payload.Foreground)
-	secondaryBase := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), payload.Foreground)
+	secondaryBase := nonBlackStatusColor(secondaryRole, payload.Foreground)
 	secondaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary_fixed", secondaryBase), payload.Foreground)
 	secondaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary_fixed_dim", secondaryFixed), payload.Foreground)
-	secondaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary_container", copyBG), payload.Foreground)
-	tertiaryBase := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), payload.Foreground)
+	tertiaryBase := nonBlackStatusColor(tertiaryRole, payload.Foreground)
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
-	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
-	weatherColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground), tertiaryFixedDim, payload.Background, 4.2)
+	weatherColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_primary", tertiaryFixedDim), payload.Foreground), tertiaryFixedDim, payload.Background, 4.2)
 	separatorBase := getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48))
 	separatorColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, separatorBase, payload.Foreground), separatorBase, payload.Background, 3.2)
 	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
 	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
 	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
-	chargingColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 4.2)
+	chargingColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_secondary", secondaryFixed), payload.Foreground), secondaryFixed, payload.Background, 4.2)
 	batteryRamp := []string{
 		"#ff6b6b", // red
 		"#ff8f5a", // orange-red
@@ -1222,23 +1414,38 @@ func renderTmuxBlock(payload computedPayload) string {
 		base := saturateHexColor(c, 0.16)
 		batteryColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, base, payload.Foreground), base, payload.Background, 3.6)
 	}
+	batteryLevelStops := []string{
+		getRoleOr(payload.Roles, "error", batteryColors[0]),
+		blendHexColor(getRoleOr(payload.Roles, "error", batteryColors[0]), getRoleOr(payload.Roles, "tertiary", batteryColors[2]), 0.45),
+		getRoleOr(payload.Roles, "tertiary", batteryColors[2]),
+		blendHexColor(getRoleOr(payload.Roles, "tertiary", batteryColors[2]), getRoleOr(payload.Roles, "secondary", batteryColors[4]), 0.50),
+		getRoleOr(payload.Roles, "secondary", batteryColors[4]),
+		blendHexColor(getRoleOr(payload.Roles, "secondary", batteryColors[4]), getRoleOr(payload.Roles, "primary", batteryColors[5]), 0.50),
+		getRoleOr(payload.Roles, "primary", batteryColors[5]),
+		blendHexColor(getRoleOr(payload.Roles, "primary", batteryColors[5]), getRoleOr(payload.Roles, "secondary_fixed", batteryColors[5]), 0.45),
+		getRoleOr(payload.Roles, "secondary_fixed", batteryColors[5]),
+		blendHexColor(getRoleOr(payload.Roles, "secondary_fixed", batteryColors[5]), getRoleOr(payload.Roles, "text_accent_secondary", batteryColors[5]), 0.40),
+	}
+	batteryLevelColors := make([]string, 10)
+	for i := range batteryLevelColors {
+		t := float64(i) / float64(len(batteryLevelColors)-1)
+		raw := saturateHexColor(sampleGradientColor(batteryLevelStops, t), 0.12)
+		fallbackIdx := i / 2
+		if fallbackIdx >= len(batteryColors) {
+			fallbackIdx = len(batteryColors) - 1
+		}
+		batteryLevelColors[i] = nonBlackStatusColor(raw, batteryColors[fallbackIdx])
+	}
+	batteryEmptyMuted := saturateHexColor(blendHexColor(surfaceHighest, getRoleOr(payload.Roles, "text_muted", surfaceHighest), 0.36), 0.10)
 	batteryFullColors := [4]string{}
 	batteryHalfColors := [4]string{}
 	batteryEmptyColors := [4]string{}
 	for i := 0; i < 4; i++ {
-		fullT := 0.10 + (0.84 * float64(i) / 3.0)
-		halfT := 0.10 + (0.84 * (float64(i) + 0.5) / 4.0)
-		emptyT := 0.06 + (0.52 * float64(i) / 3.0)
-		fullBase := saturateHexColor(sampleGradientColor(batteryColors, clamp01(fullT)), 0.26)
-		halfBase := saturateHexColor(sampleGradientColor(batteryColors, clamp01(halfT)), 0.30)
-		full := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, fullBase, payload.Foreground), fullBase, payload.Background, 3.6)
-		half := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, halfBase, payload.Foreground), halfBase, payload.Background, 3.6)
-		emptyBase := sampleGradientColor(batteryColors, clamp01(emptyT))
-		emptyPrefer := saturateHexColor(blendHexColor(emptyBase, surfaceHighest, 0.30), 0.12)
-		empty := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, emptyPrefer, payload.Foreground), emptyPrefer, payload.Background, 3.2)
-		batteryFullColors[i] = full
-		batteryHalfColors[i] = half
-		batteryEmptyColors[i] = empty
+		fullIdx := clampInt(2+(i*2), 1, 10) - 1
+		halfIdx := clampInt(1+(i*2), 1, 10) - 1
+		batteryFullColors[i] = batteryLevelColors[fullIdx]
+		batteryHalfColors[i] = batteryLevelColors[halfIdx]
+		batteryEmptyColors[i] = batteryEmptyMuted
 	}
 	cpuColors := []string{
 		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground), primaryBase, payload.Background, 3.6),
@@ -1256,12 +1463,19 @@ func renderTmuxBlock(payload computedPayload) string {
 		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground), secondaryFixedDim, payload.Background, 3.6),
 		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 3.6),
 	}
-	batteryBG := normalizeHexColor(blendHexColor(getRoleOr(payload.Roles, "surface_dim", payload.Background), "#ffffff", ternf(payload.EffectiveMode == "dark", 0.18, 0.24)))
-	chargingBG := nonBlackStatusColor(blendHexColor(blendHexColor(secondaryBase, primaryBase, 0.35), tertiaryBase, 0.18), payload.Foreground)
-	cpuBG := nonBlackStatusColor(blendHexColor(secondaryContainer, surfaceHighest, 0.20), payload.Foreground)
-	ramBG := nonBlackStatusColor(blendHexColor(primaryContainer, surfaceHighest, 0.22), payload.Foreground)
-	weatherBG := nonBlackStatusColor(blendHexColor(tertiaryContainer, surfaceHighest, 0.18), payload.Foreground)
-	widgetAccentFG := bestTextColorForBackgrounds(payload.Foreground, payload.Background, 6.0, payload.Background)
+	batteryBG := normalizeHexColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentD, tuning.WidgetMix+0.02), 0.12), statusLift*0.92))
+	chargingBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentB, tuning.WidgetMix), 0.10), statusLift*0.92), payload.Foreground)
+	cpuBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentA, tuning.WidgetMix-0.02), 0.10), statusLift*0.92), payload.Foreground)
+	ramBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentC, tuning.WidgetMix-0.02), 0.10), statusLift*0.92), payload.Foreground)
+	weatherBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, blendHexColor(statusAccentA, statusAccentC, 0.48), tuning.WidgetMix), 0.10), statusLift*0.92), payload.Foreground)
+	accentFGA := getRoleOr(payload.Roles, "text_accent_primary", primaryBase)
+	accentFGB := getRoleOr(payload.Roles, "text_accent_secondary", secondaryBase)
+	widgetAccentFG := bestTextColorForBackgrounds(
+		accentFGA,
+		ensureReadableTextColor(payload.Background, payload.Foreground, accentFGB),
+		3.8,
+		payload.Background, sessionBG, prefixBG, copyBG, batteryBG, chargingBG, cpuBG, ramBG, weatherBG,
+	)
 	sessionBG = ensureBackgroundContrastForText(sessionBG, widgetAccentFG, 3.8)
 	prefixBG = ensureBackgroundContrastForText(prefixBG, widgetAccentFG, 3.8)
 	copyBG = ensureBackgroundContrastForText(copyBG, widgetAccentFG, 3.8)
@@ -1270,6 +1484,40 @@ func renderTmuxBlock(payload computedPayload) string {
 	cpuBG = ensureBackgroundContrastForText(cpuBG, widgetAccentFG, 3.8)
 	ramBG = ensureBackgroundContrastForText(ramBG, widgetAccentFG, 3.8)
 	weatherBG = ensureBackgroundContrastForText(weatherBG, widgetAccentFG, 3.8)
+	sessionFG := preferChromaticTextColor(bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_tertiary_container", widgetAccentFG), widgetAccentFG, 4.5, sessionBG), widgetAccentFG, sessionBG, 4.5)
+	prefixFG := preferChromaticTextColor(bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_error_container", widgetAccentFG), widgetAccentFG, 4.5, prefixBG), widgetAccentFG, prefixBG, 4.5)
+	copyFG := preferChromaticTextColor(bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_secondary_container", widgetAccentFG), widgetAccentFG, 4.5, copyBG), widgetAccentFG, copyBG, 4.5)
+	weatherColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_primary", weatherColor), payload.Foreground)
+	weatherColor = ensureReadableTextColor(weatherBG, weatherColor, payload.Foreground)
+	weatherColor = nonBlackStatusColorForBG(weatherColor, payload.Foreground, payload.Background, 4.2)
+	chargingColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_secondary", chargingColor), payload.Foreground)
+	chargingColor = ensureReadableTextColor(chargingBG, chargingColor, payload.Foreground)
+	chargingColor = nonBlackStatusColorForBG(chargingColor, payload.Foreground, payload.Background, 4.2)
+	for i, c := range batteryLevelColors {
+		batteryLevelColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.3)
+	}
+	batteryEmptyMuted = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, batteryEmptyMuted, sessionFG), batteryEmptyMuted, batteryBG, 3.1)
+	for i, c := range batteryColors {
+		batteryColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.4)
+	}
+	for i, c := range batteryFullColors {
+		batteryFullColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.4)
+	}
+	for i, c := range batteryHalfColors {
+		batteryHalfColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.4)
+	}
+	for i, c := range batteryEmptyColors {
+		batteryEmptyColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.1)
+	}
+	for i, c := range cpuColors {
+		cpuColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(cpuBG, c, sessionFG), c, cpuBG, 3.4)
+	}
+	for i, c := range ramColors {
+		ramColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(ramBG, c, sessionFG), c, ramBG, 3.4)
+	}
+	batteryColors = diversifyAdjacentStatusColors(batteryColors, batteryBG, 12.0, 3.3)
+	cpuColors = diversifyAdjacentStatusColors(cpuColors, cpuBG, 14.0, 3.4)
+	ramColors = diversifyAdjacentStatusColors(ramColors, ramBG, 14.0, 3.4)
 	batteryBGSetting := batteryBG
 	if statusTheme == "default" {
 		batteryBGSetting = "default"
@@ -1323,6 +1571,9 @@ set -g @status-tmux-bg-right "%s"
 set -g @status-tmux-left-bg-session "%s"
 set -g @status-tmux-left-bg-prefix "%s"
 set -g @status-tmux-left-bg-copy "%s"
+set -g @status-tmux-left-fg-session "%s"
+set -g @status-tmux-left-fg-prefix "%s"
+set -g @status-tmux-left-fg-copy "%s"
 set -g @status-tmux-left-session-pad "%s"
 set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
 set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\$HOME/.config/tooie/configs/tmux/widget-weather)"
@@ -1375,6 +1626,18 @@ set -g @status-tmux-color-battery-empty-1 "%s"
 set -g @status-tmux-color-battery-empty-2 "%s"
 set -g @status-tmux-color-battery-empty-3 "%s"
 set -g @status-tmux-color-battery-empty-4 "%s"
+set -g @status-tmux-battery-segments "%d"
+set -g @status-tmux-color-battery-empty-muted "%s"
+set -g @status-tmux-color-battery-level-1 "%s"
+set -g @status-tmux-color-battery-level-2 "%s"
+set -g @status-tmux-color-battery-level-3 "%s"
+set -g @status-tmux-color-battery-level-4 "%s"
+set -g @status-tmux-color-battery-level-5 "%s"
+set -g @status-tmux-color-battery-level-6 "%s"
+set -g @status-tmux-color-battery-level-7 "%s"
+set -g @status-tmux-color-battery-level-8 "%s"
+set -g @status-tmux-color-battery-level-9 "%s"
+set -g @status-tmux-color-battery-level-10 "%s"
 set -g @status-tmux-color-cpu-1 "%s"
 set -g @status-tmux-color-cpu-2 "%s"
 set -g @status-tmux-color-cpu-3 "%s"
@@ -1404,6 +1667,9 @@ set -g @status-tmux-fg-on-accent "%s"
 		sessionBG,
 		prefixBG,
 		copyBG,
+		sessionFG,
+		prefixFG,
+		copyFG,
 		leftSessionPad,
 		leftGap,
 		statusFormatCommands,
@@ -1423,6 +1689,10 @@ set -g @status-tmux-fg-on-accent "%s"
 		batteryFullColors[0], batteryFullColors[1], batteryFullColors[2], batteryFullColors[3],
 		batteryHalfColors[0], batteryHalfColors[1], batteryHalfColors[2], batteryHalfColors[3],
 		batteryEmptyColors[0], batteryEmptyColors[1], batteryEmptyColors[2], batteryEmptyColors[3],
+		5,
+		batteryEmptyMuted,
+		batteryLevelColors[0], batteryLevelColors[1], batteryLevelColors[2], batteryLevelColors[3], batteryLevelColors[4],
+		batteryLevelColors[5], batteryLevelColors[6], batteryLevelColors[7], batteryLevelColors[8], batteryLevelColors[9],
 		cpuColors[0], cpuColors[1], cpuColors[2], cpuColors[3], cpuColors[4], cpuColors[5],
 		ramColors[0], ramColors[1], ramColors[2], ramColors[3], ramColors[4], ramColors[5],
 		batteryBGSetting,
@@ -1436,10 +1706,10 @@ set -g @status-tmux-fg-on-accent "%s"
 
 func tmuxGradientRamp(payload computedPayload) []string {
 	anchors := []string{
-		getRoleOr(payload.Roles, "error", payload.Colors[1]),
-		getRoleOr(payload.Roles, "secondary", payload.Colors[6]),
 		getRoleOr(payload.Roles, "primary", payload.Colors[4]),
+		getRoleOr(payload.Roles, "secondary", payload.Colors[6]),
 		getRoleOr(payload.Roles, "tertiary", payload.Colors[5]),
+		getRoleOr(payload.Roles, "primary_fixed", payload.Colors[12]),
 		getRoleOr(payload.Roles, "secondary_fixed", payload.Colors[16]),
 	}
 	ramp := make([]string, 21)
@@ -1481,28 +1751,45 @@ func nonBlackStatusColorForBG(hex, fallback, bg string, minContrast float64) str
 	if contrastRatioHex(fallback, bg) >= minContrast {
 		return fallback
 	}
+	seed := fallback
+	if !itheme.IsHexColor(seed) {
+		seed = cand
+	}
+	best := seed
+	bestRatio := contrastRatioHex(seed, bg)
 	for i := 1; i <= 16; i++ {
 		t := float64(i) / 16.0
-		darker := normalizeHexColor(blendHexColor(fallback, "#000000", t))
-		if contrastRatioHex(darker, bg) >= minContrast {
+		lighter := normalizeHexColor(blendHexColor(seed, "#ffffff", t))
+		lr := contrastRatioHex(lighter, bg)
+		if lr > bestRatio {
+			best = lighter
+			bestRatio = lr
+		}
+		if lr >= minContrast {
+			return lighter
+		}
+		darker := normalizeHexColor(blendHexColor(seed, "#000000", t))
+		dr := contrastRatioHex(darker, bg)
+		if dr > bestRatio {
+			best = darker
+			bestRatio = dr
+		}
+		if dr >= minContrast {
 			return darker
 		}
 	}
-	return hex
+	return best
 }
 
 func bestTextColorForBackgrounds(preferred, fallback string, minContrast float64, backgrounds ...string) string {
 	candidates := []string{
 		preferred,
 		fallback,
-		"#ffffff",
-		"#f5f7ff",
-		"#111111",
-		"#000000",
+		blendHexColor(preferred, fallback, 0.35),
+		blendHexColor(preferred, fallback, 0.65),
 	}
 	for _, bg := range backgrounds {
 		candidates = append(candidates, ensureReadableTextColor(bg, preferred, fallback))
-		candidates = append(candidates, ensureReadableTextColor(bg, "#ffffff", "#111111"))
 	}
 	best := normalizeHexColor(fallback)
 	bestMin := -1.0
@@ -1532,10 +1819,83 @@ func bestTextColorForBackgrounds(preferred, fallback string, minContrast float64
 			best = cand
 		}
 		if minSeen >= minContrast {
+			if !isExtremeNeutral(cand) {
+				return cand
+			}
+		}
+	}
+	if bestMin >= minContrast {
+		return best
+	}
+	// Last resort only: allow pure neutral colors if chromatic options cannot satisfy contrast.
+	for _, cand := range []string{"#f5f7ff", "#ffffff", "#111111", "#000000"} {
+		minSeen := 99.0
+		validBG := 0
+		for _, bg := range backgrounds {
+			bg = normalizeHexColor(bg)
+			if !itheme.IsHexColor(bg) {
+				continue
+			}
+			validBG++
+			r := contrastRatioHex(cand, bg)
+			if r < minSeen {
+				minSeen = r
+			}
+		}
+		if validBG == 0 || minSeen >= minContrast {
 			return cand
+		}
+		if minSeen > bestMin {
+			bestMin = minSeen
+			best = cand
 		}
 	}
 	return best
+}
+
+func preferChromaticTextColor(candidate, fallback, bg string, minContrast float64) string {
+	candidate = normalizeHexColor(candidate)
+	fallback = normalizeHexColor(fallback)
+	bg = normalizeHexColor(bg)
+	if !itheme.IsHexColor(candidate) {
+		candidate = fallback
+	}
+	if itheme.IsHexColor(candidate) && !isExtremeNeutral(candidate) && contrastRatioHex(candidate, bg) >= minContrast {
+		return candidate
+	}
+	alts := []string{
+		fallback,
+		saturateHexColor(fallback, 0.22),
+		saturateHexColor(blendHexColor(fallback, candidate, 0.5), 0.18),
+		blendHexColor(fallback, "#9bb8ff", 0.25),
+		blendHexColor(fallback, "#8fe5d5", 0.25),
+	}
+	for _, alt := range alts {
+		alt = normalizeHexColor(alt)
+		if !itheme.IsHexColor(alt) {
+			continue
+		}
+		if contrastRatioHex(alt, bg) >= minContrast && !isExtremeNeutral(alt) {
+			return alt
+		}
+	}
+	if contrastRatioHex(candidate, bg) >= minContrast {
+		return candidate
+	}
+	return ensureReadableTextColor(bg, fallback, candidate)
+}
+
+func isExtremeNeutral(hex string) bool {
+	hex = normalizeHexColor(hex)
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	delta := maxv - minv
+	luma := relativeLuminanceHex(hex)
+	return delta < 0.06 || luma <= 0.06 || luma >= 0.94
 }
 
 func ensureBackgroundContrastForText(bg, fg string, minContrast float64) string {
@@ -1591,6 +1951,30 @@ func avoidRedHue(hex string, fallbacks ...string) string {
 	}
 	// Last resort: push toward a cool non-red accent.
 	return normalizeHexColor(blendHexColor("#56c8ff", "#9b7dff", 0.35))
+}
+
+func diversifyAdjacentStatusColors(colors []string, bg string, minHueDelta, minContrast float64) []string {
+	if len(colors) <= 1 {
+		return colors
+	}
+	out := append([]string{}, colors...)
+	seeds := []string{"#4f8dff", "#49d17d", "#ffd166", "#ff8f5a", "#c07dff", "#2dd4ff"}
+	for i := 1; i < len(out); i++ {
+		prev := normalizeHexColor(out[i-1])
+		cur := normalizeHexColor(out[i])
+		if !itheme.IsHexColor(prev) || !itheme.IsHexColor(cur) {
+			continue
+		}
+		hueDelta := hueDistanceDegrees(hueFromHex(prev), hueFromHex(cur))
+		if hueDelta >= minHueDelta && contrastRatioHex(prev, cur) >= 1.10 {
+			continue
+		}
+		seed := seeds[i%len(seeds)]
+		cand := normalizeHexColor(blendHexColor(cur, seed, 0.26))
+		cand = nonBlackStatusColorForBG(ensureReadableTextColor(bg, cand, cur), cand, bg, minContrast)
+		out[i] = cand
+	}
+	return out
 }
 
 func maxInt(a, b int) int {
@@ -1814,6 +2198,111 @@ func resolveMatugen(given string) (string, error) {
 }
 
 func runMatugenImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
+	cacheKey := strings.Join([]string{
+		bin,
+		wallpaper,
+		mode,
+		schemeType,
+		fmt.Sprintf("%d", sourceColorIndex),
+		strings.TrimSpace(prefer),
+		strings.TrimSpace(fallbackColor),
+		strings.TrimSpace(resizeFilter),
+	}, "|")
+	if raw := loadMatugenCache(cacheKey); len(raw) > 0 {
+		return raw, nil
+	}
+	raw, err := runMatugenTemplateImage(bin, wallpaper, mode, schemeType, sourceColorIndex, prefer, fallbackColor, resizeFilter)
+	if err == nil && len(raw) > 0 {
+		storeMatugenCache(cacheKey, raw)
+		return raw, nil
+	}
+	legacyRaw, legacyErr := runMatugenDryRunImage(bin, wallpaper, mode, schemeType, sourceColorIndex, prefer, fallbackColor, resizeFilter)
+	if legacyErr != nil {
+		if err != nil {
+			return nil, fmt.Errorf("matugen template path failed: %v; dry-run fallback failed: %v", err, legacyErr)
+		}
+		return nil, legacyErr
+	}
+	storeMatugenCache(cacheKey, legacyRaw)
+	return legacyRaw, nil
+}
+
+func loadMatugenCache(key string) []byte {
+	matugenResultCache.mu.Lock()
+	defer matugenResultCache.mu.Unlock()
+	raw := matugenResultCache.m[key]
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
+}
+
+func storeMatugenCache(key string, raw []byte) {
+	matugenResultCache.mu.Lock()
+	defer matugenResultCache.mu.Unlock()
+	cp := make([]byte, len(raw))
+	copy(cp, raw)
+	matugenResultCache.m[key] = cp
+}
+
+func runMatugenTemplateImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
+	cfgFile, err := os.CreateTemp("", "tooie-matugen-*.toml")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = os.Remove(cfgFile.Name())
+	}()
+	tmpDir, err := os.MkdirTemp("", "tooie-matugen-roles-*")
+	if err != nil {
+		_ = cfgFile.Close()
+		return nil, err
+	}
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
+	templatePath := filepath.Join(tmpDir, "roles.json")
+	outputPath := filepath.Join(tmpDir, "roles-out.json")
+	if err := os.WriteFile(templatePath, []byte(matugenRolesTemplate), 0o644); err != nil {
+		_ = cfgFile.Close()
+		return nil, err
+	}
+	config := fmt.Sprintf("[config]\n\n[templates.roles]\ninput_path = '%s'\noutput_path = '%s'\n", templatePath, outputPath)
+	if _, err := cfgFile.WriteString(config); err != nil {
+		_ = cfgFile.Close()
+		return nil, err
+	}
+	if err := cfgFile.Close(); err != nil {
+		return nil, err
+	}
+	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType, "-c", cfgFile.Name()}
+	if sourceColorIndex >= 0 {
+		args = append(args, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex))
+	}
+	if strings.TrimSpace(prefer) != "" {
+		args = append(args, "--prefer", strings.TrimSpace(prefer))
+	}
+	if strings.TrimSpace(fallbackColor) != "" {
+		args = append(args, "--fallback-color", strings.TrimSpace(fallbackColor))
+	}
+	if strings.TrimSpace(resizeFilter) != "" {
+		args = append(args, "--resize-filter", strings.TrimSpace(resizeFilter))
+	}
+	cmd := exec.Command(bin, args...)
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		return nil, fmt.Errorf("%v (%s)", runErr, strings.TrimSpace(string(out)))
+	}
+	raw, readErr := os.ReadFile(outputPath)
+	if readErr != nil {
+		return nil, readErr
+	}
+	return bytes.TrimSpace(raw), nil
+}
+
+func runMatugenDryRunImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
 	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType}
 	if sourceColorIndex >= 0 {
 		args = append(args, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex))
@@ -2106,6 +2595,29 @@ func saturateHexColor(hex string, boost float64) string {
 	h := hueFromHex(hex)
 	sat = clamp01(sat + boost*(1.0-sat))
 	return hslToHex(h, sat, light)
+}
+
+func lightenHexColor(hex string, amount float64) string {
+	amount = clamp01(amount)
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	light := (maxv + minv) / 2.0
+	if maxv == minv {
+		return hslToHex(0, 0, clamp01(light+amount*(1.0-light)))
+	}
+	var sat float64
+	delta := maxv - minv
+	if light > 0.5 {
+		sat = delta / (2.0 - maxv - minv)
+	} else {
+		sat = delta / (maxv + minv)
+	}
+	h := hueFromHex(hex)
+	return hslToHex(h, sat, clamp01(light+amount*(1.0-light)))
 }
 
 func hslToHex(h, s, l float64) string {

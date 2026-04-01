@@ -1642,7 +1642,7 @@ func (m model) View() string {
 	}
 	statusColor := ensureReadableTextColor(
 		m.themeRoleColor("background", "#11131c"),
-		m.themeRoleColor("secondary", "#94e2d5"),
+		m.themeRoleColor("text_accent_secondary", m.themeRoleColor("secondary", "#94e2d5")),
 		"#8ec3b0",
 	)
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor))
@@ -1666,7 +1666,7 @@ func (m model) View() string {
 	if !m.applying {
 		hintColor := ensureReadableTextColor(
 			m.themeRoleColor("background", "#11131c"),
-			blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), m.themeRoleColor("background", "#11131c"), 0.28),
+			m.themeRoleColor("text_muted", blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), m.themeRoleColor("background", "#11131c"), 0.28)),
 			"#b3bcc8",
 		)
 		hints = lipgloss.NewStyle().Foreground(lipgloss.Color(hintColor)).Render("[? hints]")
@@ -2156,15 +2156,20 @@ func (m model) renderThemePage(usableW, contentH int) string {
 		mainH = max(8, contentH-overlayH)
 	}
 
-	leftW, rightW := twoColumnWidths(usableW - 4)
-	if leftW == 0 {
-		leftW = max(24, usableW-4)
+	mainBody := ""
+	if m.shouldShowWallpaperSegment() {
+		leftW, rightW := twoColumnWidths(usableW - 4)
+		if leftW == 0 {
+			leftW = max(24, usableW-4)
+		}
+		mainBody = renderTwoColumns(
+			strings.Split(m.settingsCombinedBlock(mainH-2, leftW), "\n"),
+			strings.Split(m.wallpaperBlock(mainH-2, max(18, rightW)), "\n"),
+			usableW-4,
+		)
+	} else {
+		mainBody = m.settingsCombinedBlock(mainH-2, usableW-4)
 	}
-	mainBody := renderTwoColumns(
-		strings.Split(m.settingsCombinedBlock(mainH-2, leftW), "\n"),
-		strings.Split(m.wallpaperBlock(mainH-2, max(18, rightW)), "\n"),
-		usableW-4,
-	)
 	mainRow := panelStyle(usableW, mainH, "12").Render(mainBody)
 	if overlayH <= 0 {
 		return mainRow
@@ -2172,6 +2177,10 @@ func (m model) renderThemePage(usableW, contentH int) string {
 	overlayBody := m.interactionBlock(overlayH - 2)
 	overlayRow := panelStyle(usableW, overlayH, "8").Render(overlayBody)
 	return mainRow + "\n" + overlayRow
+}
+
+func (m model) shouldShowWallpaperSegment() bool {
+	return m.width >= 76 && m.height >= 32
 }
 
 func (m model) interactionLineCount() int {
@@ -2571,7 +2580,7 @@ func (m model) renderSettingsMenuRow(label, state, kind, target string, toggle b
 
 	labelFG := ensureReadableTextColor(
 		m.themeRoleColor("background", "#11131c"),
-		m.themeRoleColor("on_surface", "#e6e2d5"),
+		m.themeRoleColor("text_primary", m.themeRoleColor("on_surface", "#e6e2d5")),
 		"#f1f1f3",
 	)
 	prefix := "  "
@@ -2611,16 +2620,19 @@ func (m model) renderInfoStateCell(state, kind string, width int, selected bool)
 	width = max(8, width)
 	state = cutPad(strings.TrimSpace(state), max(1, width-2))
 	bg := blendHexColor(m.themeRoleColor("surface_container", "#1f2335"), m.themeRoleColor("background", "#11131c"), 0.30)
+	fgPreferred := m.themeRoleColor("text_primary", m.themeRoleColor("on_surface", "#e6e2d5"))
 	switch kind {
 	case "action":
-		bg = blendHexColor(m.themeRoleColor("tertiary", "#cba6f7"), m.themeRoleColor("background", "#11131c"), 0.70)
+		bg = m.themeRoleColor("text_action_bg", blendHexColor(m.themeRoleColor("tertiary", "#cba6f7"), m.themeRoleColor("background", "#11131c"), 0.70))
+		fgPreferred = m.themeRoleColor("text_action_fg", fgPreferred)
 	case "info":
-		bg = blendHexColor(m.themeRoleColor("secondary", "#94e2d5"), m.themeRoleColor("background", "#11131c"), 0.76)
+		bg = m.themeRoleColor("text_info_bg", blendHexColor(m.themeRoleColor("surface_variant", "#2f3650"), m.themeRoleColor("background", "#11131c"), 0.68))
+		fgPreferred = m.themeRoleColor("text_info_fg", fgPreferred)
 	}
 	if selected {
 		bg = blendHexColor(bg, m.themeRoleColor("primary", "#89b4fa"), 0.12)
 	}
-	fg := ensureReadableTextColor(bg, m.themeRoleColor("on_surface", "#e6e2d5"), "#f6f7fb")
+	fg := ensureReadableTextColor(bg, fgPreferred, "#f6f7fb")
 	return lipgloss.NewStyle().
 		Width(width).
 		Align(lipgloss.Center).
@@ -3873,8 +3885,10 @@ func (m model) startApply(label string, includeOverrides bool, previewOnly bool)
 func (m model) requestThemeApply() (tea.Model, tea.Cmd) {
 	cacheKey := m.applyCacheSignature()
 	if cacheKey == m.lastAppliedTheme {
-		m.lastStatus = "No theme changes to apply"
-		return m, nil
+		if !(cacheKey == m.previewCacheKey && strings.TrimSpace(m.previewBackupID) != "") {
+			m.lastStatus = "No theme changes to apply"
+			return m, nil
+		}
 	}
 	return m.startApply(m.themeActionLabel(false), true, false)
 }

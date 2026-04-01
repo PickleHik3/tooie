@@ -39,6 +39,7 @@ if is_on "$bg_right"; then
       printf '%s#[fg=%s,bg=default]#[bg=%s]%s#[fg=%s,bg=default]#[default]' "$prefix" "$bg_weather" "$bg_weather" "$weather_body" "$bg_weather"
       ;;
     *)
+      weather_body="#[fg=${weather_color}] ${wx} "
       printf '%s#[bg=%s]%s#[bg=default]#[default]' "$prefix" "$bg_weather" "$weather_body"
       ;;
   esac

@@ -38,6 +38,17 @@ BAT_EMPTY_1_COLOR="${STATUS_TMUX_BAT_EMPTY_1_COLOR:-$METER_1_COLOR}"
 BAT_EMPTY_2_COLOR="${STATUS_TMUX_BAT_EMPTY_2_COLOR:-$METER_2_COLOR}"
 BAT_EMPTY_3_COLOR="${STATUS_TMUX_BAT_EMPTY_3_COLOR:-$METER_3_COLOR}"
 BAT_EMPTY_4_COLOR="${STATUS_TMUX_BAT_EMPTY_4_COLOR:-$METER_4_COLOR}"
+BAT_EMPTY_MUTED_COLOR="${STATUS_TMUX_BAT_EMPTY_MUTED_COLOR:-$BAT_EMPTY_2_COLOR}"
+BAT_LEVEL_1_COLOR="${STATUS_TMUX_BAT_LEVEL_1_COLOR:-$METER_1_COLOR}"
+BAT_LEVEL_2_COLOR="${STATUS_TMUX_BAT_LEVEL_2_COLOR:-$METER_1_COLOR}"
+BAT_LEVEL_3_COLOR="${STATUS_TMUX_BAT_LEVEL_3_COLOR:-$METER_2_COLOR}"
+BAT_LEVEL_4_COLOR="${STATUS_TMUX_BAT_LEVEL_4_COLOR:-$METER_2_COLOR}"
+BAT_LEVEL_5_COLOR="${STATUS_TMUX_BAT_LEVEL_5_COLOR:-$METER_3_COLOR}"
+BAT_LEVEL_6_COLOR="${STATUS_TMUX_BAT_LEVEL_6_COLOR:-$METER_4_COLOR}"
+BAT_LEVEL_7_COLOR="${STATUS_TMUX_BAT_LEVEL_7_COLOR:-$METER_4_COLOR}"
+BAT_LEVEL_8_COLOR="${STATUS_TMUX_BAT_LEVEL_8_COLOR:-$METER_5_COLOR}"
+BAT_LEVEL_9_COLOR="${STATUS_TMUX_BAT_LEVEL_9_COLOR:-$METER_6_COLOR}"
+BAT_LEVEL_10_COLOR="${STATUS_TMUX_BAT_LEVEL_10_COLOR:-$METER_6_COLOR}"
 CHARGE_COLOR="${STATUS_TMUX_CHARGE_COLOR:-colour6}"
 CPU_1_COLOR="${STATUS_TMUX_CPU_LEVEL_1_COLOR:-colour2}"
 CPU_2_COLOR="${STATUS_TMUX_CPU_LEVEL_2_COLOR:-colour10}"
@@ -51,7 +62,7 @@ RAM_3_COLOR="${STATUS_TMUX_RAM_LEVEL_3_COLOR:-colour5}"
 RAM_4_COLOR="${STATUS_TMUX_RAM_LEVEL_4_COLOR:-colour13}"
 RAM_5_COLOR="${STATUS_TMUX_RAM_LEVEL_5_COLOR:-colour9}"
 RAM_6_COLOR="${STATUS_TMUX_RAM_LEVEL_6_COLOR:-colour1}"
-BAT_SEGMENTS="${STATUS_TMUX_BAT_SEGMENTS:-6}"
+BAT_SEGMENTS="${STATUS_TMUX_BAT_SEGMENTS:-5}"
 BAT_FULL_ICON="${STATUS_TMUX_BAT_FULL_ICON:-}"
 BAT_EMPTY_ICON="${STATUS_TMUX_BAT_EMPTY_ICON:-}"
 BAT_HALF_ICON="${STATUS_TMUX_BAT_HALF_ICON:-󰛞}"
@@ -360,25 +371,31 @@ battery_slot_for_segment(){
   [ "$segs" -le 1 ] && { echo 1; return; }
   echo $(( ((idx - 1) * 3) / (segs - 1) + 1 ))
 }
+battery_level_color(){
+  lvl="$1"
+  case "$lvl" in
+    1) echo "$BAT_LEVEL_1_COLOR" ;;
+    2) echo "$BAT_LEVEL_2_COLOR" ;;
+    3) echo "$BAT_LEVEL_3_COLOR" ;;
+    4) echo "$BAT_LEVEL_4_COLOR" ;;
+    5) echo "$BAT_LEVEL_5_COLOR" ;;
+    6) echo "$BAT_LEVEL_6_COLOR" ;;
+    7) echo "$BAT_LEVEL_7_COLOR" ;;
+    8) echo "$BAT_LEVEL_8_COLOR" ;;
+    9) echo "$BAT_LEVEL_9_COLOR" ;;
+    *) echo "$BAT_LEVEL_10_COLOR" ;;
+  esac
+}
 battery_color_for_state(){
-  state="$1"; slot="$2"
+  state="$1"; slot="$2"; active="$3"
   case "${state}:${slot}" in
-    full:1) echo "$BAT_FULL_1_COLOR" ;;
-    full:2) echo "$BAT_FULL_2_COLOR" ;;
-    full:3) echo "$BAT_FULL_3_COLOR" ;;
-    full:4) echo "$BAT_FULL_4_COLOR" ;;
-    half:1) echo "$BAT_HALF_1_COLOR" ;;
-    half:2) echo "$BAT_HALF_2_COLOR" ;;
-    half:3) echo "$BAT_HALF_3_COLOR" ;;
-    half:4) echo "$BAT_HALF_4_COLOR" ;;
-    empty:1) echo "$BAT_EMPTY_1_COLOR" ;;
-    empty:2) echo "$BAT_EMPTY_2_COLOR" ;;
-    empty:3) echo "$BAT_EMPTY_3_COLOR" ;;
-    empty:4) echo "$BAT_EMPTY_4_COLOR" ;;
+    full:*) echo "$active" ;;
+    half:*) echo "$active" ;;
+    empty:*) echo "$BAT_EMPTY_MUTED_COLOR" ;;
     *) meter_color_by_step "$slot" ;;
   esac
 }
-render_battery(){ level="$1"; charging="$2"; show_charge="${3:-true}"; [ "$level" -gt 100 ] && level=100; [ "$level" -lt 0 ] && level=0; segs="$BAT_SEGMENTS"; is_on "$BG_RIGHT" && segs=4; [ "$segs" -lt 1 ] && segs=1; units_total=$((segs * 2)); units_filled=$((level * units_total / 100)); full=$((units_filled / 2)); half=$((units_filled % 2)); [ "$full" -gt "$segs" ] && full="$segs"; [ "$full" -lt 0 ] && full=0; if [ "$full" -ge "$segs" ]; then half=0; fi; spacer=""; is_on "$BG_RIGHT" && spacer=" "; meter=""; i=1; while [ "$i" -le "$segs" ]; do slot="$(battery_slot_for_segment "$i" "$segs")"; icon="$BAT_EMPTY_ICON"; state="empty"; if [ "$i" -le "$full" ]; then icon="$BAT_FULL_ICON"; state="full"; elif [ "$half" -eq 1 ] && [ "$i" -eq $((full + 1)) ]; then icon="$BAT_HALF_ICON"; state="half"; fi; c="$(battery_color_for_state "$state" "$slot")"; meter="${meter}#[fg=${c}]${icon}"; [ "$i" -lt "$segs" ] && meter="${meter}${spacer}"; i=$((i+1)); done; if [ "$charging" = "true" ] && [ "$show_charge" = "true" ]; then charge="#[fg=${CHARGE_COLOR}]${BAT_CHARGING_ICON}"; else charge=""; fi; printf "%s%s" "$charge" "${charge:+ }$meter"; }
+render_battery(){ level="$1"; charging="$2"; show_charge="${3:-true}"; [ "$level" -gt 100 ] && level=100; [ "$level" -lt 0 ] && level=0; segs="$BAT_SEGMENTS"; [ "$segs" -lt 1 ] && segs=1; units_total=$((segs * 2)); units_filled=$((level * units_total / 100)); full=$((units_filled / 2)); half=$((units_filled % 2)); [ "$full" -gt "$segs" ] && full="$segs"; [ "$full" -lt 0 ] && full=0; if [ "$full" -ge "$segs" ]; then half=0; fi; active_level="$units_filled"; [ "$active_level" -lt 1 ] && active_level=1; [ "$active_level" -gt 10 ] && active_level=10; active_color="$(battery_level_color "$active_level")"; spacer=""; is_on "$BG_RIGHT" && spacer=" "; meter=""; i=1; while [ "$i" -le "$segs" ]; do slot="$(battery_slot_for_segment "$i" "$segs")"; icon="$BAT_EMPTY_ICON"; state="empty"; if [ "$i" -le "$full" ]; then icon="$BAT_FULL_ICON"; state="full"; elif [ "$half" -eq 1 ] && [ "$i" -eq $((full + 1)) ]; then icon="$BAT_HALF_ICON"; state="half"; fi; c="$(battery_color_for_state "$state" "$slot" "$active_color")"; meter="${meter}#[fg=${c}]${icon}"; [ "$i" -lt "$segs" ] && meter="${meter}${spacer}"; i=$((i+1)); done; if [ "$charging" = "true" ] && [ "$show_charge" = "true" ]; then charge="#[fg=${CHARGE_COLOR}]${BAT_CHARGING_ICON}"; else charge=""; fi; printf "%s%s" "$charge" "${charge:+ }$meter"; }
 pill_wrap(){
   bg="$1"; body="$2"
   case "$EDGE_STYLE" in
@@ -434,14 +451,14 @@ render_widgets(){
   fi
   cpu_pct="$(awk -v x="$cpu" 'BEGIN{printf "%.0f", x}')"; case "$cpu_pct" in ''|*[!0-9]*) cpu_pct=0;; esac; [ "$cpu_pct" -gt 100 ] && cpu_pct=100; [ "$cpu_pct" -lt 0 ] && cpu_pct=0
   if [ "$mem_total" -gt 0 ] 2>/dev/null; then ram_pct="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.0f", (u*100)/t}')"; else ram_pct=0; fi; case "$ram_pct" in ''|*[!0-9]*) ram_pct=0;; esac; [ "$ram_pct" -gt 100 ] && ram_pct=100; [ "$ram_pct" -lt 0 ] && ram_pct=0
-  cpu_color="$(cpu_usage_color "$cpu_pct")"; ram_color="$(ram_usage_color "$ram_pct")"; cpu_pct_fixed="$(printf "%02d" "$cpu_pct")"; ram_text="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.1f/%.1fG", u/1073741824, t/1073741824}')"; show_bat_charge=true; is_on "$BG_RIGHT" && show_bat_charge=false; bat_text="$(render_battery "$bat_level" "$bat_charging" "$show_bat_charge")"
-  battery_segment="$bat_text"; cpu_segment="#[fg=${cpu_color}] ${cpu_pct_fixed}%"; ram_segment="#[fg=${ram_color}] ${ram_text}"; out=""
+  cpu_color="$(cpu_usage_color "$cpu_pct")"; ram_color="$(ram_usage_color "$ram_pct")"; cpu_pct_fixed="$(printf "%02d" "$cpu_pct")"; ram_pct_fixed="$(printf "%02d" "$ram_pct")"; show_bat_charge=true; is_on "$BG_RIGHT" && show_bat_charge=false; bat_text="$(render_battery "$bat_level" "$bat_charging" "$show_bat_charge")"
+  battery_segment="$bat_text"; cpu_segment="#[fg=${cpu_color}] ${cpu_pct_fixed}%"; ram_segment="#[fg=${ram_color}] ${ram_pct_fixed}%"; out=""
   if is_on "$BG_RIGHT"; then
     case "$EDGE_STYLE" in
       flat)
         battery_body=" ${battery_segment} "
         if [ "$bat_charging" = "true" ]; then
-          battery_body="#[bg=${BG_BATTERY},fg=${FG_ON_ACCENT}] ${BAT_CHARGING_ICON} #[bg=${BG_BATTERY}] ${battery_segment} "
+          battery_body="#[bg=${BG_BATTERY},fg=${FG_ON_ACCENT}] ${BAT_CHARGING_ICON}#[bg=${BG_BATTERY}]${battery_segment} "
         fi
         battery_segment="$(pill_wrap "$BG_BATTERY" "$battery_body")"
         cpu_segment="$(pill_wrap "$BG_CPU" " ${cpu_segment} ")"

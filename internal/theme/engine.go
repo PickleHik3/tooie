@@ -55,9 +55,27 @@ type matugenJSON struct {
 }
 
 func ParseMatugenColors(raw []byte) (map[string]string, error) {
+	return ParseMatugenColorsForMode(raw, "dark")
+}
+
+func ParseMatugenColorsForMode(raw []byte, mode string) (map[string]string, error) {
+	mode = canonicalMode(mode)
+	if mode == "" {
+		mode = "dark"
+	}
+	if out, ok := parseLegacyMatugenColors(raw); ok {
+		return out, nil
+	}
+	if out, ok := parseTemplateMatugenColors(raw, mode); ok {
+		return out, nil
+	}
+	return nil, fmt.Errorf("matugen output had no usable colors")
+}
+
+func parseLegacyMatugenColors(raw []byte) (map[string]string, bool) {
 	var data matugenJSON
 	if err := json.Unmarshal(raw, &data); err != nil {
-		return nil, err
+		return nil, false
 	}
 	out := map[string]string{}
 	for k, v := range data.Colors {
@@ -66,10 +84,28 @@ func ParseMatugenColors(raw []byte) (map[string]string, error) {
 			out[k] = NormalizeHex(c)
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("matugen output had no usable colors")
+	return out, len(out) > 0
+}
+
+func parseTemplateMatugenColors(raw []byte, mode string) (map[string]string, bool) {
+	var data struct {
+		Colors map[string]map[string]string `json:"colors"`
 	}
-	return out, nil
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, false
+	}
+	roleMap := data.Colors[mode]
+	if len(roleMap) == 0 {
+		return nil, false
+	}
+	out := map[string]string{}
+	for k, v := range roleMap {
+		c := strings.TrimSpace(v)
+		if IsHexColor(c) {
+			out[k] = NormalizeHex(c)
+		}
+	}
+	return out, len(out) > 0
 }
 
 func BuildPresetRoles(family, variant string) (map[string]string, string, error) {
@@ -158,16 +194,41 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	if mode == "light" && fgLuma >= bgLuma {
 		fg = ensureDualContrast("#111118", bg, guard, 7.0)
 	}
+	accentTarget := 4.4
+	if mode == "dark" {
+		accentTarget = 4.6
+	}
+	lockedANSI := map[int]bool{}
 
 	c := map[int]string{}
 	c[0] = NormalizeHex(surface)
 	c[1] = ensureContrast(errorC, bg, 3.6)
-	c[2] = ensureContrast(blendHex(secondary, "#46d37b", 0.45), bg, 3.6)
-	c[3] = ensureContrast(blendHex(tertiary, "#ffd75f", 0.55), bg, 3.6)
+	c[2] = ensureContrast(role(roles, "secondary_fixed", secondary), bg, 3.6)
+	c[3] = ensureContrast(role(roles, "tertiary_fixed", tertiary), bg, 3.6)
 	c[4] = ensureContrast(primary, bg, 3.6)
 	c[5] = ensureContrast(tertiary, bg, 3.6)
 	c[6] = ensureContrast(secondary, bg, 3.6)
 	c[7] = ensureContrast(role(roles, "on_surface", fg), bg, 6.0)
+	if opts.Source == SourceWallpaper {
+		bgTone := relLuma(bg)
+		switch {
+		case bgTone < 0.22:
+			// Dark scenes: prefer softer pastel-like ANSI accents that still exceed contrast thresholds.
+			for i := 1; i <= 6; i++ {
+				c[i] = ensureContrast(blendHex(c[i], fg, 0.16), bg, 3.9)
+			}
+		case bgTone > 0.58:
+			// Bright scenes: push accents deeper to avoid washed-out terminal text against light backgrounds.
+			for i := 1; i <= 6; i++ {
+				c[i] = ensureContrast(blendHex(c[i], "#000000", 0.20), bg, 4.0)
+			}
+		default:
+			// Mid-tone scenes: keep accents vivid but controlled.
+			for i := 1; i <= 6; i++ {
+				c[i] = ensureContrast(blendHex(c[i], fg, 0.08), bg, 3.8)
+			}
+		}
+	}
 
 	brightMix := "#ffffff"
 	brightT := 0.24
@@ -175,14 +236,14 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		brightMix = "#000000"
 		brightT = 0.22
 	}
-	c[8] = ensureContrast(role(roles, "surface_container_high", blendHex(c[0], brightMix, 0.14)), bg, 1.3)
+	c[8] = ensureContrast(role(roles, "surface_container_high", blendHex(c[0], brightMix, 0.14)), bg, 3.1)
 	for i := 1; i <= 5; i++ {
-		c[8+i] = ensureContrast(blendHex(c[i], brightMix, brightT), bg, 4.0)
+		c[8+i] = ensureContrast(blendHex(c[i], brightMix, brightT), bg, 4.5)
 	}
-	c[14] = outline
-	c[15] = muted
-	c[16] = ensureContrast(role(roles, "secondary_fixed", blendHex(c[2], c[6], 0.50)), bg, 3.2)
-	c[17] = ensureContrast(role(roles, "tertiary_fixed", blendHex(c[5], c[4], 0.40)), bg, 3.2)
+	c[14] = ensureContrast(outline, bg, 3.4)
+	c[15] = ensureContrast(muted, bg, 4.8)
+	c[16] = ensureContrast(role(roles, "secondary_fixed", blendHex(c[2], c[6], 0.50)), bg, 3.8)
+	c[17] = ensureContrast(role(roles, "tertiary_fixed", blendHex(c[5], c[4], 0.40)), bg, 3.8)
 	c[18] = role(roles, "surface_dim", blendHex(bg, "#000000", ternf(mode == "dark", 0.10, 0.06)))
 	c[19] = role(roles, "surface_bright", blendHex(bg, "#ffffff", ternf(mode == "dark", 0.12, 0.06)))
 	c[20] = role(roles, "surface_variant", blendHex(c[0], c[15], 0.26))
@@ -191,23 +252,73 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	if opts.AnsiOverrides != nil {
 		if v := opts.AnsiOverrides["red"]; IsHexColor(v) {
 			c[1], c[9] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[1] = true
 		}
 		if v := opts.AnsiOverrides["green"]; IsHexColor(v) {
 			c[2], c[10] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[2] = true
 		}
 		if v := opts.AnsiOverrides["yellow"]; IsHexColor(v) {
 			c[3], c[11] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[3] = true
 		}
 		if v := opts.AnsiOverrides["blue"]; IsHexColor(v) {
 			c[4], c[12] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[4] = true
 		}
 		if v := opts.AnsiOverrides["magenta"]; IsHexColor(v) {
 			c[5], c[13] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[5] = true
 		}
 		if v := opts.AnsiOverrides["cyan"]; IsHexColor(v) {
 			c[6], c[14] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[6] = true
 		}
 	}
+	guardedMeta := map[string]string{}
+	if !lockedANSI[1] {
+		c[1] = ensureDualContrast(c[1], bg, guard, accentTarget)
+		c[9] = ensureDualContrast(blendHex(c[1], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[2] {
+		before := NormalizeHex(c[2])
+		c[2] = guardReadableAccent(c[2], bg, guard, accentTarget, "#6fd5cf")
+		c[10] = ensureDualContrast(blendHex(c[2], brightMix, brightT), bg, guard, 4.5)
+		if before != c[2] {
+			guardedMeta["ansi_guard_green"] = "adjusted"
+		}
+	}
+	if !lockedANSI[3] {
+		c[3] = ensureDualContrast(blendHex(c[3], "#ffd97a", 0.10), bg, guard, accentTarget)
+		c[11] = ensureDualContrast(blendHex(c[3], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[4] {
+		c[4] = ensureDualContrast(c[4], bg, guard, accentTarget)
+		c[12] = ensureDualContrast(blendHex(c[4], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[5] {
+		c[5] = ensureDualContrast(c[5], bg, guard, accentTarget)
+		c[13] = ensureDualContrast(blendHex(c[5], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[6] {
+		before := NormalizeHex(c[6])
+		c[6] = guardReadableAccent(c[6], bg, guard, accentTarget, "#77d8f2")
+		if !lockedANSI[6] {
+			c[14] = ensureDualContrast(c[14], bg, guard, 3.4)
+		}
+		if before != c[6] {
+			guardedMeta["ansi_guard_cyan"] = "adjusted"
+		}
+	}
+
+	textPrimary := ensureDualContrast(fg, bg, guard, 4.8)
+	textMuted := ensureDualContrast(blendHex(muted, fg, 0.22), bg, guard, 3.8)
+	textAccentPrimary := guardReadableAccent(primary, bg, guard, 4.2, "#6fcbff")
+	textAccentSecondary := guardReadableAccent(secondary, bg, guard, 4.2, "#73d7d5")
+	textInfoBG := NormalizeHex(blendHex(role(roles, "surface_variant", c[20]), textAccentPrimary, 0.18))
+	textActionBG := NormalizeHex(blendHex(role(roles, "surface_container_high", c[19]), tertiary, 0.22))
+	textInfoFG := ensureDualContrast(textPrimary, textInfoBG, bg, 4.5)
+	textActionFG := ensureDualContrast(textPrimary, textActionBG, bg, 4.5)
 
 	stateRed := ensureContrast(c[1], bg, 3.6)
 	stateOrange := ensureContrast(blendHex(c[1], c[3], 0.58), bg, 3.6)
@@ -241,6 +352,14 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	roles["secondary"] = NormalizeHex(secondary)
 	roles["tertiary"] = NormalizeHex(tertiary)
 	roles["error"] = NormalizeHex(errorC)
+	roles["text_primary"] = NormalizeHex(textPrimary)
+	roles["text_muted"] = NormalizeHex(textMuted)
+	roles["text_accent_primary"] = NormalizeHex(textAccentPrimary)
+	roles["text_accent_secondary"] = NormalizeHex(textAccentSecondary)
+	roles["text_info_bg"] = NormalizeHex(textInfoBG)
+	roles["text_info_fg"] = NormalizeHex(textInfoFG)
+	roles["text_action_bg"] = NormalizeHex(textActionBG)
+	roles["text_action_fg"] = NormalizeHex(textActionFG)
 
 	meta := map[string]string{
 		"effective_background":      roles["background"],
@@ -254,6 +373,9 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		"contrast_guard_background": NormalizeHex(guard),
 		"style_family":              "native",
 		"style_family_version":      "2",
+	}
+	for k, v := range guardedMeta {
+		meta[k] = v
 	}
 
 	return Result{
@@ -475,6 +597,61 @@ func ensureContrast(fg, bg string, target float64) string {
 		}
 	}
 	return NormalizeHex(anchor)
+}
+
+func guardReadableAccent(fg, bgA, bgB string, target float64, pivot string) string {
+	out := ensureDualContrast(fg, bgA, bgB, target)
+	if !accentReadabilityRisk(out, bgA, target) {
+		return NormalizeHex(out)
+	}
+	shifted := ensureDualContrast(blendHex(out, pivot, 0.34), bgA, bgB, target)
+	if minContrastSet(shifted, bgA, bgB) >= minContrastSet(out, bgA, bgB)+0.05 {
+		return NormalizeHex(shifted)
+	}
+	return NormalizeHex(out)
+}
+
+func accentReadabilityRisk(fg, bg string, target float64) bool {
+	h, s, l := hslHex(fg)
+	if contrastRatio(fg, bg) < target {
+		return true
+	}
+	if h >= 70 && h <= 158 && (s < 0.44 || l < 0.56) {
+		return true
+	}
+	return false
+}
+
+func hslHex(hex string) (h, s, l float64) {
+	r8, g8, b8 := parseHex(hex)
+	r := float64(r8) / 255.0
+	g := float64(g8) / 255.0
+	b := float64(b8) / 255.0
+	maxv := math.Max(r, math.Max(g, b))
+	minv := math.Min(r, math.Min(g, b))
+	l = (maxv + minv) / 2
+	if maxv == minv {
+		return 0, 0, l
+	}
+	d := maxv - minv
+	if l > 0.5 {
+		s = d / (2.0 - maxv - minv)
+	} else {
+		s = d / (maxv + minv)
+	}
+	switch maxv {
+	case r:
+		h = (g - b) / d
+		if g < b {
+			h += 6
+		}
+	case g:
+		h = ((b - r) / d) + 2
+	default:
+		h = ((r - g) / d) + 4
+	}
+	h *= 60
+	return h, s, l
 }
 
 func bestContrastColor(bg, a, b string) string {

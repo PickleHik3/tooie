@@ -46,26 +46,26 @@ if status is-interactive
     and not set -q SSH_CONNECTION
     and not set -q SSH_CLIENT
     and not set -q SSH_TTY
-    set -l __tooie_purpose shell
-    if test "$PREFIX" = "/data/data/com.termux/files/usr"
-        set __tooie_purpose termux
+    set -l __tooie_base "main"
+    if set -q TOOIE_TMUX_SESSION_BASE
+        set __tooie_base (string trim -- "$TOOIE_TMUX_SESSION_BASE")
+    else if set -q TOOIE_TMUX_PURPOSE
+        # Backward compatibility with older env var naming.
+        set __tooie_base (string trim -- "$TOOIE_TMUX_PURPOSE")
     end
-    if set -q TOOIE_TMUX_PURPOSE
-        set __tooie_purpose (string trim -- "$TOOIE_TMUX_PURPOSE")
+    if test -z "$__tooie_base"
+        set __tooie_base "main"
     end
-    if test -z "$__tooie_purpose"
-        set __tooie_purpose shell
-    end
-    set __tooie_purpose (string lower -- "$__tooie_purpose")
-    set __tooie_purpose (string replace -ra '[^a-z0-9_-]+' '-' -- "$__tooie_purpose")
-    if test -z "$__tooie_purpose"
-        set __tooie_purpose shell
+    set __tooie_base (string lower -- "$__tooie_base")
+    set __tooie_base (string replace -ra '[^a-z0-9_-]+' '-' -- "$__tooie_base")
+    if test -z "$__tooie_base"
+        set __tooie_base "main"
     end
 
-    set -l __tooie_name "$__tooie_purpose"
+    set -l __tooie_name "$__tooie_base"
     set -l __tooie_idx 2
     while tmux has-session -t "$__tooie_name" >/dev/null 2>&1
-        set __tooie_name "$__tooie_purpose-$__tooie_idx"
+        set __tooie_name "$__tooie_base-$__tooie_idx"
         set __tooie_idx (math "$__tooie_idx + 1")
     end
     exec tmux new-session -s "$__tooie_name" 2>/dev/null

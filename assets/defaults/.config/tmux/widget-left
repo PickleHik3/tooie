@@ -14,6 +14,9 @@ bg_session="$(get_tmux_option '@status-tmux-left-bg-session' 'colour8')"
 bg_prefix="$(get_tmux_option '@status-tmux-left-bg-prefix' "$bg_session")"
 bg_copy="$(get_tmux_option '@status-tmux-left-bg-copy' "$bg_session")"
 fg_on_accent="$(get_tmux_option '@status-tmux-fg-on-accent' 'colour15')"
+fg_session="$(get_tmux_option '@status-tmux-left-fg-session' "$fg_on_accent")"
+fg_prefix="$(get_tmux_option '@status-tmux-left-fg-prefix' "$fg_on_accent")"
+fg_copy="$(get_tmux_option '@status-tmux-left-fg-copy' "$fg_on_accent")"
 session_pad="$(get_tmux_option '@status-tmux-left-session-pad' 'none')"
 
 if [ "$edge_style" = "rounded" ]; then
@@ -22,6 +25,7 @@ else
   label=" ${session_name} "
 fi
 bg="$bg_session"
+fg="$fg_session"
 if [ "$is_prefix" = "1" ]; then
   if [ "$edge_style" = "rounded" ]; then
     label="PRFX"
@@ -29,6 +33,7 @@ if [ "$is_prefix" = "1" ]; then
     label=" PRFX "
   fi
   bg="$bg_prefix"
+  fg="$fg_prefix"
 elif [ "$in_copy_mode" = "1" ]; then
   if [ "$edge_style" = "rounded" ]; then
     label="COPY"
@@ -36,12 +41,13 @@ elif [ "$in_copy_mode" = "1" ]; then
     label=" COPY "
   fi
   bg="$bg_copy"
+  fg="$fg_copy"
 fi
 
 if [ "$edge_style" = "rounded" ]; then
-  out="#[fg=${bg},bg=default]#[bg=${bg},fg=${fg_on_accent}]${label}#[fg=${bg},bg=default]"
+  out="#[fg=${bg},bg=default]#[bg=${bg},fg=${fg}]${label}#[fg=${bg},bg=default]"
 else
-  out="#[bg=${bg},fg=${fg_on_accent}]${label}#[bg=default]"
+  out="#[bg=${bg},fg=${fg}]${label}#[bg=default]"
 fi
 
 if [ "$session_pad" = "space" ]; then

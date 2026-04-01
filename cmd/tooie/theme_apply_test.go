@@ -483,21 +483,34 @@ func TestAutoCandidateModesForDarkScene(t *testing.T) {
 		DarkPixelRatio:   0.72,
 		EdgeWeightedLuma: 0.31,
 	})
-	if len(modes) != 2 || modes[0] != "dark" || modes[1] != "light" {
-		t.Fatalf("expected dark+light mode candidates, got %v", modes)
+	if len(modes) != 1 || modes[0] != "dark" {
+		t.Fatalf("expected scene-locked dark mode candidate, got %v", modes)
 	}
 }
 
-func TestAutoCandidateModesForMixedScene(t *testing.T) {
+func TestAutoCandidateModesForBrightScene(t *testing.T) {
 	modes := autoCandidateModes("auto", autoDecisionMetrics{
-		MeanLuma:         0.50,
-		P50:              0.50,
-		DarkPixelRatio:   0.35,
-		BrightPixelRatio: 0.20,
-		EdgeWeightedLuma: 0.50,
+		MeanLuma:         0.61,
+		P50:              0.56,
+		DarkPixelRatio:   0.12,
+		BrightPixelRatio: 0.34,
+		EdgeWeightedLuma: 0.60,
 	})
-	if len(modes) != 2 || modes[0] != "dark" || modes[1] != "light" {
-		t.Fatalf("expected dark+light candidates, got %v", modes)
+	if len(modes) != 1 || modes[0] != "light" {
+		t.Fatalf("expected scene-locked light mode candidate, got %v", modes)
+	}
+}
+
+func TestAutoCandidateModesForMixedSceneFallsBackToDark(t *testing.T) {
+	modes := autoCandidateModes("auto", autoDecisionMetrics{
+		MeanLuma:         0.49,
+		P50:              0.49,
+		DarkPixelRatio:   0.27,
+		BrightPixelRatio: 0.21,
+		EdgeWeightedLuma: 0.49,
+	})
+	if len(modes) != 1 || modes[0] != "dark" {
+		t.Fatalf("expected mixed scene to fallback dark mode candidate, got %v", modes)
 	}
 }
 
