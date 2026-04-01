@@ -837,39 +837,6 @@ func managedTermuxFilePath(name string) string {
 	return filepath.Join(managedConfigsDir(), "termux", name)
 }
 
-func customTermuxPropertiesPath(home string) string {
-	userPath := filepath.Join(home, ".termux", "termux.properties")
-	info, err := os.Lstat(userPath)
-	if err != nil || info.IsDir() {
-		return ""
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(userPath)
-		if err == nil && target == managedTermuxFilePath("termux.properties") {
-			return ""
-		}
-	}
-	return userPath
-}
-
-func stageManagedTermuxPropertiesFromExistingOrSnapshot(home string) (bool, error) {
-	dst := managedTermuxFilePath("termux.properties")
-	if src := customTermuxPropertiesPath(home); src != "" {
-		if err := copyFile(src, dst, 0o644); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	backup, err := latestSnapshotBackupForPath(filepath.Join(home, ".termux", "termux.properties"))
-	if err == nil {
-		if err := copyFile(backup, dst, 0o644); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	return false, nil
-}
-
 func installFishBootstrap(home string, enable bool) error {
 	snippetPath := filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish")
 	if !enable {
@@ -971,15 +938,6 @@ func stageManagedConfigs(settings tooieSettings, env setupEnv) error {
 			src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".termux", name))
 			if err != nil {
 				return err
-			}
-			if name == "termux.properties" {
-				staged, err := stageManagedTermuxPropertiesFromExistingOrSnapshot(homeDir)
-				if err != nil {
-					return err
-				}
-				if staged {
-					continue
-				}
 			}
 			perm := os.FileMode(0o644)
 			if strings.HasSuffix(name, ".ttf") {
