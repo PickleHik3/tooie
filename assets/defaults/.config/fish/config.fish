@@ -48,7 +48,9 @@ if status is-interactive
     and not set -q SSH_TTY
     set -l __tooie_tty (tty 2>/dev/null)
     if test -n "$__tooie_tty"
-        set -l __tooie_name (string replace -a "/" "_" "$__tooie_tty")
+        set -l __tooie_leaf (string split "/" "$__tooie_tty")[-1]
+        set -l __tooie_name "tty-$__tooie_leaf"
+        set __tooie_name (string replace -a "." "-" "$__tooie_name")
         exec tmux new-session -s "$__tooie_name" 2>/dev/null
     else
         exec tmux new-session 2>/dev/null
