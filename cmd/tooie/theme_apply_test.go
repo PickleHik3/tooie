@@ -75,6 +75,9 @@ func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 	if !strings.Contains(got, `set -g window-status-separator ""`) {
 		t.Fatalf("expected empty window separator, got: %s", got)
 	}
+	if !strings.Contains(got, `set -g mouse on`) {
+		t.Fatalf("expected tmux mouse mode to be enabled, got: %s", got)
+	}
 	if !strings.Contains(got, `set -g window-status-format "#[fg=`) || !strings.Contains(got, ",bg=") {
 		t.Fatalf("expected default inactive window format to stay rectangular, got: %s", got)
 	}

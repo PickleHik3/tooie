@@ -1328,6 +1328,7 @@ set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_n
 set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\$HOME/.config/tooie/configs/tmux/widget-weather)"
 %s
 set -g window-status-separator ""
+set -g mouse on
 set -g base-index 1
 setw -g pane-base-index 1
 set -g renumber-windows on
