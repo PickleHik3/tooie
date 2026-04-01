@@ -70,6 +70,25 @@ cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(now_epoch)
 cleanup_stale_lock(){ [ -d "$LOCK_DIR" ] || return 0; mt="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"; now="$(now_epoch)"; [ "$mt" -gt 0 ] && [ $((now-mt)) -gt "$LOCK_STALE_SECONDS" ] && rmdir "$LOCK_DIR" 2>/dev/null || true; }
 is_on(){ case "$1" in 1|on|true|yes|enabled) return 0;; *) return 1;; esac; }
 
+is_termux_env(){
+  case "${PREFIX:-}" in
+    /data/data/com.termux/files/usr) return 0 ;;
+  esac
+  case "${HOME:-}" in
+    /data/data/com.termux/*) return 0 ;;
+  esac
+  return 1
+}
+
+runtime_source_mode(){
+  # On regular Linux hosts, always prefer local /proc metrics so widgets match tools like btop.
+  if is_termux_env; then
+    printf '%s' "$SOURCE_MODE"
+  else
+    printf '%s' "local-first"
+  fi
+}
+
 is_waydroid_env(){
   if [ -f "/run/waydroid-container" ] || [ -d "/run/waydroid" ]; then
     return 0
@@ -292,6 +311,7 @@ collect_local_json(){
 }
 
 update_cache_if_needed(){
+  src_mode="$(runtime_source_mode)"
   age="$(cache_age)"; [ "$age" -lt "$TTL_SECONDS" ] && return 0
   want_bat=0
   if is_on "$SHOW_BATTERY"; then
@@ -300,7 +320,7 @@ update_cache_if_needed(){
   cleanup_stale_lock
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     tmp="$CACHE_FILE.tmp.$$"
-    case "$SOURCE_MODE" in
+    case "$src_mode" in
       local-first)
         if collect_local_json "$want_bat" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
           mv "$tmp" "$CACHE_FILE"
@@ -390,6 +410,7 @@ ram_usage_color(){
 }
 
 render_widgets(){
+  src_mode="$(runtime_source_mode)"
   [ -s "$CACHE_FILE" ] || exit 0
   cpu="$(json_get cpuPercent "$CACHE_FILE")"
   mem_used="$(json_get memUsedBytes "$CACHE_FILE")"
@@ -398,7 +419,7 @@ render_widgets(){
   [ -n "$bat_level" ] || bat_level="$(json_get battery.level "$CACHE_FILE")"
   bat_charging="$(json_get battery.charging "$CACHE_FILE")"
   [ -n "$cpu" ] || cpu=0; [ -n "$mem_used" ] || mem_used=0; [ -n "$mem_total" ] || mem_total=0; [ -n "$bat_level" ] || bat_level=0; [ -n "$bat_charging" ] || bat_charging=false
-  if [ "$SOURCE_MODE" = "helper-first" ] && helper_stats_is_fresh; then
+  if [ "$src_mode" = "helper-first" ] && is_termux_env && helper_stats_is_fresh; then
     h_cpu="$(json_get cpuPercent "$HELPER_STATS_FILE")"
     h_mem_used="$(json_get memUsedBytes "$HELPER_STATS_FILE")"
     h_mem_total="$(json_get memTotalBytes "$HELPER_STATS_FILE")"
