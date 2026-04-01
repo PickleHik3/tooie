@@ -143,6 +143,9 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  tooie")
 	fmt.Fprintln(w, "      Start the Tooie dashboard UI.")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie /path/to/wallpaper.jpg")
+	fmt.Fprintln(w, "      Set and persist the base wallpaper image used for theme generation.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie ui")
 	fmt.Fprintln(w, "      Start the Tooie dashboard UI.")
 	fmt.Fprintln(w)
@@ -167,6 +170,7 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "Examples")
 	fmt.Fprintln(w, "  tooie setup")
 	fmt.Fprintln(w, "  tooie doctor")
+	fmt.Fprintln(w, "  tooie ~/Pictures/Wallpapers/my-wallpaper.jpg")
 	if canUseLauncherRestart() {
 		fmt.Fprintln(w, "  tooie restart")
 	}
