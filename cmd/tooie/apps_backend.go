@@ -58,6 +58,11 @@ func runCLI(args []string) int {
 	if len(args) == 0 {
 		return runUICommand(nil)
 	}
+	if len(args) == 1 {
+		if handled, code := runSetWallpaperPathCommand(args[0]); handled {
+			return code
+		}
+	}
 	if showClock, showCal, ok := parseMiniModeFlags(args); ok {
 		return runMiniTUI(showClock, showCal)
 	}
@@ -96,6 +101,38 @@ func runCLI(args []string) int {
 		printCLIUsage(os.Stderr)
 		return 2
 	}
+}
+
+func runSetWallpaperPathCommand(raw string) (bool, int) {
+	arg := strings.TrimSpace(raw)
+	if arg == "" || strings.HasPrefix(arg, "-") {
+		return false, 0
+	}
+	if !looksLikeImagePath(arg) {
+		return false, 0
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		home = homeDir
+	}
+	wall := canonicalWallpaperCandidate(arg)
+	if wall == "" {
+		fmt.Fprintf(os.Stderr, "tooie: wallpaper image not found: %s\n", arg)
+		return true, 1
+	}
+	rememberWallpaperPath(home, wall)
+	fmt.Printf("Set wallpaper base image: %s\n", wall)
+	return true, 0
+}
+
+func looksLikeImagePath(arg string) bool {
+	v := strings.ToLower(strings.TrimSpace(arg))
+	return strings.HasSuffix(v, ".png") ||
+		strings.HasSuffix(v, ".jpg") ||
+		strings.HasSuffix(v, ".jpeg") ||
+		strings.HasSuffix(v, ".webp") ||
+		strings.HasSuffix(v, ".bmp") ||
+		strings.HasSuffix(v, ".gif")
 }
 
 func printCLIUsage(w io.Writer) {
