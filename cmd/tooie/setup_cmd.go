@@ -207,7 +207,7 @@ func runSetupCommand(args []string) int {
 	}
 	normalizeTooieSettings(&settings)
 
-	snapshotID, err := captureInstallSnapshot(installManagedPaths(homeDir))
+	snapshotID, err := captureInstallSnapshot(installManagedPaths(homeDir, settings, env))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tooie setup: failed to create install snapshot: %v\n", err)
 		return 1
@@ -916,7 +916,7 @@ source-file "$HOME/.config/tooie/configs/tmux/tmux.conf"
 	return replaceBlock(tmuxConf, "# >>> TOOIE TMUX BOOTSTRAP START >>>", "# <<< TOOIE TMUX BOOTSTRAP END <<<", block)
 }
 
-func stageManagedConfigs(settings tooieSettings) error {
+func stageManagedConfigs(settings tooieSettings, env setupEnv) error {
 	fontsSrc, err := resolveRepoAssetPath("fonts")
 	if err == nil {
 		if err := copyTree(fontsSrc, filepath.Join(tooieConfigDir, "fonts")); err != nil {
@@ -965,27 +965,32 @@ func stageManagedConfigs(settings tooieSettings) error {
 	if err := copyFile(peaclockSrc, managedPeaclockPath(), 0o644); err != nil {
 		return err
 	}
-	for _, name := range []string{"termux.properties", "colors.properties", "font.ttf", "font-italic.ttf"} {
-		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".termux", name))
-		if err != nil {
-			return err
-		}
-		if name == "termux.properties" {
-			staged, err := stageManagedTermuxPropertiesFromExistingOrSnapshot(homeDir)
+	managedTermuxDir := filepath.Join(managedConfigsDir(), "termux")
+	if settings.Modules.TermuxAppearance && env.IsTermux {
+		for _, name := range []string{"termux.properties", "colors.properties", "font.ttf", "font-italic.ttf"} {
+			src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".termux", name))
 			if err != nil {
 				return err
 			}
-			if staged {
-				continue
+			if name == "termux.properties" {
+				staged, err := stageManagedTermuxPropertiesFromExistingOrSnapshot(homeDir)
+				if err != nil {
+					return err
+				}
+				if staged {
+					continue
+				}
+			}
+			perm := os.FileMode(0o644)
+			if strings.HasSuffix(name, ".ttf") {
+				perm = 0o644
+			}
+			if err := copyFile(src, managedTermuxFilePath(name), perm); err != nil {
+				return err
 			}
 		}
-		perm := os.FileMode(0o644)
-		if strings.HasSuffix(name, ".ttf") {
-			perm = 0o644
-		}
-		if err := copyFile(src, managedTermuxFilePath(name), perm); err != nil {
-			return err
-		}
+	} else {
+		_ = os.RemoveAll(managedTermuxDir)
 	}
 	return nil
 }
@@ -995,7 +1000,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	if err := installSupportScriptsFromRepo(); err != nil {
 		return err
 	}
-	if err := stageManagedConfigs(settings); err != nil {
+	if err := stageManagedConfigs(settings, env); err != nil {
 		return err
 	}
 	if err := installTmuxBootstrap(home, settings.Modules.TmuxTheme); err != nil {
@@ -1103,16 +1108,21 @@ func seedHelperStats() error {
 	return os.WriteFile(path, raw, 0o644)
 }
 
-func installManagedPaths(home string) []string {
-	return []string{
+func installManagedPaths(home string, settings tooieSettings, env setupEnv) []string {
+	paths := []string{
 		filepath.Join(home, ".local", "bin", "tooie"),
 		filepath.Join(home, ".config", "tooie"),
 		filepath.Join(home, ".tmux.conf"),
 		filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish"),
 		filepath.Join(home, ".config", "peaclock", "config"),
-		filepath.Join(home, ".termux", "termux.properties"),
-		filepath.Join(home, ".termux", "colors.properties"),
-		filepath.Join(home, ".termux", "font.ttf"),
-		filepath.Join(home, ".termux", "font-italic.ttf"),
 	}
+	if settings.Modules.TermuxAppearance && env.IsTermux {
+		paths = append(paths,
+			filepath.Join(home, ".termux", "termux.properties"),
+			filepath.Join(home, ".termux", "colors.properties"),
+			filepath.Join(home, ".termux", "font.ttf"),
+			filepath.Join(home, ".termux", "font-italic.ttf"),
+		)
+	}
+	return paths
 }
