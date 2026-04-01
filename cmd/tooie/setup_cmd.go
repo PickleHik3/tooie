@@ -978,6 +978,9 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 				return err
 			}
 		}
+		if commandExists("termux-reload-settings") {
+			_ = exec.Command("termux-reload-settings").Run()
+		}
 	}
 
 	if settings.Modules.BtopHelper {
