@@ -24,7 +24,7 @@ func TestBestWallpaperPathUsesEnvOverride(t *testing.T) {
 
 func TestBestWallpaperPathFallsBackToPictures(t *testing.T) {
 	tmp := t.TempDir()
-	pics := filepath.Join(tmp, "Pictures")
+	pics := filepath.Join(tmp, "Pictures", "Wallpapers")
 	if err := os.MkdirAll(pics, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestBestWallpaperPathFallsBackToPictures(t *testing.T) {
 	t.Setenv("TOOIE_WALLPAPER", "")
 	got, ok := bestWallpaperPath(tmp)
 	if !ok {
-		t.Fatalf("expected pictures fallback wallpaper to resolve")
+		t.Fatalf("expected wallpapers fallback to resolve")
 	}
 	if got != img {
 		t.Fatalf("bestWallpaperPath() = %q, want %q", got, img)

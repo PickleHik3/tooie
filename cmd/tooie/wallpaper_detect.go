@@ -165,7 +165,6 @@ func newestImageFromCommonDirs(home string) string {
 	dirs := []string{
 		filepath.Join(home, "Pictures", "Wallpapers"),
 		filepath.Join(home, "Pictures", "wallpapers"),
-		filepath.Join(home, "Pictures"),
 		filepath.Join(home, ".local", "share", "backgrounds"),
 	}
 	type candidate struct {
