@@ -114,34 +114,10 @@ weather_icon_from_condition(){
   esac
 }
 
-moon_phase_icon(){
-  phase="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr ' -' '__' | tr -s '_')"
-  case "$phase" in
-    new_moon) echo '' ;;
-    waxing_crescent) echo '' ;;
-    first_quarter) echo '' ;;
-    waxing_gibbous) echo '' ;;
-    full_moon) echo '' ;;
-    waning_gibbous) echo '' ;;
-    third_quarter|last_quarter) echo '' ;;
-    waning_crescent) echo '' ;;
-    *) echo "" ;;
-  esac
-}
-
 map_weather_icon(){
-  code="$1"; night="$2"; moon_phase="${3:-}"
+  code="$1"; night="$2"
   cond="$(weather_condition_from_code "$code")"
-  icon="$(weather_icon_from_condition "$cond" "$night")"
-  if [ "$night" -eq 1 ]; then
-    case "$cond" in
-      Sunny|PartlyCloudy)
-        moon_icon="$(moon_phase_icon "$moon_phase")"
-        [ -n "$moon_icon" ] && icon="$moon_icon"
-        ;;
-    esac
-  fi
-  printf '%s' "$icon"
+  weather_icon_from_condition "$cond" "$night"
 }
 
 cache_age(){ [ -f "$CACHE_FILE" ] || { echo 999999; return; }; now="$(date +%s)"; mt="$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)"; [ "$mt" -gt 0 ] || { echo 999999; return; }; echo $((now-mt)); }
@@ -158,13 +134,11 @@ fetch_weather(){
   code=""
   sunrise=""
   sunset=""
-  moon_phase=""
   if command -v jq >/dev/null 2>&1; then
     temp="$(printf '%s' "$json" | jq -r '.data.current_condition[0].temp_C // .current_condition[0].temp_C // empty' 2>/dev/null | head -n1)"
     code="$(printf '%s' "$json" | jq -r '.data.current_condition[0].weatherCode // .current_condition[0].weatherCode // empty' 2>/dev/null | head -n1)"
     sunrise="$(printf '%s' "$json" | jq -r '.data.weather[0].astronomy[0].sunrise // .weather[0].astronomy[0].sunrise // empty' 2>/dev/null | head -n1)"
     sunset="$(printf '%s' "$json" | jq -r '.data.weather[0].astronomy[0].sunset // .weather[0].astronomy[0].sunset // empty' 2>/dev/null | head -n1)"
-    moon_phase="$(printf '%s' "$json" | jq -r '.data.weather[0].astronomy[0].moon_phase // .weather[0].astronomy[0].moon_phase // empty' 2>/dev/null | head -n1)"
   else
     temp="$(printf '%s' "$json" | sed -n 's/.*"temp_C"[[:space:]]*:[[:space:]]*"\{0,1\}\(-\{0,1\}[0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
     code="$(printf '%s' "$json" | sed -n 's/.*"weatherCode"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9][0-9]*\)"\{0,1\}.*/\1/p' | head -n1)"
@@ -180,7 +154,7 @@ fetch_weather(){
   elif fallback_is_night; then
     n=1
   fi
-  out="$(map_weather_icon "$code" "$n" "$moon_phase") ${temp}°C"
+  out="$(map_weather_icon "$code" "$n") ${temp}°C"
   printf '%s\n' "$out" > "$CACHE_FILE.tmp.$$" && mv "$CACHE_FILE.tmp.$$" "$CACHE_FILE"
   printf '%s' "$out"
 }

@@ -124,6 +124,41 @@ func latestInstallSnapshotID() (string, error) {
 	return strings.TrimSpace(v["snapshot"]), nil
 }
 
+func latestSnapshotBackupForPath(target string) (string, error) {
+	snapID, err := latestInstallSnapshotID()
+	if err != nil {
+		return "", err
+	}
+	snapID = strings.TrimSpace(snapID)
+	if snapID == "" {
+		return "", fmt.Errorf("latest snapshot id is empty")
+	}
+	manifestPath := filepath.Join(installSnapshotsRoot(), snapID, "manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	var manifest installSnapshotManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return "", err
+	}
+	want := strings.TrimSpace(target)
+	for _, ent := range manifest.Entries {
+		if strings.TrimSpace(ent.Path) != want {
+			continue
+		}
+		if !ent.Existed || strings.TrimSpace(ent.BackupRel) == "" {
+			return "", fmt.Errorf("no backed up entry for %s", target)
+		}
+		backup := filepath.Join(installSnapshotsRoot(), snapID, ent.BackupRel)
+		if _, err := os.Stat(backup); err != nil {
+			return "", err
+		}
+		return backup, nil
+	}
+	return "", fmt.Errorf("path not present in snapshot: %s", target)
+}
+
 func restoreInstallSnapshot(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
