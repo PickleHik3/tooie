@@ -59,7 +59,10 @@ func runCLI(args []string) int {
 		return runUICommand(nil)
 	}
 	if len(args) == 1 {
-		if handled, code := runSetWallpaperPathCommand(args[0]); handled {
+		if handled, launchUI, code := runSetWallpaperPathCommand(args[0]); handled {
+			if launchUI {
+				return runUICommand(nil)
+			}
 			return code
 		}
 	}
@@ -103,13 +106,13 @@ func runCLI(args []string) int {
 	}
 }
 
-func runSetWallpaperPathCommand(raw string) (bool, int) {
+func runSetWallpaperPathCommand(raw string) (bool, bool, int) {
 	arg := strings.TrimSpace(raw)
 	if arg == "" || strings.HasPrefix(arg, "-") {
-		return false, 0
+		return false, false, 0
 	}
 	if !looksLikeImagePath(arg) {
-		return false, 0
+		return false, false, 0
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
@@ -118,11 +121,11 @@ func runSetWallpaperPathCommand(raw string) (bool, int) {
 	wall := canonicalWallpaperCandidate(arg)
 	if wall == "" {
 		fmt.Fprintf(os.Stderr, "tooie: wallpaper image not found: %s\n", arg)
-		return true, 1
+		return true, false, 1
 	}
 	rememberWallpaperPath(home, wall)
 	fmt.Printf("Set wallpaper base image: %s\n", wall)
-	return true, 0
+	return true, true, 0
 }
 
 func looksLikeImagePath(arg string) bool {
@@ -144,7 +147,7 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "      Start the Tooie dashboard UI.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie /path/to/wallpaper.jpg")
-	fmt.Fprintln(w, "      Set and persist the base wallpaper image used for theme generation.")
+	fmt.Fprintln(w, "      Set and persist the base wallpaper image used for theme generation, then open the TUI.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie ui")
 	fmt.Fprintln(w, "      Start the Tooie dashboard UI.")
