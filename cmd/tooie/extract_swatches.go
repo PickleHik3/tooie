@@ -72,13 +72,10 @@ func currentExtractSwatchKey(mode, paletteType string) (string, error) {
 
 func resolveSwatchMode(mode, wallpaper string) string {
 	m := canonicalMode(mode)
-	if m == "dark" || m == "light" {
-		return m
-	}
-	metrics := analyzeWallpaperLuma(wallpaper)
-	if brightDominantScene(metrics) && !darkDominantScene(metrics) {
+	if m == "light" {
 		return "light"
 	}
+	_ = wallpaper
 	return "dark"
 }
 

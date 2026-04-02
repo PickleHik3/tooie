@@ -18,6 +18,7 @@ const (
 type Options struct {
 	Source         Source
 	Mode           string
+	Platform       string
 	StyleFamily    string
 	Profile        string
 	StatusPalette  string
@@ -163,24 +164,56 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	if mode == "" {
 		mode = "dark"
 	}
+	platform := strings.ToLower(strings.TrimSpace(opts.Platform))
+	if platform != "linux" {
+		platform = "termux"
+	}
+
+	primaryTarget := 4.0
+	secondaryTarget := 4.0
+	tertiaryTarget := 4.0
+	errorTarget := 4.0
+	fgTarget := 7.0
+	accentTarget := 4.4
+	textPrimaryTarget := 4.8
+	textMutedTarget := 3.8
+	widgetTarget := 3.6
+	if mode == "dark" {
+		accentTarget = 4.6
+	}
+	if platform == "termux" {
+		primaryTarget = 4.4
+		secondaryTarget = 4.4
+		tertiaryTarget = 4.4
+		errorTarget = 4.4
+		fgTarget = 9.0
+		if accentTarget < 4.8 {
+			accentTarget = 4.8
+		}
+		textPrimaryTarget = 5.2
+		textMutedTarget = 4.2
+		widgetTarget = 4.0
+	}
 
 	bg := role(roles, "background", tern(mode == "dark", "#1a1b26", "#eff1f5"))
 	surface := role(roles, "surface_container", blendHex(bg, tern(mode == "dark", "#000000", "#ffffff"), 0.12))
-	primary := ensureContrast(role(roles, "primary", "#7aa2f7"), bg, 4.0)
-	secondary := ensureContrast(role(roles, "secondary", "#7dcfff"), bg, 4.0)
-	tertiary := ensureContrast(role(roles, "tertiary", "#bb9af7"), bg, 4.0)
-	errorC := ensureContrast(role(roles, "error", "#ff5f5f"), bg, 4.0)
-	fg := ensureContrast(role(roles, "on_background", role(roles, "on_surface", tern(mode == "dark", "#c0caf5", "#4c4f69"))), bg, 7.0)
+	primary := ensureContrast(role(roles, "primary", "#7aa2f7"), bg, primaryTarget)
+	secondary := ensureContrast(role(roles, "secondary", "#7dcfff"), bg, secondaryTarget)
+	tertiary := ensureContrast(role(roles, "tertiary", "#bb9af7"), bg, tertiaryTarget)
+	errorC := ensureContrast(role(roles, "error", "#ff5f5f"), bg, errorTarget)
+	lightTextAnchor := NormalizeHex(blendHex(blendHex(primary, secondary, 0.50), "#f6f3ff", 0.70))
+	darkTextAnchor := NormalizeHex(blendHex(blendHex(primary, tertiary, 0.55), "#131522", 0.82))
+	fg := ensureContrast(role(roles, "on_background", role(roles, "on_surface", tern(mode == "dark", "#c0caf5", "#4c4f69"))), bg, fgTarget)
 	muted := ensureContrast(role(roles, "on_surface_variant", blendHex(fg, bg, 0.38)), bg, 4.5)
 	outline := ensureContrast(role(roles, "outline", blendHex(fg, bg, 0.54)), bg, 3.2)
 	cursor := ensureContrast(primary, bg, 4.5)
 
 	guard := role(roles, tern(mode == "dark", "surface_bright", "surface_dim"), blendHex(bg, tern(mode == "dark", "#ffffff", "#000000"), 0.18))
-	fg = ensureDualContrast(fg, bg, guard, 7.0)
+	fg = ensureDualContrastAnchored(fg, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	cursor = ensureDualContrast(cursor, bg, guard, 4.5)
 
 	if IsHexColor(opts.TextOverride) {
-		fg = ensureDualContrast(opts.TextOverride, bg, guard, 7.0)
+		fg = ensureDualContrastAnchored(opts.TextOverride, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	}
 	if IsHexColor(opts.CursorOverride) {
 		cursor = ensureDualContrast(opts.CursorOverride, bg, guard, 4.5)
@@ -189,14 +222,10 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	bgLuma := relLuma(bg)
 	fgLuma := relLuma(fg)
 	if mode == "dark" && fgLuma <= bgLuma {
-		fg = ensureDualContrast("#f2f2f8", bg, guard, 7.0)
+		fg = ensureDualContrastAnchored(lightTextAnchor, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	}
 	if mode == "light" && fgLuma >= bgLuma {
-		fg = ensureDualContrast("#111118", bg, guard, 7.0)
-	}
-	accentTarget := 4.4
-	if mode == "dark" {
-		accentTarget = 4.6
+		fg = ensureDualContrastAnchored(darkTextAnchor, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	}
 	lockedANSI := map[int]bool{}
 
@@ -208,7 +237,7 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	c[4] = ensureContrast(primary, bg, 3.6)
 	c[5] = ensureContrast(tertiary, bg, 3.6)
 	c[6] = ensureContrast(secondary, bg, 3.6)
-	c[7] = ensureContrast(role(roles, "on_surface", fg), bg, 6.0)
+	c[7] = ensureDualContrastAnchored(blendHex(role(roles, "on_surface", fg), blendHex(primary, secondary, 0.52), ternf(mode == "dark", 0.14, 0.08)), bg, guard, 6.0, lightTextAnchor, darkTextAnchor)
 	if opts.Source == SourceWallpaper {
 		bgTone := relLuma(bg)
 		switch {
@@ -236,12 +265,12 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		brightMix = "#000000"
 		brightT = 0.22
 	}
-	c[8] = ensureContrast(role(roles, "surface_container_high", blendHex(c[0], brightMix, 0.14)), bg, 3.1)
+	c[8] = ensureContrast(blendHex(role(roles, "surface_container_high", blendHex(c[0], brightMix, 0.14)), blendHex(secondary, tertiary, 0.48), ternf(mode == "dark", 0.08, 0.06)), bg, 3.1)
 	for i := 1; i <= 5; i++ {
 		c[8+i] = ensureContrast(blendHex(c[i], brightMix, brightT), bg, 4.5)
 	}
 	c[14] = ensureContrast(outline, bg, 3.4)
-	c[15] = ensureContrast(muted, bg, 4.8)
+	c[15] = ensureDualContrastAnchored(blendHex(muted, blendHex(secondary, tertiary, 0.45), ternf(mode == "dark", 0.20, 0.13)), bg, guard, 4.8, lightTextAnchor, darkTextAnchor)
 	c[16] = ensureContrast(role(roles, "secondary_fixed", blendHex(c[2], c[6], 0.50)), bg, 3.8)
 	c[17] = ensureContrast(role(roles, "tertiary_fixed", blendHex(c[5], c[4], 0.40)), bg, 3.8)
 	c[18] = role(roles, "surface_dim", blendHex(bg, "#000000", ternf(mode == "dark", 0.10, 0.06)))
@@ -311,8 +340,8 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		}
 	}
 
-	textPrimary := ensureDualContrast(fg, bg, guard, 4.8)
-	textMuted := ensureDualContrast(blendHex(muted, fg, 0.22), bg, guard, 3.8)
+	textPrimary := ensureDualContrastAnchored(blendHex(fg, blendHex(primary, secondary, 0.55), ternf(mode == "dark", 0.10, 0.06)), bg, guard, textPrimaryTarget, lightTextAnchor, darkTextAnchor)
+	textMuted := ensureDualContrastAnchored(blendHex(blendHex(muted, fg, 0.22), blendHex(secondary, tertiary, 0.50), ternf(mode == "dark", 0.16, 0.10)), bg, guard, textMutedTarget, lightTextAnchor, darkTextAnchor)
 	textAccentPrimary := guardReadableAccent(primary, bg, guard, 4.2, "#6fcbff")
 	textAccentSecondary := guardReadableAccent(secondary, bg, guard, 4.2, "#73d7d5")
 	textInfoBG := NormalizeHex(blendHex(role(roles, "surface_variant", c[20]), textAccentPrimary, 0.18))
@@ -320,15 +349,15 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	textInfoFG := ensureDualContrast(textPrimary, textInfoBG, bg, 4.5)
 	textActionFG := ensureDualContrast(textPrimary, textActionBG, bg, 4.5)
 
-	stateRed := ensureContrast(c[1], bg, 3.6)
-	stateOrange := ensureContrast(blendHex(c[1], c[3], 0.58), bg, 3.6)
-	stateYellow := ensureContrast(c[3], bg, 3.6)
-	stateGreen := ensureContrast(c[2], bg, 3.6)
-	stateMint := ensureContrast(blendHex(c[2], c[6], 0.42), bg, 3.6)
-	stateBlue := ensureContrast(c[4], bg, 3.6)
-	stateTeal := ensureContrast(c[6], bg, 3.6)
-	stateViolet := ensureContrast(blendHex(c[4], c[5], 0.55), bg, 3.6)
-	stateMagenta := ensureContrast(c[5], bg, 3.6)
+	stateRed := ensureContrast(c[1], bg, widgetTarget)
+	stateOrange := ensureContrast(blendHex(c[1], c[3], 0.58), bg, widgetTarget)
+	stateYellow := ensureContrast(c[3], bg, widgetTarget)
+	stateGreen := ensureContrast(c[2], bg, widgetTarget)
+	stateMint := ensureContrast(blendHex(c[2], c[6], 0.42), bg, widgetTarget)
+	stateBlue := ensureContrast(c[4], bg, widgetTarget)
+	stateTeal := ensureContrast(c[6], bg, widgetTarget)
+	stateViolet := ensureContrast(blendHex(c[4], c[5], 0.55), bg, widgetTarget)
+	stateMagenta := ensureContrast(c[5], bg, widgetTarget)
 
 	status := StatusColors{}
 	if strings.TrimSpace(opts.StatusPalette) == "vibrant" {
@@ -569,6 +598,17 @@ func ensureDualContrast(fg, bgA, bgB string, target float64) string {
 	return candB
 }
 
+func ensureDualContrastAnchored(fg, bgA, bgB string, target float64, lightAnchor, darkAnchor string) string {
+	candA := ensureContrastAnchored(fg, bgA, target, lightAnchor, darkAnchor)
+	candB := ensureContrastAnchored(fg, bgB, target, lightAnchor, darkAnchor)
+	minA := minContrastSet(candA, bgA, bgB)
+	minB := minContrastSet(candB, bgA, bgB)
+	if minA >= minB {
+		return candA
+	}
+	return candB
+}
+
 func minContrastSet(fg string, bgs ...string) float64 {
 	if len(bgs) == 0 {
 		return 0
@@ -590,6 +630,22 @@ func ensureContrast(fg, bg string, target float64) string {
 		return fg
 	}
 	anchor := bestContrastColor(bg, "#f2f2f8", "#111118")
+	for _, t := range []float64{0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00} {
+		cand := blendHex(fg, anchor, t)
+		if contrastRatio(cand, bg) >= target {
+			return NormalizeHex(cand)
+		}
+	}
+	return NormalizeHex(anchor)
+}
+
+func ensureContrastAnchored(fg, bg string, target float64, lightAnchor, darkAnchor string) string {
+	fg = NormalizeHex(fg)
+	bg = NormalizeHex(bg)
+	if contrastRatio(fg, bg) >= target {
+		return fg
+	}
+	anchor := bestContrastColor(bg, NormalizeHex(lightAnchor), NormalizeHex(darkAnchor))
 	for _, t := range []float64{0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00} {
 		cand := blendHex(fg, anchor, t)
 		if contrastRatio(cand, bg) >= target {

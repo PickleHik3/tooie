@@ -162,8 +162,13 @@ end
 # --- 4. Starship & Zoxide ---
 if status --is-interactive
     if type -q starship
-        starship init fish | source
-        enable_transience
+        set -l __tooie_starship_init (starship init fish 2>/dev/null)
+        if test $status -eq 0; and test -n "$__tooie_starship_init"
+            echo "$__tooie_starship_init" | source
+        end
+        if functions -q enable_transience
+            enable_transience
+        end
 
         function starship_transient_prompt_func
             starship module character
@@ -176,9 +181,15 @@ if status --is-interactive
 
     if type -q zoxide
         # Initialize zoxide as 'cd' replacement
-        zoxide init fish --cmd cd | source
+        set -l __tooie_zoxide_init (zoxide init fish --cmd cd 2>/dev/null)
+        if test $status -eq 0; and test -n "$__tooie_zoxide_init"
+            echo "$__tooie_zoxide_init" | source
+        end
 
         # Store zoxide's cd, then wrap it with auto-ls + clear integration
+        if functions -q _zoxide_cd
+            functions -e _zoxide_cd
+        end
         functions --copy cd _zoxide_cd
 
         function cd --wraps=_zoxide_cd

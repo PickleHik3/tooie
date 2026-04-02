@@ -1014,8 +1014,8 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 
 	themeArgs := []string{
 		"--theme-source", "preset",
-		"--preset-family", "catppuccin",
-		"--preset-variant", "mocha",
+		"--preset-family", "tokyo-night",
+		"--preset-variant", "night",
 		"--status-position", settings.Tmux.StatusPosition,
 		"--status-layout", settings.Tmux.StatusLayout,
 		"--status-separator", settings.Tmux.StatusSeparator,

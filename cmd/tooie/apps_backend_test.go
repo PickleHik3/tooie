@@ -272,7 +272,7 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 	m := model{
 		themeSource:   "wallpaper",
-		mode:          "auto",
+		mode:          "dark",
 		profile:       "source-2",
 		palette:       "vibrant",
 		widgetBattery: false,
@@ -288,7 +288,7 @@ func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 		"--status-position", "top",
 		"--status-layout", "two-line",
 		"--status-separator", "on",
-		"-m", "auto",
+		"-m", "dark",
 		"--style-family", "source-2",
 		"--type", "tonal-spot",
 		"--widget-battery", "off",

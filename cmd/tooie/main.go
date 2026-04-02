@@ -32,7 +32,7 @@ var (
 )
 
 const (
-	defaultMode        = "auto"
+	defaultMode        = "dark"
 	defaultPalette     = "default"
 	defaultStatusTheme = "default"
 	defaultProfile     = "auto"
@@ -44,7 +44,7 @@ const (
 	totalPages         = 2
 )
 
-var modePresets = []string{"auto", "dark", "light"}
+var modePresets = []string{"dark", "light"}
 var statusThemePresets = []string{"default", "rounded", "rectangle"}
 var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "monochrome", "rainbow", "fruit-salad"}
 var profilePresets = []string{
@@ -295,8 +295,8 @@ func initialModel() model {
 		statusTheme:     defaultStatusTheme,
 		profile:         defaultProfile,
 		themeSource:     defaultSource,
-		presetFamily:    presetFamilyOrder[0],
-		presetVariant:   presetVariantsByFamily[presetFamilyOrder[0]][0],
+		presetFamily:    "tokyo-night",
+		presetVariant:   "night",
 		lastStatus:      "Ready",
 		textColor:       "",
 		cursorColor:     "",
@@ -395,8 +395,8 @@ func initialMiniModel(showClock, showCal bool) model {
 		statusTheme:     defaultStatusTheme,
 		profile:         defaultProfile,
 		themeSource:     defaultSource,
-		presetFamily:    presetFamilyOrder[0],
-		presetVariant:   presetVariantsByFamily[presetFamilyOrder[0]][0],
+		presetFamily:    "tokyo-night",
+		presetVariant:   "night",
 		lastStatus:      "Ready",
 		barSpring:       harmonica.NewSpring(harmonica.FPS(20), 4.6, 0.90),
 		clockFontDefs:   fontDefs,
@@ -638,10 +638,8 @@ func canonicalMode(mode string) string {
 		return "dark"
 	case "light":
 		return "light"
-	case "auto":
-		return "auto"
 	default:
-		return mode
+		return defaultMode
 	}
 }
 
@@ -2446,7 +2444,6 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 		}
 	case "mode":
 		return []settingChoice{
-			{Value: "auto", Label: "Auto"},
 			{Value: "dark", Label: "Dark"},
 			{Value: "light", Label: "Light"},
 		}
@@ -4112,8 +4109,6 @@ func (m model) extractStateLabel() string {
 
 func displayMode(mode string) string {
 	switch canonicalMode(mode) {
-	case "auto":
-		return "Auto"
 	case "dark":
 		return "Dark"
 	case "light":

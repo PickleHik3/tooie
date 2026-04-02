@@ -415,7 +415,7 @@ func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
 	m := model{
 		page:              pageTheme,
 		themeSource:       "wallpaper",
-		mode:              "auto",
+		mode:              "dark",
 		profile:           "source-3",
 		settingMenuTarget: "theme_source",
 		settingMenuIndex:  1,
@@ -430,7 +430,7 @@ func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
 	}
 
 	got.settingMenuTarget = "mode"
-	got.settingMenuIndex = 1
+	got.settingMenuIndex = 0
 	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got = next.(model)
 	if got.mode != "dark" {

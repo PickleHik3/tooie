@@ -450,6 +450,12 @@ func TestParseThemeApplyFlagsRejectsInvalidWidgetToggle(t *testing.T) {
 	}
 }
 
+func TestParseThemeApplyFlagsRejectsAutoMode(t *testing.T) {
+	if _, err := parseThemeApplyFlags([]string{"--mode", "auto"}); err == nil {
+		t.Fatalf("expected auto mode to be rejected")
+	}
+}
+
 func TestDarkDominantSceneDetection(t *testing.T) {
 	m := autoDecisionMetrics{
 		MeanLuma:         0.30,
@@ -511,6 +517,56 @@ func TestAutoCandidateModesForMixedSceneFallsBackToDark(t *testing.T) {
 	})
 	if len(modes) != 1 || modes[0] != "dark" {
 		t.Fatalf("expected mixed scene to fallback dark mode candidate, got %v", modes)
+	}
+}
+
+func TestApplyThemeFilesLinuxWritesGhosttyAndSkipsTermuxColors(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+
+	settings := defaultTooieSettings()
+	settings.Platform.Profile = "linux"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	backupDir := filepath.Join(tmp, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := testThemePayload()
+	if err := applyThemeFiles(payload, backupDir); err != nil {
+		t.Fatalf("applyThemeFiles() error: %v", err)
+	}
+
+	ghosttyTheme := filepath.Join(tmp, ".config", "tooie", "configs", "ghostty", "dank-theme.conf")
+	raw, err := os.ReadFile(ghosttyTheme)
+	if err != nil {
+		t.Fatalf("missing ghostty theme: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "palette = 15=") {
+		t.Fatalf("ghostty theme missing palette entries: %s", body)
+	}
+
+	ghosttyConfig := filepath.Join(tmp, ".config", "ghostty", "config")
+	cfgRaw, err := os.ReadFile(ghosttyConfig)
+	if err != nil {
+		t.Fatalf("missing ghostty config: %v", err)
+	}
+	if !strings.Contains(string(cfgRaw), "TOOIE GHOSTTY THEME START") {
+		t.Fatalf("ghostty bootstrap block missing: %s", string(cfgRaw))
+	}
+
+	termuxColors := managedTermuxFilePath("colors.properties")
+	if _, err := os.Stat(termuxColors); !os.IsNotExist(err) {
+		t.Fatalf("expected linux flow to skip termux colors write")
 	}
 }
 

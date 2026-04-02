@@ -346,9 +346,12 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 		"magenta": cfg.AnsiMagenta,
 		"cyan":    cfg.AnsiCyan,
 	}
+	settings, _ := loadTooieSettings()
+	platformProfile := normalizePlatformProfile(settings.Platform.Profile)
 	computed, err := itheme.Compute(roles, itheme.Options{
 		Source:         itheme.Source(cfg.ThemeSource),
 		Mode:           effectiveMode,
+		Platform:       platformProfile,
 		StyleFamily:    cfg.StyleFamily,
 		Profile:        cfg.StyleFamily, // backwards compatibility in theme.Compute
 		StatusPalette:  cfg.StatusPalette,
@@ -803,11 +806,11 @@ func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg := themeApplyConfig{
-		Mode:               "auto",
+		Mode:               "dark",
 		SchemeType:         "tonal-spot",
 		ThemeSource:        "wallpaper",
-		PresetFamily:       "catppuccin",
-		PresetVariant:      "mocha",
+		PresetFamily:       "tokyo-night",
+		PresetVariant:      "night",
 		StatusPalette:      "default",
 		StatusTheme:        "default",
 		StatusPosition:     "top",
@@ -866,6 +869,10 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	}
 	if fs.NArg() != 0 {
 		return cfg, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	rawMode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if rawMode == "auto" {
+		return cfg, fmt.Errorf("invalid --mode value: auto (only dark/light are supported)")
 	}
 	cfg.Mode = canonicalMode(cfg.Mode)
 	cfg.ThemeSource = strings.TrimSpace(strings.ToLower(cfg.ThemeSource))
@@ -1002,13 +1009,13 @@ func schemeTypeLabel(raw string) string {
 }
 
 type statusSchemeTuning struct {
-	Lift          float64
-	AccentSat     float64
-	ChipMixA      float64
-	ChipMixB      float64
-	ChipMixC      float64
-	WidgetMix     float64
-	WindowActive  float64
+	Lift           float64
+	AccentSat      float64
+	ChipMixA       float64
+	ChipMixB       float64
+	ChipMixC       float64
+	WidgetMix      float64
+	WindowActive   float64
 	WindowInactive float64
 }
 
@@ -1176,20 +1183,22 @@ func normalizeSeparatorMode(raw string) string {
 }
 
 func applyThemeFiles(payload computedPayload, backupDir string) error {
-	termuxColors := managedTermuxFilePath("colors.properties")
 	tmuxConf := managedTmuxConfPath()
 	peaclockCfg := managedPeaclockPath()
 	starshipCfg := managedStarshipPath()
+	settings, _ := loadTooieSettings()
+	profile := normalizePlatformProfile(settings.Platform.Profile)
 
-	if err := os.MkdirAll(filepath.Dir(termuxColors), 0o755); err != nil {
-		return err
-	}
-	if raw, err := os.ReadFile(termuxColors); err == nil {
-		_ = os.WriteFile(filepath.Join(backupDir, "colors.properties.bak"), raw, 0o644)
-	}
-	_ = writeApplyProgress("Writing Termux colors", 0.42)
-	if err := os.WriteFile(termuxColors, []byte(renderColorsProperties(payload)), 0o644); err != nil {
-		return err
+	if profile == "linux" {
+		_ = writeApplyProgress("Writing Ghostty theme", 0.42)
+		if err := applyLinuxGhosttyTheme(payload, backupDir); err != nil {
+			return err
+		}
+	} else {
+		_ = writeApplyProgress("Writing Termux colors", 0.42)
+		if err := applyTermuxColors(payload, backupDir, settings.Modules.TermuxAppearance); err != nil {
+			return err
+		}
 	}
 
 	_ = writeApplyProgress("Writing tmux theme", 0.56)
@@ -1235,8 +1244,10 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 	}
 
 	_ = writeApplyProgress("Reloading shell surfaces", 0.94)
-	if _, err := exec.LookPath("termux-reload-settings"); err == nil {
-		_ = exec.Command("termux-reload-settings").Run()
+	if profile != "linux" {
+		if _, err := exec.LookPath("termux-reload-settings"); err == nil {
+			_ = exec.Command("termux-reload-settings").Run()
+		}
 	}
 	if _, err := exec.LookPath("tmux"); err == nil {
 		_ = exec.Command("tmux", "source-file", filepath.Join(homeDir, ".tmux.conf")).Run()
@@ -1245,6 +1256,128 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 		_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
 	}
 	return nil
+}
+
+func applyTermuxColors(payload computedPayload, backupDir string, syncLive bool) error {
+	termuxColors := managedTermuxFilePath("colors.properties")
+	if err := os.MkdirAll(filepath.Dir(termuxColors), 0o755); err != nil {
+		return err
+	}
+	if raw, err := os.ReadFile(termuxColors); err == nil {
+		_ = os.WriteFile(filepath.Join(backupDir, "colors.properties.bak"), raw, 0o644)
+	}
+	rendered := []byte(renderColorsProperties(payload))
+	if err := os.WriteFile(termuxColors, rendered, 0o644); err != nil {
+		return err
+	}
+	if !syncLive {
+		return nil
+	}
+	for _, dst := range []string{
+		filepath.Join(homeDir, ".termux", "colors.properties"),
+		filepath.Join(homeDir, ".config", "termux", "colors.properties"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, rendered, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyLinuxGhosttyTheme(payload computedPayload, backupDir string) error {
+	managedTheme := managedGhosttyThemePath()
+	if err := os.MkdirAll(filepath.Dir(managedTheme), 0o755); err != nil {
+		return err
+	}
+	if raw, err := os.ReadFile(managedTheme); err == nil {
+		_ = os.WriteFile(filepath.Join(backupDir, "ghostty.theme.bak"), raw, 0o644)
+	}
+	if err := os.WriteFile(managedTheme, []byte(renderGhosttyTheme(payload)), 0o644); err != nil {
+		return err
+	}
+
+	userGhosttyConfig := filepath.Join(homeDir, ".config", "ghostty", "config")
+	if err := ensureFileWithDirs(userGhosttyConfig); err != nil {
+		return err
+	}
+	if err := backupIfExists(userGhosttyConfig, filepath.Join(backupDir, "ghostty.config.bak")); err != nil {
+		return err
+	}
+	block := fmt.Sprintf(`# >>> TOOIE GHOSTTY THEME START >>>
+config-file = %s
+# <<< TOOIE GHOSTTY THEME END <<<`, managedTheme)
+	return replaceBlock(
+		userGhosttyConfig,
+		"# >>> TOOIE GHOSTTY THEME START >>>",
+		"# <<< TOOIE GHOSTTY THEME END <<<",
+		block,
+	)
+}
+
+func managedGhosttyThemePath() string {
+	return filepath.Join(managedConfigsDir(), "ghostty", "dank-theme.conf")
+}
+
+func renderGhosttyTheme(payload computedPayload) string {
+	selectionBG := getRoleOr(payload.Roles, "primary_container", blendHexColor(payload.Background, payload.Foreground, 0.20))
+	selectionFG := getRoleOr(payload.Roles, "on_surface", payload.Foreground)
+	cursor := getRoleOr(payload.Roles, "primary", payload.Cursor)
+	return fmt.Sprintf(`# Generated by %s/theme apply
+background = %s
+foreground = %s
+cursor-color = %s
+selection-background = %s
+selection-foreground = %s
+
+palette = 0=%s
+palette = 1=%s
+palette = 2=%s
+palette = 3=%s
+palette = 4=%s
+palette = 5=%s
+palette = 6=%s
+palette = 7=%s
+palette = 8=%s
+palette = 9=%s
+palette = 10=%s
+palette = 11=%s
+palette = 12=%s
+palette = 13=%s
+palette = 14=%s
+palette = 15=%s
+`, tooieConfigDir,
+		payload.Background,
+		payload.Foreground,
+		cursor,
+		selectionBG,
+		selectionFG,
+		colorSlot(payload.Colors, 0, "#1a1b26"),
+		colorSlot(payload.Colors, 1, "#f7768e"),
+		colorSlot(payload.Colors, 2, "#73daca"),
+		colorSlot(payload.Colors, 3, "#e0af68"),
+		colorSlot(payload.Colors, 4, "#7aa2f7"),
+		colorSlot(payload.Colors, 5, "#bb9af7"),
+		colorSlot(payload.Colors, 6, "#7dcfff"),
+		colorSlot(payload.Colors, 7, "#c0caf5"),
+		colorSlot(payload.Colors, 8, "#414868"),
+		colorSlot(payload.Colors, 9, "#f7768e"),
+		colorSlot(payload.Colors, 10, "#73daca"),
+		colorSlot(payload.Colors, 11, "#e0af68"),
+		colorSlot(payload.Colors, 12, "#7aa2f7"),
+		colorSlot(payload.Colors, 13, "#bb9af7"),
+		colorSlot(payload.Colors, 14, "#7dcfff"),
+		colorSlot(payload.Colors, 15, "#c0caf5"),
+	)
+}
+
+func colorSlot(colors map[int]string, idx int, fallback string) string {
+	if v := strings.TrimSpace(colors[idx]); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func syncManagedTmuxRuntimeFilesFromRepo() error {
@@ -1342,16 +1475,18 @@ func renderTmuxBlock(payload computedPayload) string {
 	statusAccentB := nonBlackStatusColor(saturateHexColor(blendHexColor(secondaryContainerRole, statusElevatedBG, 0.20), tuning.AccentSat), payload.Foreground)
 	statusAccentC := nonBlackStatusColor(saturateHexColor(blendHexColor(tertiaryContainerRole, statusElevatedBG, 0.22), tuning.AccentSat), payload.Foreground)
 	statusAccentD := nonBlackStatusColor(saturateHexColor(blendHexColor(statusAccentA, statusAccentC, 0.52), 0.14), payload.Foreground)
-	sessionBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentA, tuning.ChipMixA), 0.08), statusLift), payload.Foreground)
-	prefixBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentB, tuning.ChipMixB), 0.08), statusLift), payload.Foreground)
-	copyBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusElevatedBG, statusAccentC, tuning.ChipMixC), 0.08), statusLift), payload.Foreground)
+	sessionBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusAccentA, primaryContainerRole, 0.58), tuning.AccentSat+0.10), statusLift*1.02), payload.Foreground)
+	prefixBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusAccentB, secondaryContainerRole, 0.60), tuning.AccentSat+0.12), statusLift*1.04), payload.Foreground)
+	copyBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusAccentC, tertiaryContainerRole, 0.60), tuning.AccentSat+0.10), statusLift*1.03), payload.Foreground)
+	leftChipBGs := diversifyAdjacentStatusColors([]string{sessionBG, prefixBG, copyBG}, payload.Background, 24.0, 3.6)
+	sessionBG, prefixBG, copyBG = leftChipBGs[0], leftChipBGs[1], leftChipBGs[2]
 	modeBG := nonBlackStatusColor(blendHexColor(statusHighestBG, payload.Background, 0.35), statusElevatedBG)
 	modeFG := ensureReadableTextColor(modeBG, payload.Background, payload.Foreground)
 	matchBG := nonBlackStatusColor(blendHexColor(statusAccentA, statusHighestBG, 0.18), modeBG)
 	matchFG := ensureReadableTextColor(matchBG, payload.Background, payload.Foreground)
 	currentMatchBG := nonBlackStatusColor(blendHexColor(statusAccentB, statusHighestBG, 0.16), matchBG)
 	currentMatchFG := ensureReadableTextColor(currentMatchBG, payload.Background, payload.Foreground)
-	windowInactiveBG := nonBlackStatusColor(lightenHexColor(blendHexColor(statusBaseBG, statusElevatedBG, tuning.WindowInactive), statusLift*0.72), statusBaseBG)
+	windowInactiveBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusBaseBG, statusAccentD, 0.28), 0.10), statusLift*0.72), statusBaseBG)
 	windowInactiveFG := ensureReadableTextColor(windowInactiveBG, getRoleOr(payload.Roles, "on_surface_variant", payload.Foreground), payload.Foreground)
 	windowActiveBG := nonBlackStatusColor(
 		avoidRedHue(
@@ -1362,6 +1497,8 @@ func renderTmuxBlock(payload computedPayload) string {
 		),
 		payload.Foreground,
 	)
+	leftBandBGs := diversifyAdjacentStatusColors([]string{copyBG, windowInactiveBG, windowActiveBG}, payload.Background, 24.0, 3.6)
+	copyBG, windowInactiveBG, windowActiveBG = leftBandBGs[0], leftBandBGs[1], leftBandBGs[2]
 	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, getRoleOr(payload.Roles, "on_primary", payload.Foreground)), payload.Foreground)
 	alertColor := ensureReadableTextColor(payload.Background, "#ffd75f", payload.Foreground)
 	windowAccentFG := ensureReadableTextColor(windowActiveBG, payload.Background, payload.Foreground)
@@ -2003,6 +2140,9 @@ style error %s
 }
 
 func applyStarshipTheme(path string, payload computedPayload) error {
+	if err := sanitizeStarshipConfig(path); err != nil {
+		return err
+	}
 	c := payload.Colors
 	kv := []struct{ sec, key, val string }{
 		{"character", "success_symbol", fmt.Sprintf("\"[◎](bold %s)\"", c[3])},
@@ -2027,6 +2167,34 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 		}
 	}
 	return nil
+}
+
+func sanitizeStarshipConfig(path string) error {
+	raw, _ := os.ReadFile(path)
+	if len(raw) == 0 {
+		return nil
+	}
+	lines := strings.Split(string(raw), "\n")
+	out := make([]string, 0, len(lines))
+	skipSection := false
+	for _, ln := range lines {
+		trim := strings.TrimSpace(ln)
+		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+			skipSection = (trim == "[battery]")
+			if skipSection {
+				continue
+			}
+		}
+		if skipSection {
+			continue
+		}
+		// Remove legacy/bad root keys that can trigger parser warnings.
+		if strings.HasPrefix(trim, "battery ") || strings.HasPrefix(trim, "battery=") {
+			continue
+		}
+		out = append(out, ln)
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }
 
 func tomlUpsert(path, section, key, value string) error {

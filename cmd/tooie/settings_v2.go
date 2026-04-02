@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const tooieSettingsVersion = 3
+const tooieSettingsVersion = 4
 
 type tmuxSetupOptions struct {
 	Mode            string `json:"mode"`
@@ -32,6 +32,10 @@ type privilegedOptions struct {
 	Runner string `json:"runner"`
 }
 
+type linuxThemeOptions struct {
+	TerminalTarget string `json:"terminal_target"`
+}
+
 type tooieSettings struct {
 	Version    int                    `json:"version"`
 	Tmux       tmuxSetupOptions       `json:"tmux"`
@@ -39,6 +43,7 @@ type tooieSettings struct {
 	Modules    setupModules           `json:"modules"`
 	Platform   setupPlatformOptions   `json:"platform"`
 	Privileged privilegedOptions      `json:"privileged"`
+	Linux      linuxThemeOptions      `json:"linux"`
 }
 
 func defaultTooieSettings() tooieSettings {
@@ -60,12 +65,16 @@ func defaultTooieSettings() tooieSettings {
 		},
 		Platform:   setupPlatformOptions{Profile: "termux"},
 		Privileged: privilegedOptions{Runner: "auto"},
+		Linux:      linuxThemeOptions{TerminalTarget: "ghostty"},
 	}
 }
 
 func tooieSettingsPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
+	home := strings.TrimSpace(homeDir)
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if strings.TrimSpace(home) == "" {
 		return "tooie-settings.json"
 	}
 	return filepath.Join(home, ".config", "tooie", "settings.json")
@@ -112,12 +121,31 @@ func normalizePlatformProfile(raw string) string {
 	}
 }
 
+func normalizeLinuxTerminalTarget(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "ghostty":
+		return "ghostty"
+	default:
+		return "ghostty"
+	}
+}
+
+func cleanupLegacyThemeArtifacts() {
+	_ = os.RemoveAll(filepath.Join(tooieConfigDir, "backups"))
+	_ = os.Remove(filepath.Join(tooieConfigDir, "cache", "extract-swatches.json"))
+	_ = os.Remove(filepath.Join(tooieConfigDir, "cache", "theme-preview.json"))
+	_ = os.Remove(filepath.Join(tooieConfigDir, "cache", "theme-apply-progress.json"))
+}
+
 func normalizeTooieSettings(s *tooieSettings) {
 	if s.Version <= 0 {
 		s.Version = tooieSettingsVersion
 	}
 	if s.Version < 3 && !s.Modules.TmuxTheme {
 		s.Modules.TmuxTheme = true
+	}
+	if s.Version < 4 {
+		cleanupLegacyThemeArtifacts()
 	}
 	if s.Version < tooieSettingsVersion {
 		s.Version = tooieSettingsVersion
@@ -128,6 +156,7 @@ func normalizeTooieSettings(s *tooieSettings) {
 	s.Tmux.StatusSeparator = normalizeSeparatorMode(s.Tmux.StatusSeparator)
 	s.Platform.Profile = normalizePlatformProfile(s.Platform.Profile)
 	s.Privileged.Runner = normalizeRunner(s.Privileged.Runner)
+	s.Linux.TerminalTarget = normalizeLinuxTerminalTarget(s.Linux.TerminalTarget)
 	if s.Tmux.StatusLayout == "single-line" {
 		s.Tmux.StatusSeparator = "off"
 	}

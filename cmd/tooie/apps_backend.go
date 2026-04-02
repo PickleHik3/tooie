@@ -177,7 +177,7 @@ func printCLIUsage(w io.Writer) {
 	if canUseLauncherRestart() {
 		fmt.Fprintln(w, "  tooie restart")
 	}
-	fmt.Fprintln(w, "  tooie theme apply --theme-source preset --preset-family catppuccin --preset-variant mocha")
+	fmt.Fprintln(w, "  tooie theme apply --theme-source preset --preset-family tokyo-night --preset-variant night")
 	fmt.Fprintln(w, "  tooie helper btop setup --runner auto")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Paths")

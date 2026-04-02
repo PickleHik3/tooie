@@ -83,7 +83,7 @@ tooie doctor
 tooie helper btop setup --runner auto
 tooie helper uninstall --snapshot latest
 tooie theme compute --theme-source preset --preset-family catppuccin --preset-variant mocha
-tooie theme apply --theme-source wallpaper --mode auto --status-palette vibrant
+tooie theme apply --theme-source wallpaper --mode dark --status-palette vibrant
 ```
 
 ## Installed Paths
