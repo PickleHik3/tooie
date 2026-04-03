@@ -125,22 +125,37 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 		cur.Modules.BtopHelper = false
 		cur.Privileged.Runner = "auto"
 		if plan.Platform == "termux" {
+			cur.Widgets.WidgetBattery = false
 			cur.Widgets.WidgetCPU = false
+			cur.Widgets.WidgetRAM = false
+			cur.Widgets.WidgetWeather = false
 		} else {
+			cur.Widgets.WidgetBattery = true
 			cur.Widgets.WidgetCPU = true
+			cur.Widgets.WidgetRAM = true
+			cur.Widgets.WidgetWeather = true
 		}
 	case "rish":
 		cur.Modules.BtopHelper = true
 		cur.Privileged.Runner = "rish"
+		cur.Widgets.WidgetBattery = true
 		cur.Widgets.WidgetCPU = true
+		cur.Widgets.WidgetRAM = true
+		cur.Widgets.WidgetWeather = true
 	case "root":
 		cur.Modules.BtopHelper = true
 		cur.Privileged.Runner = "root"
+		cur.Widgets.WidgetBattery = true
 		cur.Widgets.WidgetCPU = true
+		cur.Widgets.WidgetRAM = true
+		cur.Widgets.WidgetWeather = true
 	case "shizuku":
 		cur.Modules.BtopHelper = true
 		cur.Privileged.Runner = "auto"
+		cur.Widgets.WidgetBattery = true
 		cur.Widgets.WidgetCPU = true
+		cur.Widgets.WidgetRAM = true
+		cur.Widgets.WidgetWeather = true
 	}
 	return nil
 }

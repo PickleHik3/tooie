@@ -46,7 +46,7 @@ const (
 
 var modePresets = []string{"dark", "light"}
 var statusThemePresets = []string{"default", "rounded", "rectangle"}
-var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "monochrome", "rainbow", "fruit-salad"}
+var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad"}
 var profilePresets = []string{
 	"auto",
 	"source-0",
@@ -649,8 +649,10 @@ func canonicalPaletteType(name string) string {
 	switch v {
 	case "", "default", "auto":
 		return defaultPaletteType
-	case "tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "monochrome", "rainbow", "fruit-salad":
+	case "tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad":
 		return v
+	case "monochrome":
+		return "neutral"
 	default:
 		return v
 	}
@@ -1130,8 +1132,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.settingMenuIndex++
 				}
 				return m, nil
+			case " ", "space":
+				if m.settingMenuTarget == "segments" {
+					opts := m.settingMenuChoices(m.settingMenuTarget)
+					if len(opts) == 0 {
+						return m, nil
+					}
+					if m.settingMenuIndex >= len(opts) {
+						m.settingMenuIndex = len(opts) - 1
+					}
+					if m.settingMenuIndex < 0 {
+						m.settingMenuIndex = 0
+					}
+					m.toggleSegment(opts[m.settingMenuIndex].Value)
+				}
+				return m, nil
 			case "enter":
 				target := m.settingMenuTarget
+				if target == "segments" {
+					m.settingMenuTarget = ""
+					m.settingMenuIndex = 0
+					return m, nil
+				}
 				opts := m.settingMenuChoices(m.settingMenuTarget)
 				if len(opts) == 0 {
 					m.settingMenuTarget = ""
@@ -1281,19 +1303,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settingIndex++
 			}
 			return m, nil
-		case "g":
-			quoted := fmt.Sprintf("%q", preferredWallpaperPath())
-			shellCmd := "if command -v chafa >/dev/null 2>&1; then chafa -f sixel --animate=off " + quoted +
-				"; elif command -v img2sixel >/dev/null 2>&1; then img2sixel " + quoted +
-				"; else echo 'Install chafa or img2sixel for sixel preview'; fi; printf '\\nPress Enter to continue...'; read _"
-			cmd := exec.Command("sh", "-lc", shellCmd)
-			m.lastStatus = "Launching wallpaper preview..."
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				if err != nil {
-					return statusMsg("Wallpaper preview failed: " + err.Error())
-				}
-				return statusMsg("Wallpaper preview finished")
-			})
 		case "u", "U":
 			m.refreshCurrentPreviewColors()
 			return m.startApply(m.themeActionLabel(true), true, true)
@@ -1348,7 +1357,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) settings() []settingItem {
 	items := []settingItem{
-		{Label: hotkeyLabel("Update Colors", "u", "4"), Target: "preview"},
 		{Label: hotkeyLabel("Source", "s", "6") + ": " + displayThemeSource(m.themeSource), Target: "theme_source"},
 	}
 	if m.themeSource == "preset" {
@@ -1359,13 +1367,12 @@ func (m model) settings() []settingItem {
 	} else {
 		items = append(items,
 			settingItem{Label: hotkeyLabel("Mode", "m", "5") + ": " + displayMode(m.mode), Target: "mode"},
-			settingItem{Label: hotkeyLabel("Primary", "f", "2") + ": " + m.extractStateLabel(), Target: "profile"},
 			settingItem{Label: hotkeyLabel("Palette", "p", "13") + ": " + displayPaletteType(m.paletteType), Target: "palette_type"},
+			settingItem{Label: hotkeyLabel("Primary", "f", "2") + ": " + m.extractStateLabel(), Target: "profile"},
 		)
 	}
 	items = append(items,
 		settingItem{Label: "Customize Colors", Target: "customize"},
-		settingItem{Label: "Backups", Target: "backups"},
 	)
 	return items
 }
@@ -1373,11 +1380,7 @@ func (m model) settings() []settingItem {
 func (m model) settingsPageItems() []settingItem {
 	return []settingItem{
 		{Label: hotkeyLabel("Theme", "t", "3") + ": " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
-		{Label: "Battery: " + onOffLabel(m.widgetBattery), Target: "widget_battery"},
-		{Label: "CPU: " + onOffLabel(m.widgetCPU), Target: "widget_cpu"},
-		{Label: "RAM: " + onOffLabel(m.widgetRAM), Target: "widget_ram"},
-		{Label: "Weather: " + onOffLabel(m.widgetWeather), Target: "widget_weather"},
-		{Label: hotkeyLabel("Apply", "A", "1"), Target: "apply"},
+		{Label: "Segments: " + m.segmentSummary(), Target: "segments"},
 	}
 }
 
@@ -1410,16 +1413,14 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch items[m.settingIndex].Target {
-	case "apply":
-		return m.requestThemeApply()
-	case "preview":
-		m.refreshCurrentPreviewColors()
-		return m.startApply(m.themeActionLabel(true), true, true)
 	case "theme_source":
 		m.openSettingMenu("theme_source")
 		return m, nil
 	case "status_theme":
 		m.openSettingMenu("status_theme")
+		return m, nil
+	case "segments":
+		m.openSettingMenu("segments")
 		return m, nil
 	case "mode":
 		m.openSettingMenu("mode")
@@ -1440,32 +1441,8 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		m.customizing = true
 		m.customIndex = 0
 		return m, nil
-	case "backups":
-		m.showBackups = true
-		return m, nil
-	case "widget_battery":
-		prev := m.widgetBattery
-		m.widgetBattery = !m.widgetBattery
-		m.startSwitchAnimation("widget_battery", prev, m.widgetBattery)
-	case "widget_cpu":
-		prev := m.widgetCPU
-		m.widgetCPU = !m.widgetCPU
-		m.startSwitchAnimation("widget_cpu", prev, m.widgetCPU)
-	case "widget_ram":
-		prev := m.widgetRAM
-		m.widgetRAM = !m.widgetRAM
-		m.startSwitchAnimation("widget_ram", prev, m.widgetRAM)
-	case "widget_weather":
-		prev := m.widgetWeather
-		m.widgetWeather = !m.widgetWeather
-		m.startSwitchAnimation("widget_weather", prev, m.widgetWeather)
 	}
-	if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
-		m.lastStatus = "Failed to save settings: " + err.Error()
-		return m, nil
-	}
-	m.lastStatus = "Settings updated"
-	return m, syncTmuxWidgetSettingsCmd(m.currentShellSettings())
+	return m, nil
 }
 
 func onOffLabel(v bool) string {
@@ -1473,6 +1450,66 @@ func onOffLabel(v bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+func (m model) segmentEnabled(target string) bool {
+	switch target {
+	case "widget_battery":
+		return m.widgetBattery
+	case "widget_cpu":
+		return m.widgetCPU
+	case "widget_ram":
+		return m.widgetRAM
+	case "widget_weather":
+		return m.widgetWeather
+	default:
+		return false
+	}
+}
+
+func (m model) segmentSummary() string {
+	labels := []string{}
+	if m.widgetBattery {
+		labels = append(labels, "Battery")
+	}
+	if m.widgetCPU {
+		labels = append(labels, "CPU")
+	}
+	if m.widgetRAM {
+		labels = append(labels, "RAM")
+	}
+	if m.widgetWeather {
+		labels = append(labels, "Weather")
+	}
+	if len(labels) == 0 {
+		return "None"
+	}
+	return strings.Join(labels, ", ")
+}
+
+func (m *model) toggleSegment(target string) {
+	prev := m.segmentEnabled(target)
+	switch target {
+	case "widget_battery":
+		m.widgetBattery = !m.widgetBattery
+	case "widget_cpu":
+		m.widgetCPU = !m.widgetCPU
+	case "widget_ram":
+		m.widgetRAM = !m.widgetRAM
+	case "widget_weather":
+		m.widgetWeather = !m.widgetWeather
+	default:
+		return
+	}
+	m.startSwitchAnimation(target, prev, m.segmentEnabled(target))
+	if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
+		m.lastStatus = "Failed to save settings: " + err.Error()
+		return
+	}
+	m.lastStatus = "Segments updated"
+	go func(cfg persistedShellSettings) {
+		_ = syncTmuxWidgetSettings(cfg)
+	}(m.currentShellSettings())
 }
 
 func (m *model) startSwitchAnimation(target string, from, to bool) {
@@ -1512,28 +1549,33 @@ func tmuxStatusRightTemplate() string {
 	return "#($HOME/.config/tooie/configs/tmux/run-system-widget all)#($HOME/.config/tooie/configs/tmux/widget-weather)"
 }
 
+func syncTmuxWidgetSettings(settings persistedShellSettings) error {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return nil
+	}
+	options := []struct {
+		key string
+		val bool
+	}{
+		{key: "@status-tmux-widget-battery", val: settings.WidgetBattery},
+		{key: "@status-tmux-widget-cpu", val: settings.WidgetCPU},
+		{key: "@status-tmux-widget-ram", val: settings.WidgetRAM},
+		{key: "@status-tmux-widget-weather", val: settings.WidgetWeather},
+	}
+	for _, item := range options {
+		_ = exec.Command("tmux", "set-option", "-g", item.key, onOffFlag(item.val)).Run()
+	}
+	_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
+	_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
+	_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
+	_ = exec.Command("tmux", "set-option", "-g", "status-right", tmuxStatusRightTemplate()).Run()
+	_ = exec.Command("tmux", "refresh-client", "-S").Run()
+	return nil
+}
+
 func syncTmuxWidgetSettingsCmd(settings persistedShellSettings) tea.Cmd {
 	return func() tea.Msg {
-		if _, err := exec.LookPath("tmux"); err != nil {
-			return nil
-		}
-		options := []struct {
-			key string
-			val bool
-		}{
-			{key: "@status-tmux-widget-battery", val: settings.WidgetBattery},
-			{key: "@status-tmux-widget-cpu", val: settings.WidgetCPU},
-			{key: "@status-tmux-widget-ram", val: settings.WidgetRAM},
-			{key: "@status-tmux-widget-weather", val: settings.WidgetWeather},
-		}
-		for _, item := range options {
-			_ = exec.Command("tmux", "set-option", "-g", item.key, onOffFlag(item.val)).Run()
-		}
-		_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
-		_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
-		_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
-		_ = exec.Command("tmux", "set-option", "-g", "status-right", tmuxStatusRightTemplate()).Run()
-		_ = exec.Command("tmux", "refresh-client", "-S").Run()
+		_ = syncTmuxWidgetSettings(settings)
 		return nil
 	}
 }
@@ -2154,31 +2196,35 @@ func (m model) renderThemePage(usableW, contentH int) string {
 		mainH = max(8, contentH-overlayH)
 	}
 
-	mainBody := ""
-	if m.shouldShowWallpaperSegment() {
-		leftW, rightW := twoColumnWidths(usableW - 4)
-		if leftW == 0 {
-			leftW = max(24, usableW-4)
-		}
-		mainBody = renderTwoColumns(
-			strings.Split(m.settingsCombinedBlock(mainH-2, leftW), "\n"),
-			strings.Split(m.wallpaperBlock(mainH-2, max(18, rightW)), "\n"),
-			usableW-4,
-		)
-	} else {
-		mainBody = m.settingsCombinedBlock(mainH-2, usableW-4)
-	}
+	mainBody := m.settingsCombinedBlock(mainH-2, usableW-4)
 	mainRow := panelStyle(usableW, mainH, "12").Render(mainBody)
+	footer := m.themeHintsLine(usableW)
 	if overlayH <= 0 {
-		return mainRow
+		return mainRow + "\n" + footer
 	}
 	overlayBody := m.interactionBlock(overlayH - 2)
 	overlayRow := panelStyle(usableW, overlayH, "8").Render(overlayBody)
-	return mainRow + "\n" + overlayRow
+	return mainRow + "\n" + overlayRow + "\n" + footer
 }
 
 func (m model) shouldShowWallpaperSegment() bool {
 	return m.width >= 76 && m.height >= 32
+}
+
+func (m model) themeHintsLine(width int) string {
+	hintColor := ensureReadableTextColor(
+		m.themeRoleColor("background", "#11131c"),
+		m.themeRoleColor("text_muted", blendHexColor(m.themeRoleColor("on_surface", "#7f849c"), m.themeRoleColor("background", "#11131c"), 0.28)),
+		"#b3bcc8",
+	)
+	text := strings.Join([]string{
+		hotkeyLabel("Update Colors", "u", "4"),
+		hotkeyLabel("Apply", "A", "1"),
+		hotkeyLabel("Backups", "b", "8"),
+		hotkeyLabel("Hints", "?", "13"),
+	}, "   ")
+	line := lipgloss.NewStyle().Foreground(lipgloss.Color(hintColor)).Render(text)
+	return placeCenterStyled(line, width)
 }
 
 func (m model) interactionLineCount() int {
@@ -2203,8 +2249,12 @@ func (m model) interactionLineCount() int {
 func (m model) settingsBlock(limit, width int) string {
 	lines := []string{headerChip("Colors", "12")}
 	items := m.settings()
+	selected := m.settingIndex
+	if selected < 0 || selected >= len(items) {
+		selected = 0
+	}
 	visible := max(1, (max(1, limit-3)+1)/2)
-	start, end := listWindow(len(items), m.settingIndex, visible)
+	start, end := listWindow(len(items), selected, visible)
 	rows := make([]string, 0, (end-start)*2)
 	for i := start; i < end; i++ {
 		label, state, kind, toggle := m.settingsRowView(items[i].Target)
@@ -2221,7 +2271,7 @@ func (m model) settingsBlock(limit, width int) string {
 }
 
 func (m model) settingsPageBlock(limit, width int) string {
-	lines := []string{headerChip("Status Bar", "8")}
+	lines := []string{headerChip("Misc", "8")}
 	items := m.settingsPageItems()
 	selected := m.settingIndex - len(m.settings())
 	if selected < 0 {
@@ -2244,6 +2294,15 @@ func (m model) settingsPageBlock(limit, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+func settingsSectionLines(itemCount int) int {
+	if itemCount <= 0 {
+		return 4
+	}
+	// header line + bordered panel (rows + top/bottom border)
+	// rows are rendered as: row, blank, row, blank... => (2*n - 1)
+	return 1 + ((2 * itemCount) - 1) + 2
+}
+
 func (m model) settingsCombinedBlock(limit, width int) string {
 	if limit < 6 {
 		return strings.Join([]string{
@@ -2251,14 +2310,13 @@ func (m model) settingsCombinedBlock(limit, width int) string {
 			"  (expand terminal)",
 		}, "\n")
 	}
-	statusLimit := max(3, (limit-1)/2)
-	if limit >= 11 {
-		statusLimit = max(statusLimit, 7)
+	minMisc := 4
+	fullColor := settingsSectionLines(len(m.settings()))
+	colorLimit := fullColor
+	if colorLimit > limit-minMisc {
+		colorLimit = max(3, limit-minMisc)
 	}
-	if statusLimit > limit-3 {
-		statusLimit = limit - 3
-	}
-	colorLimit := max(3, limit-statusLimit)
+	statusLimit := max(minMisc, limit-colorLimit)
 	lines := []string{}
 	lines = append(lines, strings.Split(m.settingsBlock(colorLimit, width), "\n")...)
 	lines = append(lines, strings.Split(m.settingsPageBlock(statusLimit, width), "\n")...)
@@ -2277,8 +2335,11 @@ func (m model) renderInlineSettingMenu(target string, width int) []string {
 		return nil
 	}
 	menuW := max(14, width-8)
-	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("    choose: ↑/↓ then Enter"),
+	lines := []string{}
+	if target == "segments" {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("    choose: ↑/↓   space: toggle   enter/esc: close"))
+	} else {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("    choose: ↑/↓ then Enter"))
 	}
 	for i, choice := range choices {
 		prefix := "    "
@@ -2293,10 +2354,18 @@ func (m model) renderInlineSettingMenu(target string, width int) []string {
 				Bold(true).
 				Background(lipgloss.Color(bg)).
 				Foreground(lipgloss.Color(fg))
-		} else if choice.Value == m.currentSettingChoice(target) {
+		} else if target != "segments" && choice.Value == m.currentSettingChoice(target) {
 			style = style.Bold(true).Foreground(lipgloss.Color(m.themeRoleColor("secondary", "#94e2d5")))
 		}
-		lines = append(lines, style.Render(prefix+choice.Label))
+		label := choice.Label
+		if target == "segments" {
+			mark := "☐ "
+			if m.segmentEnabled(choice.Value) {
+				mark = "✓ "
+			}
+			label = mark + label
+		}
+		lines = append(lines, style.Render(prefix+label))
 	}
 	return lines
 }
@@ -2424,6 +2493,8 @@ func (m model) currentSettingChoice(target string) string {
 		return m.presetFamily
 	case "preset_variant":
 		return m.presetVariant
+	case "segments":
+		return ""
 	default:
 		return ""
 	}
@@ -2472,6 +2543,13 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 			out = append(out, settingChoice{Value: variant, Label: displayPresetVariant(variant)})
 		}
 		return out
+	case "segments":
+		return []settingChoice{
+			{Value: "widget_battery", Label: "Battery"},
+			{Value: "widget_cpu", Label: "CPU"},
+			{Value: "widget_ram", Label: "RAM"},
+			{Value: "widget_weather", Label: "Weather"},
+		}
 	default:
 		return nil
 	}
@@ -2503,6 +2581,8 @@ func (m *model) applySettingChoice(target, value string) {
 	case "preset_variant":
 		m.presetVariant = value
 		m.normalizeThemeSelection()
+	case "segments":
+		m.toggleSegment(value)
 	}
 }
 
@@ -2522,6 +2602,8 @@ func settingMenuLabel(target string) string {
 		return "Preset"
 	case "preset_variant":
 		return "Preset Variant"
+	case "segments":
+		return "Segments"
 	default:
 		return "Options"
 	}
@@ -2529,8 +2611,6 @@ func settingMenuLabel(target string) string {
 
 func (m model) settingsRowView(target string) (label, state, kind string, toggle bool) {
 	switch target {
-	case "preview":
-		return hotkeyLabel("Update Colors", "u", "4"), "Preview", "action", false
 	case "theme_source":
 		return hotkeyLabel("Source", "s", "6"), displayThemeSource(m.themeSource) + " ▾", "info", false
 	case "mode":
@@ -2545,20 +2625,10 @@ func (m model) settingsRowView(target string) (label, state, kind string, toggle
 		return "Preset Variant", displayPresetVariant(m.presetVariant) + " ▾", "info", false
 	case "customize":
 		return "Customize Colors", "Open", "action", false
-	case "backups":
-		return "Backups", fmt.Sprintf("%d saved", len(m.backups)), "info", false
 	case "status_theme":
 		return hotkeyLabel("Theme", "t", "3"), displayStatusTheme(m.statusTheme) + " ▾", "info", false
-	case "widget_battery":
-		return "Battery", onOffLabel(m.widgetBattery), "toggle", m.widgetBattery
-	case "widget_cpu":
-		return "CPU", onOffLabel(m.widgetCPU), "toggle", m.widgetCPU
-	case "widget_ram":
-		return "RAM", onOffLabel(m.widgetRAM), "toggle", m.widgetRAM
-	case "widget_weather":
-		return "Weather", onOffLabel(m.widgetWeather), "toggle", m.widgetWeather
-	case "apply":
-		return hotkeyLabel("Apply", "A", "1"), "Apply", "action", false
+	case "segments":
+		return "Segments", m.segmentSummary() + " ▾", "info", false
 	default:
 		return target, "", "info", false
 	}
@@ -2895,8 +2965,9 @@ func (m model) interactionBlock(limit int) string {
 			headerChip("Hints", "13"),
 			"  up/down or j/k: move",
 			"  enter: select action",
-			"  g: Wallpaper Preview",
-			"  Apply: Shift+A",
+			"  u: Update colors",
+			"  A: Apply",
+			"  b: Backups",
 			"  q: quit",
 			"  esc or ?: close",
 		}, "\n")
@@ -4141,8 +4212,6 @@ func displayPaletteType(name string) string {
 		return "Vibrant"
 	case "neutral":
 		return "Neutral"
-	case "monochrome":
-		return "Monochrome"
 	case "rainbow":
 		return "Rainbow"
 	case "fruit-salad":

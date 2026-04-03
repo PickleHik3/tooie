@@ -109,10 +109,11 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	got := m.renderThemePage(96, 18)
 	for _, want := range []string{
 		"Colors",
-		"Status Bar",
+		"Misc",
 		"Theme",
-		"Battery",
-		"Wallpaper",
+		"Update Colors",
+		"Backups",
+		"Apply",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderThemePage() missing %q in:\n%s", want, got)
@@ -278,7 +279,7 @@ func TestRequestThemeApplyStartsWhenChanged(t *testing.T) {
 	}
 }
 
-func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
+func TestToggleSegmentPersists(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
@@ -292,26 +293,15 @@ func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 		widgetRAM:     false,
 		widgetWeather: true,
 	}
-	for i, item := range m.mergedPageItems() {
-		if item.Target == "widget_battery" {
-			m.settingIndex = i
-			break
-		}
-	}
-
-	next, cmd := m.activateSetting()
-	got := next.(model)
-	if got.widgetBattery {
+	m.toggleSegment("widget_battery")
+	if m.widgetBattery {
 		t.Fatalf("widget battery should toggle off")
 	}
-	if got.switchAnimTarget != "widget_battery" {
-		t.Fatalf("switch animation target = %q, want widget_battery", got.switchAnimTarget)
+	if m.switchAnimTarget != "widget_battery" {
+		t.Fatalf("switch animation target = %q, want widget_battery", m.switchAnimTarget)
 	}
-	if got.switchAnimProg != 0 {
-		t.Fatalf("switch animation progress = %v, want 0", got.switchAnimProg)
-	}
-	if cmd == nil {
-		t.Fatalf("activateSetting() should return sync command for widget toggle")
+	if m.switchAnimProg != 0 {
+		t.Fatalf("switch animation progress = %v, want 0", m.switchAnimProg)
 	}
 
 	settings, ok := loadPersistedShellSettings()
