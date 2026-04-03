@@ -869,6 +869,33 @@ end
 	return os.WriteFile(snippetPath, []byte(snippet), 0o644)
 }
 
+func patchLegacyFishZoxideCopy(home string) error {
+	cfgPath := filepath.Join(home, ".config", "fish", "config.fish")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	body := string(raw)
+	needle := "functions --copy cd _zoxide_cd"
+	if !strings.Contains(body, needle) {
+		return nil
+	}
+	if strings.Contains(body, "if functions -q _zoxide_cd") {
+		return nil
+	}
+	replacement := strings.Join([]string{
+		"if functions -q _zoxide_cd",
+		"    functions -e _zoxide_cd",
+		"end",
+		"functions --copy cd _zoxide_cd",
+	}, "\n")
+	body = strings.Replace(body, needle, replacement, 1)
+	return os.WriteFile(cfgPath, []byte(body), 0o644)
+}
+
 func relinkPath(dst, target string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
@@ -980,6 +1007,9 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		return err
 	}
 	if err := installFishBootstrap(home, settings.Modules.ShellTheme); err != nil {
+		return err
+	}
+	if err := patchLegacyFishZoxideCopy(home); err != nil {
 		return err
 	}
 	if settings.Modules.PeaclockTheme {
