@@ -2417,8 +2417,6 @@ func writeStarshipTemplate(dstPath, prompt string) error {
 
 func starshipTemplateRelativePath(prompt string) string {
 	switch normalizeStarshipPrompt(prompt) {
-	case "nerd-font-symbols":
-		return filepath.Join("assets", "defaults", ".config", "starship-nerd-font-symbols.toml")
 	case "pure":
 		return filepath.Join("assets", "defaults", ".config", "starship-pure.toml")
 	case "gruvbox":
