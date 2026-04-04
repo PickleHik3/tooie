@@ -292,7 +292,7 @@ func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
 	}
 
 	payload := testThemePayload()
-	payload.Meta["starship_prompt"] = "nerd-font-symbols"
+	payload.Meta["starship_prompt"] = "pure"
 	if err := applyThemeFiles(payload, backupDir); err != nil {
 		t.Fatalf("applyThemeFiles() error: %v", err)
 	}
@@ -302,8 +302,8 @@ func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
 		t.Fatalf("read starship cfg: %v", err)
 	}
 	got := string(raw)
-	if !strings.Contains(got, `[aws]`) || !strings.Contains(got, `symbol = " "`) {
-		t.Fatalf("expected nerd-font-symbols template content, got:\n%s", got)
+	if !strings.Contains(got, `format = """`) || !strings.Contains(got, `[character]`) {
+		t.Fatalf("expected pure template content, got:\n%s", got)
 	}
 	if strings.Contains(got, "[battery]") {
 		t.Fatalf("expected battery section to be stripped, got:\n%s", got)

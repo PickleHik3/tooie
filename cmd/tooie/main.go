@@ -47,7 +47,7 @@ const (
 
 var modePresets = []string{"dark", "light"}
 var statusThemePresets = []string{"default", "rounded", "rectangle"}
-var starshipPromptPresets = []string{"jetpack", "nerd-font-symbols"}
+var starshipPromptPresets = []string{"jetpack", "pure", "gruvbox"}
 var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad"}
 var profilePresets = []string{
 	"auto",
@@ -322,6 +322,7 @@ func initialModel() model {
 		extractSwatches: map[string]string{},
 	}
 	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
+	m.loadStarshipSettings()
 	if strings.TrimSpace(savedClock.Pattern) != "" {
 		for i, p := range m.clockPatterns {
 			if strings.EqualFold(strings.TrimSpace(p), strings.TrimSpace(savedClock.Pattern)) {
@@ -429,6 +430,7 @@ func initialMiniModel(showClock, showCal bool) model {
 	}
 	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
 	m.calGlyphs = loadCalendarGlyphSet(m.calFontDefs, m.calFontIdx)
+	m.loadStarshipSettings()
 	m.loadThemeStateFromBackups()
 	m.loadShellSettings()
 	m.loadPreviewColors()
@@ -503,6 +505,15 @@ func (m *model) loadThemeStateFromBackups() {
 		m.ansiCyan = v
 	}
 	m.normalizeThemeSelection()
+}
+
+func (m *model) loadStarshipSettings() {
+	settings, ok := loadTooieSettings()
+	if !ok {
+		m.starshipPrompt = normalizeStarshipPrompt(m.starshipPrompt)
+		return
+	}
+	m.starshipPrompt = normalizeStarshipPrompt(settings.Starship.Prompt)
 }
 
 func (m *model) normalizeThemeSelection() {
@@ -2611,6 +2622,12 @@ func (m *model) applySettingChoice(target, value string) {
 		} else {
 			m.starshipPrompt = defaultStarship
 		}
+		settings, ok := loadTooieSettings()
+		if !ok {
+			settings = defaultTooieSettings()
+		}
+		settings.Starship.Prompt = m.starshipPrompt
+		_ = saveTooieSettings(settings)
 	}
 }
 
@@ -4269,8 +4286,10 @@ func displayStarshipPrompt(name string) string {
 	switch strings.TrimSpace(strings.ToLower(name)) {
 	case "", "jetpack":
 		return "Jetpack"
-	case "nerd-font-symbols":
-		return "Nerd Font Symbols"
+	case "pure":
+		return "Pure"
+	case "gruvbox":
+		return "Gruvbox"
 	default:
 		parts := strings.Split(strings.TrimSpace(name), "-")
 		for i := range parts {

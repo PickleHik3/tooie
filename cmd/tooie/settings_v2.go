@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const tooieSettingsVersion = 4
+const tooieSettingsVersion = 5
 
 type tmuxSetupOptions struct {
 	Mode            string `json:"mode"`
@@ -17,11 +17,13 @@ type tmuxSetupOptions struct {
 }
 
 type setupModules struct {
-	TmuxTheme        bool `json:"tmux_theme"`
-	TermuxAppearance bool `json:"termux_appearance"`
-	ShellTheme       bool `json:"shell_theme"`
-	PeaclockTheme    bool `json:"peaclock_theme"`
-	BtopHelper       bool `json:"btop_helper"`
+	TmuxTheme        bool   `json:"tmux_theme"`
+	TermuxAppearance bool   `json:"termux_appearance"`
+	FishBootstrap    bool   `json:"fish_bootstrap"`
+	StarshipMode     string `json:"starship_mode"`
+	ShellTheme       bool   `json:"shell_theme"`
+	PeaclockTheme    bool   `json:"peaclock_theme"`
+	BtopHelper       bool   `json:"btop_helper"`
 }
 
 type setupPlatformOptions struct {
@@ -36,6 +38,10 @@ type linuxThemeOptions struct {
 	TerminalTarget string `json:"terminal_target"`
 }
 
+type starshipOptions struct {
+	Prompt string `json:"prompt"`
+}
+
 type tooieSettings struct {
 	Version    int                    `json:"version"`
 	Tmux       tmuxSetupOptions       `json:"tmux"`
@@ -44,6 +50,7 @@ type tooieSettings struct {
 	Platform   setupPlatformOptions   `json:"platform"`
 	Privileged privilegedOptions      `json:"privileged"`
 	Linux      linuxThemeOptions      `json:"linux"`
+	Starship   starshipOptions        `json:"starship"`
 }
 
 func defaultTooieSettings() tooieSettings {
@@ -59,6 +66,8 @@ func defaultTooieSettings() tooieSettings {
 		Modules: setupModules{
 			TmuxTheme:        true,
 			TermuxAppearance: true,
+			FishBootstrap:    true,
+			StarshipMode:     "themed",
 			ShellTheme:       true,
 			PeaclockTheme:    true,
 			BtopHelper:       false,
@@ -66,6 +75,7 @@ func defaultTooieSettings() tooieSettings {
 		Platform:   setupPlatformOptions{Profile: "termux"},
 		Privileged: privilegedOptions{Runner: "auto"},
 		Linux:      linuxThemeOptions{TerminalTarget: "ghostty"},
+		Starship:   starshipOptions{Prompt: defaultStarship},
 	}
 }
 
@@ -130,6 +140,17 @@ func normalizeLinuxTerminalTarget(raw string) string {
 	}
 }
 
+func normalizeStarshipInstallMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "default":
+		return "default"
+	case "themed":
+		return "themed"
+	default:
+		return "off"
+	}
+}
+
 func cleanupLegacyThemeArtifacts() {
 	_ = os.RemoveAll(filepath.Join(tooieConfigDir, "backups"))
 	_ = os.Remove(filepath.Join(tooieConfigDir, "cache", "extract-swatches.json"))
@@ -147,6 +168,14 @@ func normalizeTooieSettings(s *tooieSettings) {
 	if s.Version < 4 {
 		cleanupLegacyThemeArtifacts()
 	}
+	if s.Version < 5 {
+		if s.Modules.ShellTheme {
+			s.Modules.FishBootstrap = true
+			if normalizeStarshipInstallMode(s.Modules.StarshipMode) == "off" {
+				s.Modules.StarshipMode = "themed"
+			}
+		}
+	}
 	if s.Version < tooieSettingsVersion {
 		s.Version = tooieSettingsVersion
 	}
@@ -157,6 +186,9 @@ func normalizeTooieSettings(s *tooieSettings) {
 	s.Platform.Profile = normalizePlatformProfile(s.Platform.Profile)
 	s.Privileged.Runner = normalizeRunner(s.Privileged.Runner)
 	s.Linux.TerminalTarget = normalizeLinuxTerminalTarget(s.Linux.TerminalTarget)
+	s.Modules.StarshipMode = normalizeStarshipInstallMode(s.Modules.StarshipMode)
+	s.Modules.ShellTheme = s.Modules.FishBootstrap || s.Modules.StarshipMode != "off"
+	s.Starship.Prompt = normalizeStarshipPrompt(s.Starship.Prompt)
 	if s.Tmux.StatusLayout == "single-line" {
 		s.Tmux.StatusSeparator = "off"
 	}

@@ -1286,21 +1286,26 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 		return err
 	}
 
-	_ = writeApplyProgress("Writing starship theme", 0.78)
-	if err := ensureFileWithDirs(starshipCfg); err != nil {
-		return err
-	}
-	if err := backupIfExists(starshipCfg, filepath.Join(backupDir, "starship.toml.bak")); err != nil {
-		return err
-	}
-	if err := applyStarshipTheme(starshipCfg, payload); err != nil {
-		return err
+	if settings.Modules.StarshipMode == "themed" {
+		_ = writeApplyProgress("Writing starship theme", 0.78)
+		if err := ensureFileWithDirs(starshipCfg); err != nil {
+			return err
+		}
+		if err := backupIfExists(starshipCfg, filepath.Join(backupDir, "starship.toml.bak")); err != nil {
+			return err
+		}
+		if err := applyStarshipTheme(starshipCfg, payload); err != nil {
+			return err
+		}
 	}
 
 	metaPath := filepath.Join(backupDir, "meta.env")
 	f, err := os.OpenFile(metaPath, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err == nil {
-		_, _ = f.WriteString("peaclock_themed=true\nstarship_themed=true\n")
+		_, _ = f.WriteString("peaclock_themed=true\n")
+		if settings.Modules.StarshipMode == "themed" {
+			_, _ = f.WriteString("starship_themed=true\n")
+		}
 		_ = f.Close()
 	}
 
@@ -2343,6 +2348,7 @@ style error %s
 }
 
 func applyStarshipTheme(path string, payload computedPayload) error {
+	prompt := normalizeStarshipPrompt(payload.Meta["starship_prompt"])
 	if err := writeStarshipTemplate(path, payload.Meta["starship_prompt"]); err != nil {
 		return err
 	}
@@ -2372,11 +2378,33 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 			return err
 		}
 	}
+	if prompt == "gruvbox" {
+		gruvboxPalette := []struct{ key, val string }{
+			{"color_fg0", fmt.Sprintf("%q", c[7])},
+			{"color_bg1", fmt.Sprintf("%q", payload.Background)},
+			{"color_bg3", fmt.Sprintf("%q", c[14])},
+			{"color_blue", fmt.Sprintf("%q", c[4])},
+			{"color_aqua", fmt.Sprintf("%q", c[3])},
+			{"color_green", fmt.Sprintf("%q", c[2])},
+			{"color_orange", fmt.Sprintf("%q", c[5])},
+			{"color_purple", fmt.Sprintf("%q", c[6])},
+			{"color_red", fmt.Sprintf("%q", c[1])},
+			{"color_yellow", fmt.Sprintf("%q", c[15])},
+		}
+		if err := tomlUpsert(path, "", "palette", "\"tooie_gruvbox\""); err != nil {
+			return err
+		}
+		for _, item := range gruvboxPalette {
+			if err := tomlUpsert(path, "palettes.tooie_gruvbox", item.key, item.val); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
 func writeStarshipTemplate(dstPath, prompt string) error {
-	srcPath, err := resolveRepoAssetPath(starshipTemplateRelativePath(prompt))
+	srcPath, err := managedStarshipTemplatePath(prompt)
 	if err != nil {
 		return err
 	}
@@ -2391,6 +2419,10 @@ func starshipTemplateRelativePath(prompt string) string {
 	switch normalizeStarshipPrompt(prompt) {
 	case "nerd-font-symbols":
 		return filepath.Join("assets", "defaults", ".config", "starship-nerd-font-symbols.toml")
+	case "pure":
+		return filepath.Join("assets", "defaults", ".config", "starship-pure.toml")
+	case "gruvbox":
+		return filepath.Join("assets", "defaults", ".config", "starship-gruvbox.toml")
 	default:
 		return filepath.Join("assets", "defaults", ".config", "starship.toml")
 	}
@@ -2427,6 +2459,33 @@ func sanitizeStarshipConfig(path string) error {
 func tomlUpsert(path, section, key, value string) error {
 	raw, _ := os.ReadFile(path)
 	lines := strings.Split(string(raw), "\n")
+	if strings.TrimSpace(section) == "" {
+		replaced := false
+		for i, ln := range lines {
+			trim := strings.TrimSpace(ln)
+			if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+				break
+			}
+			if strings.HasPrefix(trim, key+" ") || strings.HasPrefix(trim, key+"=") {
+				lines[i] = fmt.Sprintf("%s = %s", key, value)
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			insertAt := 0
+			for i, ln := range lines {
+				trim := strings.TrimSpace(ln)
+				if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+					insertAt = i
+					break
+				}
+				insertAt = i + 1
+			}
+			lines = append(lines[:insertAt], append([]string{fmt.Sprintf("%s = %s", key, value)}, lines[insertAt:]...)...)
+		}
+		return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	}
 	secHdr := "[" + section + "]"
 	secStart := -1
 	secEnd := len(lines)

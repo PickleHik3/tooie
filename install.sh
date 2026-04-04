@@ -97,6 +97,7 @@ map_pkg_name() {
     pkg:fish|pacman:fish|apt:fish|dnf:fish) printf '%s' "fish" ;;
     pkg:starship|pacman:starship|apt:starship|dnf:starship) printf '%s' "starship" ;;
     pkg:eza|pacman:eza|apt:eza|dnf:eza) printf '%s' "eza" ;;
+    pkg:zoxide|pacman:zoxide|apt:zoxide|dnf:zoxide) printf '%s' "zoxide" ;;
     pkg:peaclock|pacman:peaclock|apt:peaclock|dnf:peaclock) printf '%s' "peaclock" ;;
     pkg:matugen|pacman:matugen|apt:matugen|dnf:matugen) printf '%s' "matugen" ;;
     *) printf '%s' "" ;;
@@ -125,6 +126,8 @@ append_unique_word() {
 
 resolve_logical_deps() {
   selection="$1"
+  fish_mode="$2"
+  starship_mode="$3"
   deps=""
   deps="$(append_unique_word "$deps" "go")"
 
@@ -133,8 +136,6 @@ resolve_logical_deps() {
       deps="$(append_unique_word "$deps" "tmux")"
       deps="$(append_unique_word "$deps" "jq")"
       deps="$(append_unique_word "$deps" "matugen")"
-      deps="$(append_unique_word "$deps" "fish")"
-      deps="$(append_unique_word "$deps" "starship")"
       deps="$(append_unique_word "$deps" "eza")"
       deps="$(append_unique_word "$deps" "peaclock")"
       ;;
@@ -150,12 +151,19 @@ resolve_logical_deps() {
     shell)
       deps="$(append_unique_word "$deps" "jq")"
       deps="$(append_unique_word "$deps" "matugen")"
-      deps="$(append_unique_word "$deps" "fish")"
-      deps="$(append_unique_word "$deps" "starship")"
       deps="$(append_unique_word "$deps" "eza")"
       deps="$(append_unique_word "$deps" "peaclock")"
       ;;
   esac
+
+  if [ "$fish_mode" = "on" ]; then
+    deps="$(append_unique_word "$deps" "fish")"
+    deps="$(append_unique_word "$deps" "eza")"
+    deps="$(append_unique_word "$deps" "zoxide")"
+  fi
+  if [ "$starship_mode" != "off" ]; then
+    deps="$(append_unique_word "$deps" "starship")"
+  fi
 
   printf '%s' "$deps"
 }
@@ -213,6 +221,8 @@ install_packages() {
 platform_pick="$(prompt_menu "Choose target platform" 1 "termux" "linux")"
 platform="$platform_pick"
 backend="none"
+fish_mode="off"
+starship_mode="off"
 
 if [ "$platform" = "termux" ]; then
   backend_pick="$(prompt_menu "Choose Termux elevated backend" 1 "none" "rish" "root" "shizuku")"
@@ -235,6 +245,23 @@ else
     termux) theme_items="termux" ;;
     starship+eza+peaclock) theme_items="shell" ;;
     *) err "unknown items selection: $items_pick"; exit 1 ;;
+  esac
+fi
+
+if [ "$theme_items" = "all" ] || [ "$theme_items" = "shell" ]; then
+  fish_pick="$(prompt_menu "Install fish bootstrap snippet + managed bootstrap file?" 1 "yes" "no")"
+  case "$fish_pick" in
+    yes) fish_mode="on" ;;
+    no) fish_mode="off" ;;
+    *) err "unknown fish selection: $fish_pick"; exit 1 ;;
+  esac
+
+  starship_pick="$(prompt_menu "Starship config mode" 3 "off" "default" "themed")"
+  case "$starship_pick" in
+    off) starship_mode="off" ;;
+    default) starship_mode="default" ;;
+    themed) starship_mode="themed" ;;
+    *) err "unknown starship selection: $starship_pick"; exit 1 ;;
   esac
 fi
 
@@ -265,7 +292,7 @@ if [ -z "$pm" ]; then
   exit 1
 fi
 
-logical_deps="$(resolve_logical_deps "$theme_items")"
+logical_deps="$(resolve_logical_deps "$theme_items" "$fish_mode" "$starship_mode")"
 resolved_pkgs=""
 missing_pkgs=""
 for logical in $logical_deps; do
@@ -287,6 +314,8 @@ if [ "$platform" = "termux" ]; then
   printf '  backend:       %s\n' "$backend"
 fi
 printf '  themed items:  %s\n' "$theme_items"
+printf '  fish:          %s\n' "$fish_mode"
+printf '  starship:      %s\n' "$starship_mode"
 printf '  package mgr:   %s\n' "$pm"
 printf '  packages:      %s\n' "$resolved_pkgs"
 if [ -n "$missing_pkgs" ]; then
@@ -317,4 +346,6 @@ log "Applying setup selection..."
 exec env TOOIE_REPO_DIR="$REPO_DIR" "$BIN_DIR/tooie" setup --non-interactive \
   --install-platform "$platform" \
   --install-backend "$backend" \
-  --install-items "$theme_items"
+  --install-items "$theme_items" \
+  --install-fish "$fish_mode" \
+  --install-starship "$starship_mode"

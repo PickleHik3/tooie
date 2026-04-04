@@ -21,7 +21,7 @@ func TestApplyInstallPlanTermuxNoneDisablesCPUWidget(t *testing.T) {
 	if !settings.Modules.TmuxTheme {
 		t.Fatalf("tmux theme should be enabled for tmux item")
 	}
-	if settings.Modules.ShellTheme || settings.Modules.TermuxAppearance {
+	if settings.Modules.FishBootstrap || settings.Modules.StarshipMode != "off" || settings.Modules.TermuxAppearance {
 		t.Fatalf("only tmux target should be enabled")
 	}
 }
@@ -45,8 +45,8 @@ func TestApplyInstallPlanTermuxRootShell(t *testing.T) {
 	if settings.Modules.TmuxTheme || settings.Modules.TermuxAppearance {
 		t.Fatalf("shell item should not enable tmux/termux targets")
 	}
-	if !settings.Modules.ShellTheme || !settings.Modules.PeaclockTheme {
-		t.Fatalf("shell item should enable shell + peaclock targets")
+	if !settings.Modules.FishBootstrap || settings.Modules.StarshipMode != "themed" || !settings.Modules.PeaclockTheme {
+		t.Fatalf("shell item should enable fish + themed starship + peaclock targets")
 	}
 }
 

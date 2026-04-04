@@ -33,6 +33,8 @@ type setupInstallPlan struct {
 	Platform   string
 	Backend    string
 	ThemeItems string
+	Fish       string
+	Starship   string
 }
 
 func normalizeInstallPlatform(raw string) string {
@@ -70,6 +72,19 @@ func normalizeInstallItems(raw string) string {
 	}
 }
 
+func normalizeInstallFish(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "off", "false", "no", "0":
+		return "off"
+	default:
+		return "on"
+	}
+}
+
+func normalizeInstallStarship(raw string) string {
+	return normalizeStarshipInstallMode(raw)
+}
+
 func profileForInstallPlan(platform, backend string) string {
 	if platform == "linux" {
 		return "linux"
@@ -100,13 +115,14 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 	applyProfileDefaults(cur, profileForInstallPlan(plan.Platform, plan.Backend), env)
 	cur.Modules.TmuxTheme = false
 	cur.Modules.TermuxAppearance = false
+	cur.Modules.FishBootstrap = false
+	cur.Modules.StarshipMode = "off"
 	cur.Modules.ShellTheme = false
 	cur.Modules.PeaclockTheme = false
 
 	switch plan.ThemeItems {
 	case "all":
 		cur.Modules.TmuxTheme = true
-		cur.Modules.ShellTheme = true
 		cur.Modules.PeaclockTheme = true
 		if plan.Platform == "termux" {
 			cur.Modules.TermuxAppearance = true
@@ -116,8 +132,28 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 	case "termux":
 		cur.Modules.TermuxAppearance = true
 	case "shell":
-		cur.Modules.ShellTheme = true
 		cur.Modules.PeaclockTheme = true
+	}
+
+	defaultFish := "off"
+	defaultStarship := "off"
+	if plan.ThemeItems == "all" || plan.ThemeItems == "shell" {
+		defaultFish = "on"
+		defaultStarship = "themed"
+	}
+	if strings.TrimSpace(plan.Fish) == "" {
+		plan.Fish = defaultFish
+	}
+	if strings.TrimSpace(plan.Starship) == "" {
+		plan.Starship = defaultStarship
+	}
+	cur.Modules.FishBootstrap = normalizeInstallFish(plan.Fish) == "on"
+	cur.Modules.StarshipMode = normalizeInstallStarship(plan.Starship)
+	cur.Modules.ShellTheme = cur.Modules.FishBootstrap || cur.Modules.StarshipMode != "off"
+	if cur.Modules.StarshipMode == "themed" {
+		cur.Starship.Prompt = defaultStarship
+	} else {
+		cur.Starship.Prompt = defaultStarship
 	}
 
 	switch plan.Backend {
@@ -167,6 +203,8 @@ func runSetupCommand(args []string) int {
 	installPlatform := fs.String("install-platform", "", "")
 	installBackend := fs.String("install-backend", "", "")
 	installItems := fs.String("install-items", "", "")
+	installFish := fs.String("install-fish", "", "")
+	installStarship := fs.String("install-starship", "", "")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie setup: %v\n", err)
 		return 2
@@ -200,11 +238,13 @@ func runSetupCommand(args []string) int {
 	if !env.IsTermux {
 		settings.Modules.TermuxAppearance = false
 	}
-	if strings.TrimSpace(*installPlatform) != "" || strings.TrimSpace(*installBackend) != "" || strings.TrimSpace(*installItems) != "" {
+	if strings.TrimSpace(*installPlatform) != "" || strings.TrimSpace(*installBackend) != "" || strings.TrimSpace(*installItems) != "" || strings.TrimSpace(*installFish) != "" || strings.TrimSpace(*installStarship) != "" {
 		plan := setupInstallPlan{
 			Platform:   *installPlatform,
 			Backend:    *installBackend,
 			ThemeItems: *installItems,
+			Fish:       *installFish,
+			Starship:   *installStarship,
 		}
 		if err := applyInstallPlan(&settings, env, plan); err != nil {
 			fmt.Fprintf(os.Stderr, "tooie setup: invalid install selection: %v\n", err)
@@ -351,7 +391,7 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 			step++
 		case 5:
 			if env.IsTermux {
-				v, back, err := gumBoolWithBack("Step 6/10: Install Termux appearance files (.termux/*)?", cur.Modules.TermuxAppearance, true)
+				v, back, err := gumBoolWithBack("Step 6/12: Install Termux appearance files (.termux/*)?", cur.Modules.TermuxAppearance, true)
 				if err != nil {
 					return cur, err
 				}
@@ -369,7 +409,7 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 			}
 			step++
 		case 6:
-			v, back, err := gumBoolWithBack("Step 7/10: Install fish + starship theme files?", cur.Modules.ShellTheme, true)
+			v, back, err := gumBoolWithBack("Step 7/12: Install fish bootstrap snippet + managed bootstrap file?", cur.Modules.FishBootstrap, true)
 			if err != nil {
 				return cur, err
 			}
@@ -377,10 +417,23 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 				step--
 				continue
 			}
-			cur.Modules.ShellTheme = v
+			cur.Modules.FishBootstrap = v
+			cur.Modules.ShellTheme = cur.Modules.FishBootstrap || cur.Modules.StarshipMode != "off"
 			step++
 		case 7:
-			v, back, err := gumBoolWithBack("Step 8/10: Install peaclock theme file?", cur.Modules.PeaclockTheme, true)
+			v, back, err := gumChooseSimple("Step 8/12: Starship config mode", []string{"off", "default", "themed"}, cur.Modules.StarshipMode, true)
+			if err != nil {
+				return cur, err
+			}
+			if back {
+				step--
+				continue
+			}
+			cur.Modules.StarshipMode = normalizeStarshipInstallMode(v)
+			cur.Modules.ShellTheme = cur.Modules.FishBootstrap || cur.Modules.StarshipMode != "off"
+			step++
+		case 8:
+			v, back, err := gumBoolWithBack("Step 9/12: Install peaclock theme file?", cur.Modules.PeaclockTheme, true)
 			if err != nil {
 				return cur, err
 			}
@@ -390,8 +443,8 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 			}
 			cur.Modules.PeaclockTheme = v
 			step++
-		case 8:
-			v, back, err := gumBoolWithBack("Step 9/10: Configure btop helper module?", cur.Modules.BtopHelper, true)
+		case 9:
+			v, back, err := gumBoolWithBack("Step 10/12: Configure btop helper module?", cur.Modules.BtopHelper, true)
 			if err != nil {
 				return cur, err
 			}
@@ -402,12 +455,12 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 			cur.Modules.BtopHelper = v
 			if !cur.Modules.BtopHelper {
 				cur.Privileged.Runner = "auto"
-				step = 10
+				step = 11
 			} else {
 				step++
 			}
-		case 9:
-			v, back, err := gumChooseSimple("Step 10/10: Privileged runner", []string{"auto", "rish", "root", "su", "tsu", "sudo"}, cur.Privileged.Runner, true)
+		case 10:
+			v, back, err := gumChooseSimple("Step 11/12: Privileged runner", []string{"auto", "rish", "root", "su", "tsu", "sudo"}, cur.Privileged.Runner, true)
 			if err != nil {
 				return cur, err
 			}
@@ -423,9 +476,10 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 			fmt.Printf("  profile: %s\n", cur.Platform.Profile)
 			fmt.Printf("  tmux mode: %s\n", cur.Tmux.Mode)
 			fmt.Printf("  status: %s, %s, separator=%s\n", cur.Tmux.StatusPosition, cur.Tmux.StatusLayout, cur.Tmux.StatusSeparator)
-			fmt.Printf("  modules: termux=%s shell=%s peaclock=%s btop=%s\n",
+			fmt.Printf("  modules: termux=%s fish=%s starship=%s peaclock=%s btop=%s\n",
 				onOffFlag(cur.Modules.TermuxAppearance),
-				onOffFlag(cur.Modules.ShellTheme),
+				onOffFlag(cur.Modules.FishBootstrap),
+				cur.Modules.StarshipMode,
 				onOffFlag(cur.Modules.PeaclockTheme),
 				onOffFlag(cur.Modules.BtopHelper),
 			)
@@ -440,9 +494,9 @@ func runSetupWizard(cur tooieSettings, env setupEnv) (tooieSettings, error) {
 				return cur, nil
 			case "back":
 				if cur.Modules.BtopHelper {
-					step = 9
+					step = 10
 				} else {
-					step = 8
+					step = 9
 				}
 			default:
 				return cur, fmt.Errorf("setup cancelled")
@@ -475,6 +529,10 @@ func applyProfileDefaults(cur *tooieSettings, profile string, env setupEnv) {
 	profile = normalizePlatformProfile(profile)
 	cur.Platform.Profile = profile
 	cur.Modules.TmuxTheme = true
+	cur.Modules.FishBootstrap = true
+	cur.Modules.StarshipMode = "themed"
+	cur.Modules.ShellTheme = true
+	cur.Starship.Prompt = defaultStarship
 	switch profile {
 	case "termux-root":
 		cur.Modules.TermuxAppearance = env.IsTermux
@@ -856,6 +914,10 @@ func managedStarshipPath() string {
 	return filepath.Join(managedConfigsDir(), "starship.toml")
 }
 
+func managedStarshipTemplateDir() string {
+	return filepath.Join(managedConfigsDir(), "starship")
+}
+
 func managedFishConfigPath() string {
 	return filepath.Join(managedConfigsDir(), "fish", "config.fish")
 }
@@ -868,13 +930,23 @@ func managedTermuxFilePath(name string) string {
 	return filepath.Join(managedConfigsDir(), "termux", name)
 }
 
-func installFishBootstrap(home string, enable bool) error {
+func installFishBootstrap(home string, enable bool, starshipMode string) error {
 	snippetPath := filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish")
 	if !enable {
+		if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 		return nil
 	}
+	starshipMode = normalizeStarshipInstallMode(starshipMode)
 	snippet := `# tooie managed snippet
-set -gx STARSHIP_CONFIG "$HOME/.config/tooie/configs/starship.toml"
+set -gx TOOIE_STARSHIP_MODE "` + starshipMode + `"
+set -l __tooie_starship_config "$HOME/.config/tooie/configs/starship.toml"
+if test -f "$__tooie_starship_config"
+    set -gx STARSHIP_CONFIG "$__tooie_starship_config"
+else if set -q STARSHIP_CONFIG; and test "$STARSHIP_CONFIG" = "$__tooie_starship_config"
+    set -e STARSHIP_CONFIG
+end
 if test -f "$HOME/.config/tooie/configs/fish/config.fish"
     source "$HOME/.config/tooie/configs/fish/config.fish"
 end
@@ -969,19 +1041,39 @@ func stageManagedConfigs(settings tooieSettings, env setupEnv) error {
 	if err := copyFile(tmuxConfSrc, managedTmuxConfPath(), 0o644); err != nil {
 		return err
 	}
-	starshipSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "starship.toml"))
-	if err != nil {
+	if err := os.MkdirAll(managedStarshipTemplateDir(), 0o755); err != nil {
 		return err
 	}
-	if err := copyFile(starshipSrc, managedStarshipPath(), 0o644); err != nil {
-		return err
+	for _, rel := range []string{
+		filepath.Join("assets", "defaults", ".config", "starship.toml"),
+		filepath.Join("assets", "defaults", ".config", "starship-pure.toml"),
+		filepath.Join("assets", "defaults", ".config", "starship-gruvbox.toml"),
+	} {
+		src, err := resolveRepoAssetPath(rel)
+		if err != nil {
+			return err
+		}
+		if err := copyFile(src, filepath.Join(managedStarshipTemplateDir(), filepath.Base(rel)), 0o644); err != nil {
+			return err
+		}
 	}
-	fishSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "fish", "config.fish"))
-	if err != nil {
-		return err
+	if settings.Modules.StarshipMode != "off" {
+		if err := writeInitialStarshipConfig(settings.Modules.StarshipMode, settings.Starship.Prompt); err != nil {
+			return err
+		}
+	} else {
+		_ = os.Remove(managedStarshipPath())
 	}
-	if err := copyFile(fishSrc, managedFishConfigPath(), 0o644); err != nil {
-		return err
+	if settings.Modules.FishBootstrap {
+		fishSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "fish", "config.fish"))
+		if err != nil {
+			return err
+		}
+		if err := copyFile(fishSrc, managedFishConfigPath(), 0o644); err != nil {
+			return err
+		}
+	} else {
+		_ = os.RemoveAll(filepath.Dir(managedFishConfigPath()))
 	}
 	peaclockSrc, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "peaclock", "config"))
 	if err != nil {
@@ -1011,6 +1103,45 @@ func stageManagedConfigs(settings tooieSettings, env setupEnv) error {
 	return nil
 }
 
+func writeInitialStarshipConfig(mode, prompt string) error {
+	mode = normalizeStarshipInstallMode(mode)
+	if mode == "off" {
+		return nil
+	}
+	if mode == "default" {
+		defaultPath := filepath.Join(homeDir, ".config", "starship.toml")
+		if err := os.MkdirAll(filepath.Dir(defaultPath), 0o755); err != nil {
+			return err
+		}
+		if _, err := exec.LookPath("starship"); err != nil {
+			return err
+		}
+		out, err := exec.Command("starship", "print-config").Output()
+		if err != nil {
+			return err
+		}
+		_ = os.Remove(managedStarshipPath())
+		return os.WriteFile(defaultPath, out, 0o644)
+	}
+	if err := os.MkdirAll(filepath.Dir(managedStarshipPath()), 0o755); err != nil {
+		return err
+	}
+	src, err := managedStarshipTemplatePath(prompt)
+	if err != nil {
+		return err
+	}
+	return copyFile(src, managedStarshipPath(), 0o644)
+}
+
+func managedStarshipTemplatePath(prompt string) (string, error) {
+	name := filepath.Base(starshipTemplateRelativePath(prompt))
+	p := filepath.Join(managedStarshipTemplateDir(), name)
+	if _, err := os.Stat(p); err == nil {
+		return p, nil
+	}
+	return resolveRepoAssetPath(starshipTemplateRelativePath(prompt))
+}
+
 func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	home := homeDir
 	if err := installSupportScriptsFromRepo(); err != nil {
@@ -1022,7 +1153,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 	if err := installTmuxBootstrap(home, settings.Modules.TmuxTheme); err != nil {
 		return err
 	}
-	if err := installFishBootstrap(home, settings.Modules.ShellTheme); err != nil {
+	if err := installFishBootstrap(home, settings.Modules.FishBootstrap, settings.Modules.StarshipMode); err != nil {
 		return err
 	}
 	if err := patchLegacyFishZoxideCopy(home); err != nil {
@@ -1077,6 +1208,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		"--theme-source", "preset",
 		"--preset-family", "tokyo-night",
 		"--preset-variant", "night",
+		"--starship-prompt", settings.Starship.Prompt,
 		"--status-position", settings.Tmux.StatusPosition,
 		"--status-layout", settings.Tmux.StatusLayout,
 		"--status-separator", settings.Tmux.StatusSeparator,
@@ -1139,8 +1271,13 @@ func installManagedPaths(home string, settings tooieSettings, env setupEnv) []st
 		filepath.Join(home, ".local", "bin", "tooie"),
 		filepath.Join(home, ".config", "tooie"),
 		filepath.Join(home, ".tmux.conf"),
-		filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish"),
 		filepath.Join(home, ".config", "peaclock", "config"),
+	}
+	if settings.Modules.FishBootstrap {
+		paths = append(paths, filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish"))
+	}
+	if settings.Modules.StarshipMode == "default" {
+		paths = append(paths, filepath.Join(home, ".config", "starship.toml"))
 	}
 	if settings.Modules.TermuxAppearance && env.IsTermux {
 		paths = append(paths,
