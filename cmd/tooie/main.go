@@ -38,6 +38,7 @@ const (
 	defaultProfile     = "auto"
 	defaultPaletteType = "tonal-spot"
 	defaultSource      = "wallpaper"
+	defaultStarship    = "jetpack"
 	themeCacheSchema   = "2026-03-20-v2"
 	pageHome           = 0
 	pageTheme          = 1
@@ -46,6 +47,7 @@ const (
 
 var modePresets = []string{"dark", "light"}
 var statusThemePresets = []string{"default", "rounded", "rectangle"}
+var starshipPromptPresets = []string{"jetpack", "nerd-font-symbols"}
 var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad"}
 var profilePresets = []string{
 	"auto",
@@ -198,6 +200,7 @@ type model struct {
 	palette           string
 	paletteType       string
 	statusTheme       string
+	starshipPrompt    string
 	profile           string
 	themeSource       string
 	presetFamily      string
@@ -293,6 +296,7 @@ func initialModel() model {
 		palette:         defaultPalette,
 		paletteType:     defaultPaletteType,
 		statusTheme:     defaultStatusTheme,
+		starshipPrompt:  defaultStarship,
 		profile:         defaultProfile,
 		themeSource:     defaultSource,
 		presetFamily:    "tokyo-night",
@@ -393,6 +397,7 @@ func initialMiniModel(showClock, showCal bool) model {
 		palette:         defaultPalette,
 		paletteType:     defaultPaletteType,
 		statusTheme:     defaultStatusTheme,
+		starshipPrompt:  defaultStarship,
 		profile:         defaultProfile,
 		themeSource:     defaultSource,
 		presetFamily:    "tokyo-night",
@@ -470,6 +475,9 @@ func (m *model) loadThemeStateFromBackups() {
 	if v := strings.TrimSpace(meta["preset_variant"]); v != "" {
 		m.presetVariant = v
 	}
+	if v := strings.TrimSpace(meta["starship_prompt"]); v != "" {
+		m.starshipPrompt = v
+	}
 	if v := strings.TrimSpace(meta["text_color_override"]); v != "" {
 		m.textColor = v
 	}
@@ -517,6 +525,7 @@ func (m *model) normalizeThemeSelection() {
 	if !contains(statusThemePresets, m.statusTheme) {
 		m.statusTheme = defaultStatusTheme
 	}
+	m.starshipPrompt = normalizeStarshipPrompt(m.starshipPrompt)
 	if !contains(presetFamilyOrder, m.presetFamily) {
 		m.presetFamily = presetFamilyOrder[0]
 	}
@@ -1379,8 +1388,9 @@ func (m model) settings() []settingItem {
 
 func (m model) settingsPageItems() []settingItem {
 	return []settingItem{
-		{Label: hotkeyLabel("Theme", "t", "3") + ": " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
-		{Label: "Segments: " + m.segmentSummary(), Target: "segments"},
+		{Label: hotkeyLabel("tmux status", "t", "3") + ": " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
+		{Label: "tmux status segments: " + m.segmentSummary(), Target: "segments"},
+		{Label: "Starship prompt: " + displayStarshipPrompt(m.starshipPrompt), Target: "starship_prompt"},
 	}
 }
 
@@ -1421,6 +1431,9 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		return m, nil
 	case "segments":
 		m.openSettingMenu("segments")
+		return m, nil
+	case "starship_prompt":
+		m.openSettingMenu("starship_prompt")
 		return m, nil
 	case "mode":
 		m.openSettingMenu("mode")
@@ -2495,6 +2508,8 @@ func (m model) currentSettingChoice(target string) string {
 		return m.presetVariant
 	case "segments":
 		return ""
+	case "starship_prompt":
+		return strings.TrimSpace(strings.ToLower(m.starshipPrompt))
 	default:
 		return ""
 	}
@@ -2550,6 +2565,12 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 			{Value: "widget_ram", Label: "RAM"},
 			{Value: "widget_weather", Label: "Weather"},
 		}
+	case "starship_prompt":
+		out := make([]settingChoice, 0, len(starshipPromptPresets))
+		for _, sp := range starshipPromptPresets {
+			out = append(out, settingChoice{Value: sp, Label: displayStarshipPrompt(sp)})
+		}
+		return out
 	default:
 		return nil
 	}
@@ -2583,6 +2604,13 @@ func (m *model) applySettingChoice(target, value string) {
 		m.normalizeThemeSelection()
 	case "segments":
 		m.toggleSegment(value)
+	case "starship_prompt":
+		v := strings.TrimSpace(strings.ToLower(value))
+		if contains(starshipPromptPresets, v) {
+			m.starshipPrompt = v
+		} else {
+			m.starshipPrompt = defaultStarship
+		}
 	}
 }
 
@@ -2603,7 +2631,9 @@ func settingMenuLabel(target string) string {
 	case "preset_variant":
 		return "Preset Variant"
 	case "segments":
-		return "Segments"
+		return "tmux status segments"
+	case "starship_prompt":
+		return "Starship prompt"
 	default:
 		return "Options"
 	}
@@ -2626,9 +2656,11 @@ func (m model) settingsRowView(target string) (label, state, kind string, toggle
 	case "customize":
 		return "Customize Colors", "Open", "action", false
 	case "status_theme":
-		return hotkeyLabel("Theme", "t", "3"), displayStatusTheme(m.statusTheme) + " ▾", "info", false
+		return hotkeyLabel("tmux status", "t", "3"), displayStatusTheme(m.statusTheme) + " ▾", "info", false
 	case "segments":
-		return "Segments", m.segmentSummary() + " ▾", "info", false
+		return "tmux status segments", m.segmentSummary() + " ▾", "info", false
+	case "starship_prompt":
+		return "Starship prompt", displayStarshipPrompt(m.starshipPrompt) + " ▾", "info", false
 	default:
 		return target, "", "info", false
 	}
@@ -3748,6 +3780,7 @@ func (m model) applyArgs(includeOverrides bool) []string {
 		statusTheme = defaultStatusTheme
 	}
 	args := []string{"--theme-source", m.themeSource, "--status-palette", m.palette, "--status-theme", statusTheme}
+	args = append(args, "--starship-prompt", normalizeStarshipPrompt(m.starshipPrompt))
 	setupCfg, _ := loadTooieSettings()
 	args = append(args,
 		"--status-position", normalizeStatusPosition(setupCfg.Tmux.StatusPosition),
@@ -4230,6 +4263,32 @@ func displayPaletteType(name string) string {
 		}
 		return strings.Join(parts, " ")
 	}
+}
+
+func displayStarshipPrompt(name string) string {
+	switch strings.TrimSpace(strings.ToLower(name)) {
+	case "", "jetpack":
+		return "Jetpack"
+	case "nerd-font-symbols":
+		return "Nerd Font Symbols"
+	default:
+		parts := strings.Split(strings.TrimSpace(name), "-")
+		for i := range parts {
+			if parts[i] == "" {
+				continue
+			}
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+		return strings.Join(parts, " ")
+	}
+}
+
+func normalizeStarshipPrompt(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	if contains(starshipPromptPresets, v) {
+		return v
+	}
+	return defaultStarship
 }
 
 func displayStatusTheme(name string) string {

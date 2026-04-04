@@ -716,10 +716,26 @@ func resolveRepoAssetPath(rel string) (string, error) {
 		candidates = append(candidates, filepath.Join(repo, rel))
 	}
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), rel))
+		dir := filepath.Dir(exe)
+		for i := 0; i < 5; i++ {
+			candidates = append(candidates, filepath.Join(dir, rel))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
-		candidates = append(candidates, filepath.Join(wd, rel))
+		dir := wd
+		for i := 0; i < 5; i++ {
+			candidates = append(candidates, filepath.Join(dir, rel))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 	candidates = append(candidates, filepath.Join(homeDir, "files", "tooie", rel))
 	for _, p := range candidates {

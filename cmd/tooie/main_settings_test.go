@@ -110,7 +110,7 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	for _, want := range []string{
 		"Colors",
 		"Misc",
-		"Theme",
+		"tmux status",
 		"Update Colors",
 		"Backups",
 		"Apply",

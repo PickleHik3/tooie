@@ -83,6 +83,7 @@ type themeApplyConfig struct {
 	Mode                 string
 	SchemeType           string
 	ThemeSource          string
+	StarshipPrompt       string
 	PresetFamily         string
 	PresetVariant        string
 	MatugenBin           string
@@ -195,6 +196,7 @@ func runThemeApplyCommand(args []string) int {
 	meta["cursor_color_override"] = strings.TrimSpace(cfg.CursorColor)
 	meta["status_palette"] = cfg.StatusPalette
 	meta["status_theme"] = cfg.StatusTheme
+	meta["starship_prompt"] = normalizeStarshipPrompt(cfg.StarshipPrompt)
 	meta["status_position"] = cfg.StatusPosition
 	meta["status_layout"] = cfg.StatusLayout
 	meta["status_separator"] = cfg.StatusSeparator
@@ -815,6 +817,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		PresetVariant:      "night",
 		StatusPalette:      "default",
 		StatusTheme:        "default",
+		StarshipPrompt:     defaultStarship,
 		StatusPosition:     "top",
 		StatusLayout:       "two-line",
 		StatusSeparator:    "on",
@@ -837,6 +840,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.SchemeType, "t", cfg.SchemeType, "")
 	fs.StringVar(&cfg.SchemeType, "type", cfg.SchemeType, "")
 	fs.StringVar(&cfg.ThemeSource, "theme-source", cfg.ThemeSource, "")
+	fs.StringVar(&cfg.StarshipPrompt, "starship-prompt", cfg.StarshipPrompt, "")
 	fs.StringVar(&cfg.PresetFamily, "preset-family", cfg.PresetFamily, "")
 	fs.StringVar(&cfg.PresetVariant, "preset-variant", cfg.PresetVariant, "")
 	fs.StringVar(&cfg.MatugenBin, "b", cfg.MatugenBin, "")
@@ -881,6 +885,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	if cfg.ThemeSource != "wallpaper" && cfg.ThemeSource != "preset" {
 		return cfg, fmt.Errorf("invalid theme source: %s", cfg.ThemeSource)
 	}
+	cfg.StarshipPrompt = normalizeStarshipPrompt(cfg.StarshipPrompt)
 	rawSchemeType := strings.TrimSpace(cfg.SchemeType)
 	cfg.SchemeType = normalizeSchemeType(cfg.SchemeType)
 	if cfg.SchemeType == "" {
@@ -2338,6 +2343,9 @@ style error %s
 }
 
 func applyStarshipTheme(path string, payload computedPayload) error {
+	if err := writeStarshipTemplate(path, payload.Meta["starship_prompt"]); err != nil {
+		return err
+	}
 	if err := sanitizeStarshipConfig(path); err != nil {
 		return err
 	}
@@ -2365,6 +2373,27 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 		}
 	}
 	return nil
+}
+
+func writeStarshipTemplate(dstPath, prompt string) error {
+	srcPath, err := resolveRepoAssetPath(starshipTemplateRelativePath(prompt))
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dstPath, raw, 0o644)
+}
+
+func starshipTemplateRelativePath(prompt string) string {
+	switch normalizeStarshipPrompt(prompt) {
+	case "nerd-font-symbols":
+		return filepath.Join("assets", "defaults", ".config", "starship-nerd-font-symbols.toml")
+	default:
+		return filepath.Join("assets", "defaults", ".config", "starship.toml")
+	}
 }
 
 func sanitizeStarshipConfig(path string) error {

@@ -269,6 +269,47 @@ func TestApplyThemeFilesCreatesBackupsAndIdempotentBlocks(t *testing.T) {
 	}
 }
 
+func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+
+	backupDir := filepath.Join(tmp, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("mkdir backup: %v", err)
+	}
+	starshipCfg := managedStarshipPath()
+	if err := ensureFileWithDirs(starshipCfg); err != nil {
+		t.Fatalf("ensure starship cfg: %v", err)
+	}
+	if err := os.WriteFile(starshipCfg, []byte("[character]\nsuccess_symbol='x'\n[battery]\ndisabled=true\n"), 0o644); err != nil {
+		t.Fatalf("write starship cfg: %v", err)
+	}
+
+	payload := testThemePayload()
+	payload.Meta["starship_prompt"] = "nerd-font-symbols"
+	if err := applyThemeFiles(payload, backupDir); err != nil {
+		t.Fatalf("applyThemeFiles() error: %v", err)
+	}
+
+	raw, err := os.ReadFile(starshipCfg)
+	if err != nil {
+		t.Fatalf("read starship cfg: %v", err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, `[aws]`) || !strings.Contains(got, `symbol = " "`) {
+		t.Fatalf("expected nerd-font-symbols template content, got:\n%s", got)
+	}
+	if strings.Contains(got, "[battery]") {
+		t.Fatalf("expected battery section to be stripped, got:\n%s", got)
+	}
+}
+
 func TestScoreCandidatePrefersDarkForDarkScene(t *testing.T) {
 	metrics := autoDecisionMetrics{
 		MeanLuma:         0.22,
