@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	itheme "github.com/PickleHik3/tooie/internal/theme"
@@ -25,30 +26,92 @@ const (
 	themeBackupKeep = 5
 )
 
+var matugenResultCache = struct {
+	mu sync.Mutex
+	m  map[string][]byte
+}{
+	m: map[string][]byte{},
+}
+
+const matugenRolesTemplate = `{
+  "colors": {
+    "dark": {
+      "background": "{{colors.background.dark.hex}}",
+      "surface": "{{colors.surface.dark.hex}}",
+      "surface_container": "{{colors.surface_container.dark.hex}}",
+      "surface_container_high": "{{colors.surface_container_high.dark.hex}}",
+      "surface_dim": "{{colors.surface_dim.dark.hex}}",
+      "surface_bright": "{{colors.surface_bright.dark.hex}}",
+      "surface_variant": "{{colors.surface_variant.dark.hex}}",
+      "on_background": "{{colors.on_background.dark.hex}}",
+      "on_surface": "{{colors.on_surface.dark.hex}}",
+      "on_surface_variant": "{{colors.on_surface_variant.dark.hex}}",
+      "outline": "{{colors.outline.dark.hex}}",
+      "outline_variant": "{{colors.outline_variant.dark.hex}}",
+      "primary": "{{colors.primary.dark.hex}}",
+      "secondary": "{{colors.secondary.dark.hex}}",
+      "tertiary": "{{colors.tertiary.dark.hex}}",
+      "error": "{{colors.error.dark.hex}}",
+      "secondary_fixed": "{{colors.secondary_fixed.dark.hex}}",
+      "tertiary_fixed": "{{colors.tertiary_fixed.dark.hex}}"
+    },
+    "light": {
+      "background": "{{colors.background.light.hex}}",
+      "surface": "{{colors.surface.light.hex}}",
+      "surface_container": "{{colors.surface_container.light.hex}}",
+      "surface_container_high": "{{colors.surface_container_high.light.hex}}",
+      "surface_dim": "{{colors.surface_dim.light.hex}}",
+      "surface_bright": "{{colors.surface_bright.light.hex}}",
+      "surface_variant": "{{colors.surface_variant.light.hex}}",
+      "on_background": "{{colors.on_background.light.hex}}",
+      "on_surface": "{{colors.on_surface.light.hex}}",
+      "on_surface_variant": "{{colors.on_surface_variant.light.hex}}",
+      "outline": "{{colors.outline.light.hex}}",
+      "outline_variant": "{{colors.outline_variant.light.hex}}",
+      "primary": "{{colors.primary.light.hex}}",
+      "secondary": "{{colors.secondary.light.hex}}",
+      "tertiary": "{{colors.tertiary.light.hex}}",
+      "error": "{{colors.error.light.hex}}",
+      "secondary_fixed": "{{colors.secondary_fixed.light.hex}}",
+      "tertiary_fixed": "{{colors.tertiary_fixed.light.hex}}"
+    }
+  }
+}
+`
+
 type themeApplyConfig struct {
-	Mode          string
-	SchemeType    string
-	ThemeSource   string
-	PresetFamily  string
-	PresetVariant string
-	MatugenBin    string
-	StatusPalette string
-	StatusTheme   string
-	Profile       string
-	TextColor     string
-	CursorColor   string
-	PreviewOnly   bool
-	ReuseBackupID string
-	AnsiRed       string
-	AnsiGreen     string
-	AnsiYellow    string
-	AnsiBlue      string
-	AnsiMagenta   string
-	AnsiCyan      string
-	WidgetBattery bool
-	WidgetCPU     bool
-	WidgetRAM     bool
-	WidgetWeather bool
+	Mode                 string
+	SchemeType           string
+	ThemeSource          string
+	StarshipPrompt       string
+	PresetFamily         string
+	PresetVariant        string
+	MatugenBin           string
+	StatusPalette        string
+	StatusTheme          string
+	StatusPosition       string
+	StatusLayout         string
+	StatusSeparator      string
+	StyleFamily          string
+	Profile              string
+	ExtractSourceIndex   int
+	ExtractPrefer        string
+	ExtractFallbackColor string
+	ExtractResizeFilter  string
+	TextColor            string
+	CursorColor          string
+	PreviewOnly          bool
+	ReuseBackupID        string
+	AnsiRed              string
+	AnsiGreen            string
+	AnsiYellow           string
+	AnsiBlue             string
+	AnsiMagenta          string
+	AnsiCyan             string
+	WidgetBattery        bool
+	WidgetCPU            bool
+	WidgetRAM            bool
+	WidgetWeather        bool
 }
 
 func runThemeCommand(args []string) int {
@@ -127,18 +190,30 @@ func runThemeApplyCommand(args []string) int {
 	meta["theme_source"] = cfg.ThemeSource
 	meta["mode"] = cfg.Mode
 	meta["effective_mode"] = payload.EffectiveMode
-	meta["type"] = cfg.SchemeType
+	meta["type"] = schemeTypeLabel(cfg.SchemeType)
 	meta["matugen_bin"] = cfg.MatugenBin
 	meta["text_color_override"] = strings.TrimSpace(cfg.TextColor)
 	meta["cursor_color_override"] = strings.TrimSpace(cfg.CursorColor)
 	meta["status_palette"] = cfg.StatusPalette
 	meta["status_theme"] = cfg.StatusTheme
+	meta["starship_prompt"] = normalizeStarshipPrompt(cfg.StarshipPrompt)
+	meta["status_position"] = cfg.StatusPosition
+	meta["status_layout"] = cfg.StatusLayout
+	meta["status_separator"] = cfg.StatusSeparator
+	meta["extract_source_index"] = fmt.Sprintf("%d", cfg.ExtractSourceIndex)
+	meta["extract_prefer"] = strings.TrimSpace(cfg.ExtractPrefer)
+	meta["extract_fallback_color"] = strings.TrimSpace(cfg.ExtractFallbackColor)
+	meta["extract_resize_filter"] = strings.TrimSpace(cfg.ExtractResizeFilter)
 	meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
 	meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	if cfg.ThemeSource != "preset" {
-		meta["profile"] = canonicalProfile(cfg.Profile)
+		family := canonicalProfile(cfg.StyleFamily)
+		meta["style_family"] = family // backward compatibility for existing readers
+		meta["style_family_version"] = "2"
+		meta["profile"] = family // backward compatibility for existing readers
+		meta["extraction_preset"] = family
 	}
 	meta["ansi_red_override"] = strings.TrimSpace(cfg.AnsiRed)
 	meta["ansi_green_override"] = strings.TrimSpace(cfg.AnsiGreen)
@@ -212,6 +287,9 @@ type autoDecisionMetrics struct {
 	EdgeWeightedLuma float64
 	MeanSat          float64
 	P90Sat           float64
+	DominantHue      float64
+	SecondaryHue     float64
+	HueStrength      float64
 }
 
 func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload, []byte, error) {
@@ -255,7 +333,7 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 			effectiveMode = mode
 			autoMeta = meta
 		}
-		parsed, err := itheme.ParseMatugenColors(matugenRaw)
+		parsed, err := itheme.ParseMatugenColorsForMode(matugenRaw, effectiveMode)
 		if err != nil {
 			return out, nil, err
 		}
@@ -270,10 +348,14 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 		"magenta": cfg.AnsiMagenta,
 		"cyan":    cfg.AnsiCyan,
 	}
+	settings, _ := loadTooieSettings()
+	platformProfile := normalizePlatformProfile(settings.Platform.Profile)
 	computed, err := itheme.Compute(roles, itheme.Options{
 		Source:         itheme.Source(cfg.ThemeSource),
 		Mode:           effectiveMode,
-		Profile:        cfg.Profile,
+		Platform:       platformProfile,
+		StyleFamily:    cfg.StyleFamily,
+		Profile:        cfg.StyleFamily, // backwards compatibility in theme.Compute
 		StatusPalette:  cfg.StatusPalette,
 		TextOverride:   cfg.TextColor,
 		CursorOverride: cfg.CursorColor,
@@ -290,8 +372,22 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	out.Cursor = computed.Cursor
 	out.Colors = computed.Colors
 	out.Meta = computed.Meta
+	for role, hex := range out.Roles {
+		role = strings.TrimSpace(role)
+		hex = strings.TrimSpace(hex)
+		if role == "" || hex == "" {
+			continue
+		}
+		out.Meta["effective_role_"+role] = strings.ToLower(hex)
+	}
 	out.Meta["status_palette"] = cfg.StatusPalette
 	out.Meta["status_theme"] = cfg.StatusTheme
+	out.Meta["starship_prompt"] = normalizeStarshipPrompt(cfg.StarshipPrompt)
+	out.Meta["status_position"] = cfg.StatusPosition
+	out.Meta["status_layout"] = cfg.StatusLayout
+	out.Meta["status_separator"] = cfg.StatusSeparator
+	out.Meta["type"] = schemeTypeLabel(cfg.SchemeType)
+	out.Meta["scheme_type"] = normalizeSchemeType(cfg.SchemeType)
 	out.Meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	out.Meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	out.Meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
@@ -315,7 +411,19 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	metrics := analyzeWallpaperLuma(wallpaper)
 	candidates, err := collectMatugenCandidates(cfg, wallpaper, mode, metrics)
 	if err != nil {
-		return nil, "", nil, err
+		fallback := normalizeSchemeType(defaultPaletteType)
+		if normalizeSchemeType(cfg.SchemeType) != fallback {
+			cfg2 := cfg
+			cfg2.SchemeType = fallback
+			candidates, err = collectMatugenCandidates(cfg2, wallpaper, mode, metrics)
+			if err == nil {
+				meta["palette_fallback"] = schemeTypeLabel(fallback)
+				meta["palette_requested"] = schemeTypeLabel(cfg.SchemeType)
+			}
+		}
+		if err != nil {
+			return nil, "", nil, err
+		}
 	}
 	if len(candidates) == 0 {
 		return nil, "", nil, fmt.Errorf("no matugen candidates evaluated")
@@ -336,17 +444,25 @@ func generateMatugenJSON(cfg themeApplyConfig, wallpaper, workDir string) ([]byt
 	meta["auto_edge_luma"] = fmt.Sprintf("%.4f", metrics.EdgeWeightedLuma)
 	meta["auto_mean_sat"] = fmt.Sprintf("%.4f", metrics.MeanSat)
 	meta["auto_p90_sat"] = fmt.Sprintf("%.4f", metrics.P90Sat)
+	meta["auto_hue_strength"] = fmt.Sprintf("%.4f", metrics.HueStrength)
+	if metrics.DominantHue >= 0 {
+		meta["auto_dominant_hue"] = fmt.Sprintf("%.2f", metrics.DominantHue)
+	}
+	if metrics.SecondaryHue >= 0 {
+		meta["auto_secondary_hue"] = fmt.Sprintf("%.2f", metrics.SecondaryHue)
+	}
 	meta["auto_candidate_count"] = fmt.Sprintf("%d", len(candidates))
 	sceneClass, modeGate := autoSceneDecision(metrics, mode)
 	meta["auto_scene_class"] = sceneClass
 	meta["auto_mode_gate"] = modeGate
 	meta["auto_decision_reason"] = "deep-score"
-	meta["auto_selected_scheme"] = best.Scheme
+	meta["auto_selected_scheme"] = schemeTypeLabel(best.Scheme)
 	meta["auto_selected_source_index"] = fmt.Sprintf("%d", best.SourceIndex)
 	meta["auto_selected_score"] = fmt.Sprintf("%.4f", best.Score)
 	meta["auto_selected_readability"] = fmt.Sprintf("%.4f", best.Readability)
 	meta["auto_selected_ansi_delta"] = fmt.Sprintf("%.4f", ansiSeparationScore(best.Roles))
 	meta["auto_selected_scene_fit"] = fmt.Sprintf("%.4f", sceneFitScore(best.Mode, metrics))
+	meta["auto_selected_wallpaper_affinity"] = fmt.Sprintf("%.4f", wallpaperHueAffinityScore(best.Roles, metrics))
 
 	return best.Raw, best.Mode, meta, nil
 }
@@ -389,6 +505,16 @@ func minFloat(v float64, more ...float64) float64 {
 	return m
 }
 
+func maxFloat(v float64, more ...float64) float64 {
+	m := v
+	for _, x := range more {
+		if x > m {
+			m = x
+		}
+	}
+	return m
+}
+
 type matugenCandidate struct {
 	Raw         []byte
 	Mode        string
@@ -402,36 +528,69 @@ type matugenCandidate struct {
 func collectMatugenCandidates(cfg themeApplyConfig, wallpaper, mode string, metrics autoDecisionMetrics) ([]matugenCandidate, error) {
 	schemes := pickSchemeCandidates(cfg.SchemeType)
 	modes := autoCandidateModes(mode, metrics)
-	indices := []int{0, 1, 2, 3, 4}
-	candidates := make([]matugenCandidate, 0, len(modes)*len(schemes)*len(indices))
-	var lastErr error
+	indices := sourceIndexCandidates(cfg)
+	type combo struct {
+		mode   string
+		scheme string
+		index  int
+	}
+	jobs := make([]combo, 0, len(modes)*len(schemes)*len(indices))
 	for _, m := range modes {
 		for _, s := range schemes {
 			for _, idx := range indices {
-				raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, m, s, idx)
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				roles, err := itheme.ParseMatugenColors(raw)
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				readability := readabilityScore(roles)
-				c := matugenCandidate{
-					Raw:         raw,
-					Mode:        m,
-					Scheme:      s,
-					SourceIndex: idx,
-					Roles:       roles,
-					Readability: readability,
-				}
-				c.Score = scoreCandidate(c, metrics)
-				candidates = append(candidates, c)
+				jobs = append(jobs, combo{mode: m, scheme: s, index: idx})
 			}
 		}
 	}
+	candidates := make([]matugenCandidate, 0, len(jobs))
+	var lastErr error
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	parallel := 4
+	if len(jobs) < parallel {
+		parallel = len(jobs)
+	}
+	if parallel <= 0 {
+		return nil, fmt.Errorf("no matugen candidates requested")
+	}
+	sem := make(chan struct{}, parallel)
+	for _, job := range jobs {
+		job := job
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			raw, err := runMatugenImage(cfg.MatugenBin, wallpaper, job.mode, job.scheme, job.index, cfg.ExtractPrefer, cfg.ExtractFallbackColor, cfg.ExtractResizeFilter)
+			if err != nil {
+				mu.Lock()
+				lastErr = err
+				mu.Unlock()
+				return
+			}
+			roles, err := itheme.ParseMatugenColorsForMode(raw, job.mode)
+			if err != nil {
+				mu.Lock()
+				lastErr = err
+				mu.Unlock()
+				return
+			}
+			readability := readabilityScore(roles)
+			c := matugenCandidate{
+				Raw:         raw,
+				Mode:        job.mode,
+				Scheme:      job.scheme,
+				SourceIndex: job.index,
+				Roles:       roles,
+				Readability: readability,
+			}
+			c.Score = scoreCandidate(c, metrics)
+			mu.Lock()
+			candidates = append(candidates, c)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
 	if len(candidates) == 0 {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("failed to evaluate any matugen candidates")
@@ -445,13 +604,8 @@ func autoCandidateModes(mode string, metrics autoDecisionMetrics) []string {
 	if mode != "auto" {
 		return []string{mode}
 	}
-	if darkDominantScene(metrics) {
-		return []string{"dark"}
-	}
-	if brightDominantScene(metrics) {
-		return []string{"light"}
-	}
-	return []string{"dark", "light"}
+	sceneMode, _ := autoSceneDecision(metrics, mode)
+	return []string{sceneMode}
 }
 
 func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string) {
@@ -462,24 +616,44 @@ func autoSceneDecision(metrics autoDecisionMetrics, mode string) (string, string
 		return "dark", "forced-dark"
 	}
 	if brightDominantScene(metrics) {
-		return "bright", "forced-light"
+		return "light", "forced-light"
 	}
-	return "mixed", "dual"
+	return "dark", "fallback-dark"
 }
 
 func pickSchemeCandidates(schemeType string) []string {
-	s := strings.TrimSpace(schemeType)
+	s := normalizeSchemeType(schemeType)
 	if s != "" {
 		return []string{s}
 	}
-	return []string{"scheme-expressive", "scheme-tonal-spot", "scheme-fidelity", "scheme-content"}
+	return []string{
+		"scheme-tonal-spot",
+		"scheme-expressive",
+		"scheme-fidelity",
+		"scheme-content",
+		"scheme-vibrant",
+		"scheme-neutral",
+		"scheme-rainbow",
+		"scheme-fruit-salad",
+		"scheme-cmf",
+	}
+}
+
+func sourceIndexCandidates(cfg themeApplyConfig) []int {
+	if cfg.ExtractSourceIndex >= 0 {
+		return []int{cfg.ExtractSourceIndex}
+	}
+	if strings.TrimSpace(cfg.ExtractPrefer) != "" {
+		return []int{-1}
+	}
+	return []int{0, 1, 2, 3, 4}
 }
 
 func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	bg := getRoleOr(c.Roles, "background", "#1a1b26")
 	fg := getRoleOr(c.Roles, "on_background", "#c0caf5")
 	fgContrast := contrastRatioHex(fg, bg)
-	if fgContrast < 4.5 {
+	if fgContrast < 7.0 {
 		return -1000 + fgContrast
 	}
 	accentMin := minFloat(
@@ -491,15 +665,24 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 	if accentMin < 3.0 {
 		return -800 + accentMin
 	}
+	mutedContrast := contrastRatioHex(getRoleOr(c.Roles, "on_surface_variant", fg), bg)
+	if mutedContrast < 3.2 {
+		return -700 + mutedContrast
+	}
+	outlineContrast := contrastRatioHex(getRoleOr(c.Roles, "outline", fg), bg)
+	if outlineContrast < 2.8 {
+		return -650 + outlineContrast
+	}
 
 	sceneFit := sceneFitScore(c.Mode, metrics)
 	ansiSep := ansiSeparationScore(c.Roles)
+	wallpaperAffinity := wallpaperHueAffinityScore(c.Roles, metrics)
 	modePenalty := 0.0
 	if darkDominantScene(metrics) && c.Mode == "light" {
 		modePenalty += 2.4
 	}
 	if brightDominantScene(metrics) && c.Mode == "dark" {
-		modePenalty += 2.0
+		modePenalty += 0.65
 	}
 	sourcePenalty := 0.0
 	if c.SourceIndex > 0 {
@@ -514,10 +697,47 @@ func scoreCandidate(c matugenCandidate, metrics autoDecisionMetrics) float64 {
 		schemeBias = 0.22 + (0.35 * clamp01(metrics.P90Sat-0.32))
 	case "scheme-fidelity", "scheme-content":
 		schemeBias = 0.16 + (0.28 * clamp01(metrics.P90Sat-0.28))
+	case "scheme-vibrant":
+		schemeBias = 0.25 + (0.24 * clamp01(metrics.P90Sat-0.30))
+	case "scheme-neutral":
+		schemeBias = 0.14 + (0.12 * clamp01(0.42-metrics.P90Sat))
+	case "scheme-rainbow":
+		schemeBias = 0.20 + (0.20 * clamp01(metrics.P90Sat-0.24))
+	case "scheme-fruit-salad":
+		schemeBias = 0.18 + (0.20 * clamp01(metrics.P90Sat-0.24))
+	case "scheme-cmf":
+		schemeBias = 0.22 + (0.22 * clamp01(metrics.P90Sat-0.20))
 	case "scheme-tonal-spot":
 		schemeBias = 0.18 + (0.25 * clamp01(0.40-metrics.P90Sat))
 	}
-	return (c.Readability * 1.85) + (fgContrast * 0.9) + (accentMin * 0.85) + (ansiSep * 0.8) + sceneFit + schemeBias - sourcePenalty - modePenalty
+	affinityWeight := 1.0
+	return (c.Readability * 2.05) + (fgContrast * 1.05) + (accentMin * 1.00) + (mutedContrast * 0.70) + (outlineContrast * 0.45) + (ansiSep * 0.95) + (wallpaperAffinity * affinityWeight) + sceneFit + schemeBias - sourcePenalty - modePenalty
+}
+
+func wallpaperHueAffinityScore(roles map[string]string, metrics autoDecisionMetrics) float64 {
+	if metrics.HueStrength <= 0.05 || metrics.DominantHue < 0 {
+		return 0
+	}
+	accents := []string{
+		getRoleOr(roles, "primary", "#7aa2f7"),
+		getRoleOr(roles, "secondary", "#7dcfff"),
+		getRoleOr(roles, "tertiary", "#bb9af7"),
+		getRoleOr(roles, "error", "#f7768e"),
+	}
+	sum := 0.0
+	for _, hex := range accents {
+		h := hueFromHex(hex)
+		d1 := hueDistanceDegrees(h, metrics.DominantHue)
+		closeness := 1.0 - (d1 / 180.0)
+		if metrics.SecondaryHue >= 0 {
+			d2 := hueDistanceDegrees(h, metrics.SecondaryHue)
+			c2 := 1.0 - (d2 / 180.0)
+			closeness = maxFloat(closeness, c2*0.82)
+		}
+		sum += closeness
+	}
+	avg := sum / float64(len(accents))
+	return (avg - 0.5) * 2.0 * clamp01(metrics.HueStrength*1.35)
 }
 
 func sceneFitScore(mode string, metrics autoDecisionMetrics) float64 {
@@ -530,15 +750,13 @@ func sceneFitScore(mode string, metrics autoDecisionMetrics) float64 {
 }
 
 func darkDominantScene(metrics autoDecisionMetrics) bool {
-	return (metrics.DarkPixelRatio > 0.45 && (metrics.P50 < 0.50 || metrics.MeanLuma < 0.48)) ||
-		(metrics.P50 < 0.40 && metrics.DarkPixelRatio > 0.52) ||
-		(metrics.MeanLuma < 0.43 && metrics.EdgeWeightedLuma < 0.50)
+	return metrics.DarkPixelRatio >= 0.45 ||
+		metrics.P50 <= 0.38 ||
+		(metrics.MeanLuma <= 0.35 && metrics.BrightPixelRatio < 0.08)
 }
 
 func brightDominantScene(metrics autoDecisionMetrics) bool {
-	return (metrics.BrightPixelRatio > 0.28 && (metrics.P50 > 0.56 || metrics.MeanLuma > 0.56)) ||
-		(metrics.P50 > 0.60 && metrics.DarkPixelRatio < 0.36) ||
-		(metrics.MeanLuma > 0.63 && metrics.BrightPixelRatio > 0.22)
+	return metrics.BrightPixelRatio >= 0.28 && metrics.P50 >= 0.52
 }
 
 func ansiSeparationScore(roles map[string]string) float64 {
@@ -586,25 +804,31 @@ func analyzeWallpaperLuma(path string) autoDecisionMetrics {
 	// Fallback for environments where decode fails.
 	l := wallpaperLuma(path)
 	if l < 0 {
-		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5, MeanSat: 0.35, P90Sat: 0.55}
+		return autoDecisionMetrics{MeanLuma: 0.5, P10: 0.5, P50: 0.5, P90: 0.5, DarkPixelRatio: 0.5, BrightPixelRatio: 0.0, EdgeWeightedLuma: 0.5, MeanSat: 0.35, P90Sat: 0.55, DominantHue: -1, SecondaryHue: -1, HueStrength: 0}
 	}
-	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l, MeanSat: 0.40, P90Sat: 0.60}
+	return autoDecisionMetrics{MeanLuma: l, P10: l, P50: l, P90: l, DarkPixelRatio: ternf(l < 0.25, 1, 0), BrightPixelRatio: ternf(l > 0.82, 1, 0), EdgeWeightedLuma: l, MeanSat: 0.40, P90Sat: 0.60, DominantHue: -1, SecondaryHue: -1, HueStrength: 0}
 }
 
 func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg := themeApplyConfig{
-		Mode:          "auto",
-		SchemeType:    "scheme-tonal-spot",
-		ThemeSource:   "wallpaper",
-		PresetFamily:  "catppuccin",
-		PresetVariant: "mocha",
-		StatusPalette: "default",
-		StatusTheme:   "default",
-		Profile:       "adaptive",
-		WidgetBattery: true,
-		WidgetCPU:     true,
-		WidgetRAM:     true,
-		WidgetWeather: true,
+		Mode:               "dark",
+		SchemeType:         "tonal-spot",
+		ThemeSource:        "wallpaper",
+		PresetFamily:       "tokyo-night",
+		PresetVariant:      "night",
+		StatusPalette:      "default",
+		StatusTheme:        "default",
+		StarshipPrompt:     defaultStarship,
+		StatusPosition:     "top",
+		StatusLayout:       "two-line",
+		StatusSeparator:    "on",
+		StyleFamily:        "auto",
+		Profile:            "auto",
+		ExtractSourceIndex: -1,
+		WidgetBattery:      true,
+		WidgetCPU:          true,
+		WidgetRAM:          true,
+		WidgetWeather:      true,
 	}
 	widgetBattery := "on"
 	widgetCPU := "on"
@@ -617,6 +841,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.SchemeType, "t", cfg.SchemeType, "")
 	fs.StringVar(&cfg.SchemeType, "type", cfg.SchemeType, "")
 	fs.StringVar(&cfg.ThemeSource, "theme-source", cfg.ThemeSource, "")
+	fs.StringVar(&cfg.StarshipPrompt, "starship-prompt", cfg.StarshipPrompt, "")
 	fs.StringVar(&cfg.PresetFamily, "preset-family", cfg.PresetFamily, "")
 	fs.StringVar(&cfg.PresetVariant, "preset-variant", cfg.PresetVariant, "")
 	fs.StringVar(&cfg.MatugenBin, "b", cfg.MatugenBin, "")
@@ -625,7 +850,15 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&cfg.CursorColor, "cursor-color", "", "")
 	fs.StringVar(&cfg.StatusPalette, "status-palette", cfg.StatusPalette, "")
 	fs.StringVar(&cfg.StatusTheme, "status-theme", cfg.StatusTheme, "")
+	fs.StringVar(&cfg.StatusPosition, "status-position", cfg.StatusPosition, "")
+	fs.StringVar(&cfg.StatusLayout, "status-layout", cfg.StatusLayout, "")
+	fs.StringVar(&cfg.StatusSeparator, "status-separator", cfg.StatusSeparator, "")
+	fs.StringVar(&cfg.StyleFamily, "style-family", cfg.StyleFamily, "")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "")
+	fs.IntVar(&cfg.ExtractSourceIndex, "source-color-index", cfg.ExtractSourceIndex, "")
+	fs.StringVar(&cfg.ExtractPrefer, "prefer", cfg.ExtractPrefer, "")
+	fs.StringVar(&cfg.ExtractFallbackColor, "fallback-color", cfg.ExtractFallbackColor, "")
+	fs.StringVar(&cfg.ExtractResizeFilter, "resize-filter", cfg.ExtractResizeFilter, "")
 	fs.BoolVar(&cfg.PreviewOnly, "preview-only", false, "")
 	fs.StringVar(&cfg.ReuseBackupID, "reuse-backup", "", "")
 	fs.StringVar(&cfg.AnsiRed, "ansi-red", "", "")
@@ -644,10 +877,20 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	if fs.NArg() != 0 {
 		return cfg, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
+	rawMode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if rawMode == "auto" {
+		return cfg, fmt.Errorf("invalid --mode value: auto (only dark/light are supported)")
+	}
 	cfg.Mode = canonicalMode(cfg.Mode)
 	cfg.ThemeSource = strings.TrimSpace(strings.ToLower(cfg.ThemeSource))
 	if cfg.ThemeSource != "wallpaper" && cfg.ThemeSource != "preset" {
 		return cfg, fmt.Errorf("invalid theme source: %s", cfg.ThemeSource)
+	}
+	cfg.StarshipPrompt = normalizeStarshipPrompt(cfg.StarshipPrompt)
+	rawSchemeType := strings.TrimSpace(cfg.SchemeType)
+	cfg.SchemeType = normalizeSchemeType(cfg.SchemeType)
+	if cfg.SchemeType == "" {
+		return cfg, fmt.Errorf("invalid --type value: %s", rawSchemeType)
 	}
 	cfg.StatusPalette = strings.TrimSpace(strings.ToLower(cfg.StatusPalette))
 	if cfg.StatusPalette != "default" && cfg.StatusPalette != "vibrant" {
@@ -657,9 +900,57 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	if cfg.StatusTheme == "" {
 		return cfg, fmt.Errorf("invalid status theme")
 	}
-	cfg.Profile = canonicalProfile(cfg.Profile)
-	if !contains(profilePresets, cfg.Profile) {
-		return cfg, fmt.Errorf("invalid profile: %s", cfg.Profile)
+	cfg.StatusPosition = normalizeStatusPosition(cfg.StatusPosition)
+	cfg.StatusLayout = normalizeStatusLayout(cfg.StatusLayout)
+	cfg.StatusSeparator = normalizeSeparatorMode(cfg.StatusSeparator)
+	if cfg.StatusLayout == "single-line" {
+		cfg.StatusSeparator = "off"
+	}
+	styleFamilySet := false
+	sourceIndexSet := false
+	preferSet := false
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "style-family":
+			styleFamilySet = true
+		case "source-color-index":
+			sourceIndexSet = true
+		case "prefer":
+			preferSet = true
+		}
+	})
+	if !styleFamilySet || strings.TrimSpace(cfg.StyleFamily) == "" {
+		cfg.StyleFamily = cfg.Profile
+	}
+	cfg.StyleFamily = canonicalProfile(cfg.StyleFamily)
+	cfg.Profile = cfg.StyleFamily // keep both fields normalized the same
+	if !contains(profilePresets, cfg.StyleFamily) {
+		return cfg, fmt.Errorf("invalid style family: %s", cfg.StyleFamily)
+	}
+	if cfg.ExtractSourceIndex < -1 || cfg.ExtractSourceIndex > 4 {
+		return cfg, fmt.Errorf("invalid --source-color-index value: %d (expected -1..4)", cfg.ExtractSourceIndex)
+	}
+	rawPrefer := strings.TrimSpace(cfg.ExtractPrefer)
+	cfg.ExtractPrefer = normalizeMatugenPrefer(cfg.ExtractPrefer)
+	if rawPrefer != "" && cfg.ExtractPrefer == "" {
+		return cfg, fmt.Errorf("invalid --prefer value: %s", rawPrefer)
+	}
+	rawFilter := strings.TrimSpace(cfg.ExtractResizeFilter)
+	cfg.ExtractResizeFilter = normalizeResizeFilter(cfg.ExtractResizeFilter)
+	if rawFilter != "" && cfg.ExtractResizeFilter == "" {
+		return cfg, fmt.Errorf("invalid --resize-filter value: %s", rawFilter)
+	}
+	cfg.ExtractFallbackColor = strings.TrimSpace(cfg.ExtractFallbackColor)
+	if cfg.ExtractFallbackColor != "" && !itheme.IsHexColor(cfg.ExtractFallbackColor) {
+		return cfg, fmt.Errorf("invalid --fallback-color value: %s (expected #rrggbb)", cfg.ExtractFallbackColor)
+	}
+	if !sourceIndexSet && !preferSet {
+		presetIndex, presetPrefer := extractionPresetSelection(cfg.StyleFamily)
+		cfg.ExtractSourceIndex = presetIndex
+		cfg.ExtractPrefer = presetPrefer
+	}
+	if cfg.ExtractPrefer == "closest-to-fallback" && cfg.ExtractFallbackColor == "" {
+		cfg.ExtractFallbackColor = "#6750A4"
 	}
 	for _, item := range []struct {
 		v    string
@@ -709,6 +1000,210 @@ func parseOnOffValue(raw string) (bool, error) {
 	}
 }
 
+func normalizeSchemeType(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	v = strings.TrimPrefix(v, "scheme-")
+	if v == "monochrome" {
+		v = "neutral"
+	}
+	switch v {
+	case "tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad", "cmf":
+		return "scheme-" + v
+	default:
+		return ""
+	}
+}
+
+func schemeTypeLabel(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	return strings.TrimPrefix(v, "scheme-")
+}
+
+type statusSchemeTuning struct {
+	Lift           float64
+	AccentSat      float64
+	ChipMixA       float64
+	ChipMixB       float64
+	ChipMixC       float64
+	WidgetMix      float64
+	WindowActive   float64
+	WindowInactive float64
+	HueShiftA      float64
+	HueShiftB      float64
+	HueShiftC      float64
+	RoleDesat      float64
+}
+
+func statusSchemeTuningFor(scheme, mode string) statusSchemeTuning {
+	t := statusSchemeTuning{
+		Lift:           0.24,
+		AccentSat:      0.18,
+		ChipMixA:       0.62,
+		ChipMixB:       0.58,
+		ChipMixC:       0.60,
+		WidgetMix:      0.64,
+		WindowActive:   0.36,
+		WindowInactive: 0.62,
+		HueShiftA:      0,
+		HueShiftB:      0,
+		HueShiftC:      0,
+		RoleDesat:      0,
+	}
+	if mode == "light" {
+		t.Lift = 0.14
+		t.AccentSat = 0.14
+	}
+	switch normalizeSchemeType(scheme) {
+	case "scheme-tonal-spot":
+		t.AccentSat -= 0.06
+		t.ChipMixA -= 0.10
+		t.ChipMixB -= 0.10
+		t.ChipMixC -= 0.10
+		t.WidgetMix -= 0.08
+		t.WindowInactive += 0.08
+		t.RoleDesat += 0.14
+	case "scheme-expressive":
+		t.AccentSat += 0.02
+		t.ChipMixA += 0.06
+		t.ChipMixB += 0.04
+		t.ChipMixC += 0.07
+		t.WidgetMix += 0.06
+		t.WindowActive += 0.05
+		t.HueShiftA = 26
+		t.HueShiftB = -18
+		t.HueShiftC = 36
+	case "scheme-rainbow":
+		t.AccentSat += 0.10
+		t.ChipMixA += 0.12
+		t.ChipMixB += 0.12
+		t.ChipMixC += 0.12
+		t.WidgetMix += 0.10
+		t.WindowActive += 0.08
+		t.HueShiftA = 120
+		t.HueShiftB = 205
+		t.HueShiftC = 285
+	case "scheme-fruit-salad":
+		t.AccentSat += 0.08
+		t.ChipMixA += 0.10
+		t.ChipMixB += 0.10
+		t.ChipMixC += 0.10
+		t.WidgetMix += 0.08
+		t.WindowActive += 0.08
+		t.HueShiftA = 84
+		t.HueShiftB = 164
+		t.HueShiftC = 244
+	case "scheme-vibrant":
+		t.AccentSat += 0.16
+		t.ChipMixA += 0.12
+		t.ChipMixB += 0.12
+		t.ChipMixC += 0.12
+		t.WidgetMix += 0.10
+		t.WindowActive += 0.08
+	case "scheme-fidelity", "scheme-content":
+		t.AccentSat += 0.02
+		t.ChipMixA -= 0.01
+		t.ChipMixB -= 0.01
+		t.ChipMixC -= 0.01
+		t.WidgetMix += 0.02
+	case "scheme-cmf":
+		t.AccentSat += 0.08
+		t.ChipMixA += 0.05
+		t.ChipMixB += 0.03
+		t.ChipMixC += 0.10
+		t.WidgetMix += 0.07
+		t.WindowActive += 0.06
+		t.HueShiftC = 20
+	case "scheme-neutral":
+		t.AccentSat -= 0.16
+		t.ChipMixA -= 0.14
+		t.ChipMixB -= 0.14
+		t.ChipMixC -= 0.14
+		t.WidgetMix -= 0.14
+		t.WindowActive -= 0.10
+		t.WindowInactive += 0.12
+		t.RoleDesat = 0.74
+	}
+	t.Lift = clamp01(t.Lift)
+	t.AccentSat = clamp01(t.AccentSat)
+	t.ChipMixA = clamp01(t.ChipMixA)
+	t.ChipMixB = clamp01(t.ChipMixB)
+	t.ChipMixC = clamp01(t.ChipMixC)
+	t.WidgetMix = clamp01(t.WidgetMix)
+	t.WindowActive = clamp01(t.WindowActive)
+	t.WindowInactive = clamp01(t.WindowInactive)
+	t.RoleDesat = clamp01(t.RoleDesat)
+	return t
+}
+
+func normalizeMatugenPrefer(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "none":
+		return ""
+	case "darkness":
+		return "darkness"
+	case "lightness":
+		return "lightness"
+	case "saturation":
+		return "saturation"
+	case "less-saturation", "less_saturation":
+		return "less-saturation"
+	case "value":
+		return "value"
+	case "closest-to-fallback", "closest_to_fallback":
+		return "closest-to-fallback"
+	default:
+		return ""
+	}
+}
+
+func normalizeResizeFilter(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "default":
+		return ""
+	case "nearest":
+		return "nearest"
+	case "triangle":
+		return "triangle"
+	case "catmull-rom", "catmull_rom":
+		return "catmull-rom"
+	case "gaussian":
+		return "gaussian"
+	case "lanczos3":
+		return "lanczos3"
+	default:
+		return ""
+	}
+}
+
+func extractionPresetSelection(preset string) (int, string) {
+	switch canonicalProfile(preset) {
+	case "source-0":
+		return 0, ""
+	case "source-1":
+		return 1, ""
+	case "source-2":
+		return 2, ""
+	case "source-3":
+		return 3, ""
+	case "source-4":
+		return 4, ""
+	case "prefer-darkness":
+		return -1, "darkness"
+	case "prefer-lightness":
+		return -1, "lightness"
+	case "prefer-saturation":
+		return -1, "saturation"
+	case "prefer-less-saturation":
+		return -1, "less-saturation"
+	case "prefer-value":
+		return -1, "value"
+	case "prefer-closest-fallback":
+		return -1, "closest-to-fallback"
+	default:
+		return 0, ""
+	}
+}
+
 func normalizeStatusTheme(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", "default":
@@ -722,24 +1217,57 @@ func normalizeStatusTheme(raw string) string {
 	}
 }
 
-func applyThemeFiles(payload computedPayload, backupDir string) error {
-	termuxColors := filepath.Join(homeDir, ".termux", "colors.properties")
-	tmuxConf := filepath.Join(homeDir, ".tmux.conf")
-	peaclockCfg := filepath.Join(homeDir, ".config", "peaclock", "config")
-	starshipCfg := filepath.Join(homeDir, ".config", "starship.toml")
+func normalizeStatusPosition(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "bottom":
+		return "bottom"
+	default:
+		return "top"
+	}
+}
 
-	if err := os.MkdirAll(filepath.Dir(termuxColors), 0o755); err != nil {
-		return err
+func normalizeStatusLayout(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "single", "single-line", "single_line":
+		return "single-line"
+	default:
+		return "two-line"
 	}
-	if raw, err := os.ReadFile(termuxColors); err == nil {
-		_ = os.WriteFile(filepath.Join(backupDir, "colors.properties.bak"), raw, 0o644)
+}
+
+func normalizeSeparatorMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "off", "none", "false", "0":
+		return "off"
+	default:
+		return "on"
 	}
-	_ = writeApplyProgress("Writing Termux colors", 0.42)
-	if err := os.WriteFile(termuxColors, []byte(renderColorsProperties(payload)), 0o644); err != nil {
-		return err
+}
+
+func applyThemeFiles(payload computedPayload, backupDir string) error {
+	tmuxConf := managedTmuxConfPath()
+	peaclockCfg := managedPeaclockPath()
+	starshipCfg := managedStarshipPath()
+	settings, _ := loadTooieSettings()
+	profile := normalizePlatformProfile(settings.Platform.Profile)
+
+	if profile == "linux" {
+		_ = writeApplyProgress("Writing Ghostty theme", 0.42)
+		if err := applyLinuxGhosttyTheme(payload, backupDir); err != nil {
+			return err
+		}
+	} else {
+		_ = writeApplyProgress("Writing Termux colors", 0.42)
+		if err := applyTermuxColors(payload, backupDir, settings.Modules.TermuxAppearance); err != nil {
+			return err
+		}
 	}
 
 	_ = writeApplyProgress("Writing tmux theme", 0.56)
+	_ = syncManagedTmuxRuntimeFilesFromRepo()
+	_ = syncManagedTmuxProfileEnvFromRepo(profile)
+	_ = syncManagedFishConfigFromRepo()
+	_ = syncManagedStarshipTemplatesFromRepo()
 	if err := ensureFileWithDirs(tmuxConf); err != nil {
 		return err
 	}
@@ -761,30 +1289,230 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 		return err
 	}
 
-	_ = writeApplyProgress("Writing starship theme", 0.78)
-	if err := ensureFileWithDirs(starshipCfg); err != nil {
-		return err
-	}
-	if err := backupIfExists(starshipCfg, filepath.Join(backupDir, "starship.toml.bak")); err != nil {
-		return err
-	}
-	if err := applyStarshipTheme(starshipCfg, payload); err != nil {
-		return err
+	starshipMode := normalizeStarshipInstallMode(settings.Modules.StarshipMode)
+	if starshipMode == "themed" {
+		_ = writeApplyProgress("Writing starship theme", 0.78)
+		if err := ensureFileWithDirs(starshipCfg); err != nil {
+			return err
+		}
+		if err := backupIfExists(starshipCfg, filepath.Join(backupDir, "starship.toml.bak")); err != nil {
+			return err
+		}
+		if err := applyStarshipTheme(starshipCfg, payload); err != nil {
+			return err
+		}
 	}
 
 	metaPath := filepath.Join(backupDir, "meta.env")
 	f, err := os.OpenFile(metaPath, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err == nil {
-		_, _ = f.WriteString("peaclock_themed=true\nstarship_themed=true\n")
+		_, _ = f.WriteString("peaclock_themed=true\n")
+		if starshipMode == "themed" {
+			_, _ = f.WriteString("starship_themed=true\n")
+		}
 		_ = f.Close()
 	}
 
 	_ = writeApplyProgress("Reloading shell surfaces", 0.94)
-	if _, err := exec.LookPath("termux-reload-settings"); err == nil {
-		_ = exec.Command("termux-reload-settings").Run()
+	if profile != "linux" {
+		if _, err := exec.LookPath("termux-reload-settings"); err == nil {
+			_ = exec.Command("termux-reload-settings").Run()
+		}
 	}
 	if _, err := exec.LookPath("tmux"); err == nil {
-		_ = exec.Command("tmux", "source-file", tmuxConf).Run()
+		_ = exec.Command("tmux", "source-file", filepath.Join(homeDir, ".tmux.conf")).Run()
+		_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
+		_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
+		_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
+	}
+	return nil
+}
+
+func applyTermuxColors(payload computedPayload, backupDir string, syncLive bool) error {
+	termuxColors := managedTermuxFilePath("colors.properties")
+	if err := os.MkdirAll(filepath.Dir(termuxColors), 0o755); err != nil {
+		return err
+	}
+	if raw, err := os.ReadFile(termuxColors); err == nil {
+		_ = os.WriteFile(filepath.Join(backupDir, "colors.properties.bak"), raw, 0o644)
+	}
+	rendered := []byte(renderColorsProperties(payload))
+	if err := os.WriteFile(termuxColors, rendered, 0o644); err != nil {
+		return err
+	}
+	if !syncLive {
+		return nil
+	}
+	for _, dst := range []string{
+		filepath.Join(homeDir, ".termux", "colors.properties"),
+		filepath.Join(homeDir, ".config", "termux", "colors.properties"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, rendered, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyLinuxGhosttyTheme(payload computedPayload, backupDir string) error {
+	managedTheme := managedGhosttyThemePath()
+	if err := os.MkdirAll(filepath.Dir(managedTheme), 0o755); err != nil {
+		return err
+	}
+	if raw, err := os.ReadFile(managedTheme); err == nil {
+		_ = os.WriteFile(filepath.Join(backupDir, "ghostty.theme.bak"), raw, 0o644)
+	}
+	if err := os.WriteFile(managedTheme, []byte(renderGhosttyTheme(payload)), 0o644); err != nil {
+		return err
+	}
+
+	userGhosttyConfig := filepath.Join(homeDir, ".config", "ghostty", "config")
+	if err := ensureFileWithDirs(userGhosttyConfig); err != nil {
+		return err
+	}
+	if err := backupIfExists(userGhosttyConfig, filepath.Join(backupDir, "ghostty.config.bak")); err != nil {
+		return err
+	}
+	block := fmt.Sprintf(`# >>> TOOIE GHOSTTY THEME START >>>
+config-file = %s
+# <<< TOOIE GHOSTTY THEME END <<<`, managedTheme)
+	return replaceBlock(
+		userGhosttyConfig,
+		"# >>> TOOIE GHOSTTY THEME START >>>",
+		"# <<< TOOIE GHOSTTY THEME END <<<",
+		block,
+	)
+}
+
+func managedGhosttyThemePath() string {
+	return filepath.Join(managedConfigsDir(), "ghostty", "dank-theme.conf")
+}
+
+func renderGhosttyTheme(payload computedPayload) string {
+	selectionBG := getRoleOr(payload.Roles, "primary_container", blendHexColor(payload.Background, payload.Foreground, 0.20))
+	selectionFG := getRoleOr(payload.Roles, "on_surface", payload.Foreground)
+	cursor := getRoleOr(payload.Roles, "primary", payload.Cursor)
+	return fmt.Sprintf(`# Generated by %s/theme apply
+background = %s
+foreground = %s
+cursor-color = %s
+selection-background = %s
+selection-foreground = %s
+
+palette = 0=%s
+palette = 1=%s
+palette = 2=%s
+palette = 3=%s
+palette = 4=%s
+palette = 5=%s
+palette = 6=%s
+palette = 7=%s
+palette = 8=%s
+palette = 9=%s
+palette = 10=%s
+palette = 11=%s
+palette = 12=%s
+palette = 13=%s
+palette = 14=%s
+palette = 15=%s
+`, tooieConfigDir,
+		payload.Background,
+		payload.Foreground,
+		cursor,
+		selectionBG,
+		selectionFG,
+		colorSlot(payload.Colors, 0, "#1a1b26"),
+		colorSlot(payload.Colors, 1, "#f7768e"),
+		colorSlot(payload.Colors, 2, "#73daca"),
+		colorSlot(payload.Colors, 3, "#e0af68"),
+		colorSlot(payload.Colors, 4, "#7aa2f7"),
+		colorSlot(payload.Colors, 5, "#bb9af7"),
+		colorSlot(payload.Colors, 6, "#7dcfff"),
+		colorSlot(payload.Colors, 7, "#c0caf5"),
+		colorSlot(payload.Colors, 8, "#414868"),
+		colorSlot(payload.Colors, 9, "#f7768e"),
+		colorSlot(payload.Colors, 10, "#73daca"),
+		colorSlot(payload.Colors, 11, "#e0af68"),
+		colorSlot(payload.Colors, 12, "#7aa2f7"),
+		colorSlot(payload.Colors, 13, "#bb9af7"),
+		colorSlot(payload.Colors, 14, "#7dcfff"),
+		colorSlot(payload.Colors, 15, "#c0caf5"),
+	)
+}
+
+func colorSlot(colors map[int]string, idx int, fallback string) string {
+	if v := strings.TrimSpace(colors[idx]); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func syncManagedTmuxRuntimeFilesFromRepo() error {
+	if err := os.MkdirAll(managedTmuxDir(), 0o755); err != nil {
+		return err
+	}
+	files := []string{
+		"helpers.sh",
+		"run-system-widget",
+		"system-widgets",
+		"widget-left",
+		"widget-weather",
+		"widget-cpu",
+		"widget-ram",
+		"widget-battery",
+	}
+	for _, name := range files {
+		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", name))
+		if err != nil {
+			// Applying a theme should still succeed from installed-only environments.
+			continue
+		}
+		dst := filepath.Join(managedTmuxDir(), name)
+		if err := copyFile(src, dst, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncManagedTmuxProfileEnvFromRepo(profile string) error {
+	profile = normalizePlatformProfile(profile)
+	src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", "profiles", profile+".env"))
+	if err != nil {
+		// Applying a theme should still succeed from installed-only environments.
+		return nil
+	}
+	return copyFile(src, filepath.Join(managedTmuxDir(), "profile.env"), 0o644)
+}
+
+func syncManagedFishConfigFromRepo() error {
+	src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "fish", "config.fish"))
+	if err != nil {
+		// Applying a theme should still succeed from installed-only environments.
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(managedFishConfigPath()), 0o755); err != nil {
+		return err
+	}
+	return copyFile(src, managedFishConfigPath(), 0o644)
+}
+
+func syncManagedStarshipTemplatesFromRepo() error {
+	if err := os.MkdirAll(managedStarshipTemplateDir(), 0o755); err != nil {
+		return err
+	}
+	for _, name := range []string{"starship.toml", "starship-pure.toml", "starship-gruvbox.toml"} {
+		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", name))
+		if err != nil {
+			// Applying a theme should still succeed from installed-only environments.
+			continue
+		}
+		if err := copyFile(src, filepath.Join(managedStarshipTemplateDir(), name), 0o644); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -825,62 +1553,133 @@ color21=%s
 
 func renderTmuxBlock(payload computedPayload) string {
 	tmuxRamp := tmuxGradientRamp(payload)
-	sessionBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[16]), "#b889ff", 0.55),
-			tmuxRamp[16],
-			"#a678ff",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	prefixBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffb347", 0.55),
-			"#ff6f61",
-			"#ffb347",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	copyBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), "#00d5ff", 0.42),
-			"#00c96b",
-			"#2dd4ff",
-			payload.Foreground,
-		),
-		payload.Foreground,
-	)
-	modeBG := nonBlackStatusColor(blendHexColor(copyBG, payload.Background, 0.15), copyBG)
+	schemeKey := normalizeSchemeType(strings.TrimSpace(payload.Meta["scheme_type"]))
+	if schemeKey == "" {
+		schemeKey = normalizeSchemeType(strings.TrimSpace(payload.Meta["type"]))
+	}
+	if schemeKey == "" {
+		schemeKey = normalizeSchemeType(strings.TrimSpace(payload.Meta["auto_selected_scheme"]))
+	}
+	primaryRole := getRoleOr(payload.Roles, "primary", tmuxRamp[8])
+	secondaryRole := getRoleOr(payload.Roles, "secondary", tmuxRamp[10])
+	tertiaryRole := getRoleOr(payload.Roles, "tertiary", tmuxRamp[16])
+	schemeName := strings.TrimSpace(payload.Meta["scheme_type"])
+	if schemeName == "" {
+		schemeName = strings.TrimSpace(payload.Meta["type"])
+	}
+	if schemeName == "" {
+		schemeName = strings.TrimSpace(payload.Meta["auto_selected_scheme"])
+	}
+	tuning := statusSchemeTuningFor(schemeName, payload.EffectiveMode)
+	seedHue := hueFromHex(primaryRole)
+	if tuning.HueShiftA != 0 {
+		primaryRole = shiftHexHue(primaryRole, tuning.HueShiftA)
+	}
+	if tuning.HueShiftB != 0 {
+		secondaryRole = shiftHexHue(secondaryRole, tuning.HueShiftB)
+	}
+	if tuning.HueShiftC != 0 {
+		tertiaryRole = shiftHexHue(tertiaryRole, tuning.HueShiftC)
+	}
+	if schemeKey == "scheme-rainbow" || schemeKey == "scheme-fruit-salad" {
+		primaryRole = pushHueAway(primaryRole, seedHue, 44, 72)
+		secondaryRole = pushHueAway(secondaryRole, seedHue, 44, 72)
+		tertiaryRole = pushHueAway(tertiaryRole, seedHue, 44, 72)
+	}
+	if tuning.RoleDesat > 0 {
+		primaryRole = saturateHexColor(primaryRole, -tuning.RoleDesat)
+		secondaryRole = saturateHexColor(secondaryRole, -tuning.RoleDesat)
+		tertiaryRole = saturateHexColor(tertiaryRole, -tuning.RoleDesat)
+	}
+	primaryContainerRole := getRoleOr(payload.Roles, "primary_container", blendHexColor(primaryRole, payload.Background, 0.35))
+	secondaryContainerRole := getRoleOr(payload.Roles, "secondary_container", blendHexColor(secondaryRole, payload.Background, 0.35))
+	tertiaryContainerRole := getRoleOr(payload.Roles, "tertiary_container", blendHexColor(tertiaryRole, payload.Background, 0.35))
+	primaryContainerRole = saturateHexColor(blendHexColor(primaryContainerRole, primaryRole, 0.24), tuning.AccentSat*0.5)
+	secondaryContainerRole = saturateHexColor(blendHexColor(secondaryContainerRole, secondaryRole, 0.24), tuning.AccentSat*0.5)
+	tertiaryContainerRole = saturateHexColor(blendHexColor(tertiaryContainerRole, tertiaryRole, 0.24), tuning.AccentSat*0.5)
+	statusBaseBG := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container", blendHexColor(payload.Background, payload.Foreground, 0.12)), payload.Foreground)
+	statusElevatedBG := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_high", blendHexColor(statusBaseBG, payload.Foreground, 0.10)), payload.Foreground)
+	statusHighestBG := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_highest", blendHexColor(statusElevatedBG, payload.Foreground, 0.12)), payload.Foreground)
+	statusLift := tuning.Lift
+	statusAccentA := nonBlackStatusColor(saturateHexColor(blendHexColor(primaryContainerRole, statusElevatedBG, 0.18), tuning.AccentSat), payload.Foreground)
+	statusAccentB := nonBlackStatusColor(saturateHexColor(blendHexColor(secondaryContainerRole, statusElevatedBG, 0.20), tuning.AccentSat), payload.Foreground)
+	statusAccentC := nonBlackStatusColor(saturateHexColor(blendHexColor(tertiaryContainerRole, statusElevatedBG, 0.22), tuning.AccentSat), payload.Foreground)
+	statusAccentD := nonBlackStatusColor(saturateHexColor(blendHexColor(statusAccentA, statusAccentC, 0.52), 0.14), payload.Foreground)
+	sessionBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(primaryContainerRole, statusElevatedBG, 0.34), tuning.AccentSat+0.14), statusLift*1.05), payload.Foreground)
+	prefixBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(secondaryContainerRole, statusElevatedBG, 0.34), tuning.AccentSat+0.14), statusLift*1.05), payload.Foreground)
+	copyBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(tertiaryContainerRole, statusElevatedBG, 0.34), tuning.AccentSat+0.14), statusLift*1.05), payload.Foreground)
+	leftChipBGs := diversifyAdjacentStatusColors([]string{sessionBG, prefixBG, copyBG}, payload.Background, 24.0, 3.6)
+	sessionBG, prefixBG, copyBG = leftChipBGs[0], leftChipBGs[1], leftChipBGs[2]
+	modeBG := nonBlackStatusColor(blendHexColor(statusHighestBG, payload.Background, 0.35), statusElevatedBG)
 	modeFG := ensureReadableTextColor(modeBG, payload.Background, payload.Foreground)
-	matchBG := nonBlackStatusColor(blendHexColor(tmuxRamp[12], payload.Background, 0.25), modeBG)
+	matchBG := nonBlackStatusColor(blendHexColor(statusAccentA, statusHighestBG, 0.18), modeBG)
 	matchFG := ensureReadableTextColor(matchBG, payload.Background, payload.Foreground)
-	currentMatchBG := nonBlackStatusColor(tmuxRamp[15], matchBG)
+	currentMatchBG := nonBlackStatusColor(blendHexColor(statusAccentB, statusHighestBG, 0.16), matchBG)
 	currentMatchFG := ensureReadableTextColor(currentMatchBG, payload.Background, payload.Foreground)
-	windowInactiveBG := blendHexColor(tmuxRamp[4], payload.Background, 0.90)
-	windowInactiveFG := ensureReadableTextColor(windowInactiveBG, getRoleOr(payload.Roles, "on_surface_variant", payload.Foreground), payload.Foreground)
+	windowInactiveSeed := blendHexColor(
+		getRoleOr(payload.Roles, "surface_variant", statusBaseBG),
+		blendHexColor(tertiaryContainerRole, primaryContainerRole, 0.58),
+		0.62,
+	)
+	windowInactiveBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(statusBaseBG, windowInactiveSeed, 0.54), -0.34), statusLift*0.24), statusBaseBG)
+	windowInactiveBG = nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(windowInactiveBG, statusBaseBG, tuning.WindowInactive), -0.28), statusLift*0.14), statusBaseBG)
+	inactiveInkBase := saturateHexColor(
+		blendHexColor(
+			blendHexColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", getRoleOr(payload.Roles, "text_muted", payload.Foreground)), getRoleOr(payload.Roles, "primary_fixed_dim", getRoleOr(payload.Roles, "text_muted", payload.Foreground)), 0.56),
+			"#e4d8f7",
+			0.22,
+		),
+		-0.10,
+	)
+	inactiveInkSeed := saturateHexColor(
+		blendHexColor(
+			inactiveInkBase,
+			getRoleOr(payload.Roles, "text_muted", payload.Foreground),
+			0.54,
+		),
+		-0.18,
+	)
+	windowInactiveFG := nonBlackStatusColorForBG(
+		preferChromaticTextColor(
+			ensureReadableTextColor(windowInactiveBG, inactiveInkSeed, inactiveInkBase),
+			inactiveInkBase,
+			windowInactiveBG,
+			3.3,
+		),
+		inactiveInkBase,
+		windowInactiveBG,
+		3.3,
+	)
 	windowActiveBG := nonBlackStatusColor(
 		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "primary", tmuxRamp[8]), getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), 0.28),
+			blendHexColor(blendHexColor(statusAccentA, statusAccentD, tuning.WindowActive), windowInactiveBG, 0.22),
 			tmuxRamp[9],
 			tmuxRamp[7],
 			payload.Foreground,
 		),
 		payload.Foreground,
 	)
-	windowActiveFG := nonBlackStatusColor(ensureReadableTextColor(windowActiveBG, payload.Foreground, "#ffffff"), payload.Foreground)
-	attentionBG := nonBlackStatusColor(
-		avoidRedHue(
-			blendHexColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), "#ffd166", 0.35),
-			"#ff7a59",
-			"#ffcc4d",
-			payload.Foreground,
+	leftBandBGs := diversifyAdjacentStatusColors([]string{copyBG, windowInactiveBG, windowActiveBG}, payload.Background, 24.0, 3.6)
+	copyBG, windowInactiveBG, windowActiveBG = leftBandBGs[0], leftBandBGs[1], leftBandBGs[2]
+	activeInkSeed := saturateHexColor(
+		blendHexColor(
+			blendHexColor(getRoleOr(payload.Roles, "primary", payload.Foreground), getRoleOr(payload.Roles, "tertiary", payload.Foreground), 0.44),
+			"#111118",
+			0.38,
 		),
-		payload.Foreground,
+		0.24,
 	)
-	attentionFG := ensureReadableTextColor(attentionBG, payload.Background, payload.Foreground)
-	windowAccentFG := ensureReadableTextColor(windowActiveBG, payload.Background, payload.Foreground)
+	windowActiveFG := nonBlackStatusColorForBG(
+		preferChromaticTextColor(ensureReadableTextColor(windowActiveBG, activeInkSeed, getRoleOr(payload.Roles, "on_primary", payload.Foreground)), activeInkSeed, windowActiveBG, 4.6),
+		activeInkSeed,
+		windowActiveBG,
+		4.6,
+	)
+	alertColor := ensureReadableTextColor(payload.Background, "#ffd75f", payload.Foreground)
+	windowAccentFG := nonBlackStatusColorForBG(ensureReadableTextColor(windowActiveBG, blendHexColor(windowActiveFG, payload.Background, 0.36), payload.Foreground), windowActiveFG, windowActiveBG, 4.2)
+	windowInactiveFG = avoidExtremeTextInk(windowInactiveBG, windowInactiveFG, blendHexColor(payload.Foreground, payload.Background, 0.30))
+	windowActiveFG = avoidExtremeTextInk(windowActiveBG, windowActiveFG, blendHexColor(primaryRole, tertiaryRole, 0.50))
+	windowAccentFG = avoidExtremeTextInk(windowActiveBG, windowAccentFG, blendHexColor(windowActiveFG, primaryRole, 0.35))
 	paneBorderColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.62), payload.Foreground)
 	paneActiveBorderColor := nonBlackStatusColor(
 		ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "primary", tmuxRamp[8]), payload.Foreground),
@@ -894,58 +1693,193 @@ func renderTmuxBlock(payload computedPayload) string {
 	if statusTheme == "" {
 		statusTheme = "default"
 	}
+	statusPosition := normalizeStatusPosition(payload.Meta["status_position"])
+	statusLayout := normalizeStatusLayout(payload.Meta["status_layout"])
 	widgetBattery := onOffFlag(parseOnOffDefault(payload.Meta["widget_battery"], true))
 	widgetCPU := onOffFlag(parseOnOffDefault(payload.Meta["widget_cpu"], true))
 	widgetRAM := onOffFlag(parseOnOffDefault(payload.Meta["widget_ram"], true))
 	widgetWeather := onOffFlag(parseOnOffDefault(payload.Meta["widget_weather"], true))
-	surfaceHigh := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_high", windowInactiveBG), payload.Foreground)
-	surfaceHighest := nonBlackStatusColor(getRoleOr(payload.Roles, "surface_container_highest", blendHexColor(surfaceHigh, payload.Foreground, 0.10)), payload.Foreground)
-	primaryBase := nonBlackStatusColor(getRoleOr(payload.Roles, "primary", tmuxRamp[8]), payload.Foreground)
+	surfaceHighest := statusHighestBG
+	primaryBase := nonBlackStatusColor(primaryRole, payload.Foreground)
 	primaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_fixed", primaryBase), payload.Foreground)
 	primaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_fixed_dim", primaryFixed), payload.Foreground)
-	primaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_container", windowActiveBG), payload.Foreground)
-	secondaryBase := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary", tmuxRamp[10]), payload.Foreground)
+	secondaryBase := nonBlackStatusColor(secondaryRole, payload.Foreground)
 	secondaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary_fixed", secondaryBase), payload.Foreground)
 	secondaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary_fixed_dim", secondaryFixed), payload.Foreground)
-	secondaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "secondary_container", copyBG), payload.Foreground)
-	tertiaryBase := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary", tmuxRamp[17]), payload.Foreground)
+	tertiaryBase := nonBlackStatusColor(tertiaryRole, payload.Foreground)
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
-	tertiaryContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_container", sessionBG), payload.Foreground)
-	errorBase := nonBlackStatusColor(getRoleOr(payload.Roles, "error", payload.Colors[1]), payload.Foreground)
-	errorContainer := nonBlackStatusColor(getRoleOr(payload.Roles, "error_container", attentionBG), payload.Foreground)
-	weatherColor := ensureReadableTextColor(payload.Background, tertiaryFixedDim, payload.Foreground)
-	separatorColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48)), payload.Foreground)
-	chargingColor := ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground)
-	batteryColors := []string{
-		ensureReadableTextColor(payload.Background, errorBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, blendHexColor(errorBase, tertiaryFixedDim, 0.18), payload.Foreground),
-		ensureReadableTextColor(payload.Background, blendHexColor(tertiaryFixedDim, secondaryFixedDim, 0.28), payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+	weatherColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_primary", tertiaryFixedDim), payload.Foreground), tertiaryFixedDim, payload.Background, 4.2)
+	separatorBase := getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48))
+	separatorColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, separatorBase, payload.Foreground), separatorBase, payload.Background, 3.2)
+	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
+	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
+	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
+	chargingColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_secondary", secondaryFixed), payload.Foreground), secondaryFixed, payload.Background, 4.2)
+	batteryRamp := []string{
+		"#ff6b6b", // red
+		"#ff8f5a", // orange-red
+		"#ffb347", // orange
+		"#ffd166", // yellow
+		"#b7df6a", // yellow-green
+		"#49d17d", // green
+	}
+	batteryColors := make([]string, len(batteryRamp))
+	for i, c := range batteryRamp {
+		base := saturateHexColor(c, 0.16)
+		batteryColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, base, payload.Foreground), base, payload.Background, 3.6)
+	}
+	batteryLevelStops := []string{
+		getRoleOr(payload.Roles, "error", batteryColors[0]),
+		blendHexColor(getRoleOr(payload.Roles, "error", batteryColors[0]), getRoleOr(payload.Roles, "tertiary", batteryColors[2]), 0.45),
+		getRoleOr(payload.Roles, "tertiary", batteryColors[2]),
+		blendHexColor(getRoleOr(payload.Roles, "tertiary", batteryColors[2]), getRoleOr(payload.Roles, "secondary", batteryColors[4]), 0.50),
+		getRoleOr(payload.Roles, "secondary", batteryColors[4]),
+		blendHexColor(getRoleOr(payload.Roles, "secondary", batteryColors[4]), getRoleOr(payload.Roles, "primary", batteryColors[5]), 0.50),
+		getRoleOr(payload.Roles, "primary", batteryColors[5]),
+		blendHexColor(getRoleOr(payload.Roles, "primary", batteryColors[5]), getRoleOr(payload.Roles, "secondary_fixed", batteryColors[5]), 0.45),
+		getRoleOr(payload.Roles, "secondary_fixed", batteryColors[5]),
+		blendHexColor(getRoleOr(payload.Roles, "secondary_fixed", batteryColors[5]), getRoleOr(payload.Roles, "text_accent_secondary", batteryColors[5]), 0.40),
+	}
+	batteryLevelColors := make([]string, 10)
+	for i := range batteryLevelColors {
+		t := float64(i) / float64(len(batteryLevelColors)-1)
+		raw := saturateHexColor(sampleGradientColor(batteryLevelStops, t), 0.12)
+		fallbackIdx := i / 2
+		if fallbackIdx >= len(batteryColors) {
+			fallbackIdx = len(batteryColors) - 1
+		}
+		batteryLevelColors[i] = nonBlackStatusColor(raw, batteryColors[fallbackIdx])
+	}
+	batteryEmptyMuted := saturateHexColor(blendHexColor(surfaceHighest, getRoleOr(payload.Roles, "text_muted", surfaceHighest), 0.36), 0.10)
+	batteryFullColors := [4]string{}
+	batteryHalfColors := [4]string{}
+	batteryEmptyColors := [4]string{}
+	for i := 0; i < 4; i++ {
+		fullIdx := clampInt(2+(i*2), 1, 10) - 1
+		halfIdx := clampInt(1+(i*2), 1, 10) - 1
+		batteryFullColors[i] = batteryLevelColors[fullIdx]
+		batteryHalfColors[i] = batteryLevelColors[halfIdx]
+		batteryEmptyColors[i] = batteryEmptyMuted
 	}
 	cpuColors := []string{
-		ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryBase, payload.Foreground), primaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground), primaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryBase, payload.Foreground), secondaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground), tertiaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground), tertiaryFixed, payload.Background, 3.6),
 	}
 	ramColors := []string{
-		ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground),
-		ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground),
-		ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryBase, payload.Foreground), tertiaryBase, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, tertiaryFixed, payload.Foreground), tertiaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryFixedDim, payload.Foreground), primaryFixedDim, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, primaryFixed, payload.Foreground), primaryFixed, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixedDim, payload.Foreground), secondaryFixedDim, payload.Background, 3.6),
+		nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, secondaryFixed, payload.Foreground), secondaryFixed, payload.Background, 3.6),
 	}
-	batteryBG := nonBlackStatusColor(blendHexColor(errorContainer, surfaceHighest, 0.24), payload.Foreground)
-	cpuBG := nonBlackStatusColor(blendHexColor(secondaryContainer, surfaceHighest, 0.20), payload.Foreground)
-	ramBG := nonBlackStatusColor(blendHexColor(primaryContainer, surfaceHighest, 0.22), payload.Foreground)
-	weatherBG := nonBlackStatusColor(blendHexColor(tertiaryContainer, surfaceHighest, 0.18), payload.Foreground)
-	widgetAccentFG := ensureReadableTextColor(blendHexColor(blendHexColor(batteryBG, cpuBG, 0.5), blendHexColor(ramBG, weatherBG, 0.5), 0.5), payload.Foreground, payload.Background)
+	widgetBandBase := nonBlackStatusColor(
+		lightenHexColor(
+			saturateHexColor(
+				blendHexColor(statusElevatedBG, statusBaseBG, 0.50),
+				0.06,
+			),
+			statusLift*0.76,
+		),
+		payload.Foreground,
+	)
+	batteryBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(tertiaryContainerRole, widgetBandBase, tuning.WidgetMix*0.52), 0.14), statusLift*0.28), payload.Foreground)
+	chargingBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(primaryContainerRole, widgetBandBase, tuning.WidgetMix*0.50), 0.14), statusLift*0.28), payload.Foreground)
+	cpuBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(secondaryContainerRole, widgetBandBase, tuning.WidgetMix*0.52), 0.14), statusLift*0.28), payload.Foreground)
+	ramBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(blendHexColor(primaryContainerRole, tertiaryContainerRole, 0.44), widgetBandBase, tuning.WidgetMix*0.50), 0.14), statusLift*0.28), payload.Foreground)
+	weatherBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(blendHexColor(secondaryContainerRole, tertiaryContainerRole, 0.48), widgetBandBase, tuning.WidgetMix*0.50), 0.14), statusLift*0.28), payload.Foreground)
+	accentFGA := getRoleOr(payload.Roles, "text_accent_primary", primaryBase)
+	accentFGB := getRoleOr(payload.Roles, "text_accent_secondary", secondaryBase)
+	widgetAccentFG := bestTextColorForBackgrounds(
+		accentFGA,
+		ensureReadableTextColor(payload.Background, payload.Foreground, accentFGB),
+		3.8,
+		payload.Background, sessionBG, prefixBG, copyBG, batteryBG, chargingBG, cpuBG, ramBG, weatherBG,
+	)
+	sessionBG = ensureBackgroundContrastForText(sessionBG, widgetAccentFG, 3.8)
+	prefixBG = ensureBackgroundContrastForText(prefixBG, widgetAccentFG, 3.8)
+	copyBG = ensureBackgroundContrastForText(copyBG, widgetAccentFG, 3.8)
+	batteryBG = ensureBackgroundContrastForText(batteryBG, widgetAccentFG, 3.8)
+	chargingBG = ensureBackgroundContrastForText(chargingBG, widgetAccentFG, 3.8)
+	cpuBG = ensureBackgroundContrastForText(cpuBG, widgetAccentFG, 3.8)
+	ramBG = ensureBackgroundContrastForText(ramBG, widgetAccentFG, 3.8)
+	weatherBG = ensureBackgroundContrastForText(weatherBG, widgetAccentFG, 3.8)
+	sessionFG := nonBlackStatusColorForBG(
+		preferChromaticTextColor(
+			bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_tertiary_container", widgetAccentFG), widgetAccentFG, 4.5, sessionBG),
+			widgetAccentFG,
+			sessionBG,
+			4.5,
+		),
+		blendHexColor(widgetAccentFG, getRoleOr(payload.Roles, "primary", widgetAccentFG), 0.34),
+		sessionBG,
+		4.5,
+	)
+	prefixFG := nonBlackStatusColorForBG(
+		preferChromaticTextColor(
+			bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_error_container", widgetAccentFG), widgetAccentFG, 4.5, prefixBG),
+			widgetAccentFG,
+			prefixBG,
+			4.5,
+		),
+		blendHexColor(widgetAccentFG, getRoleOr(payload.Roles, "secondary", widgetAccentFG), 0.34),
+		prefixBG,
+		4.5,
+	)
+	copyFG := nonBlackStatusColorForBG(
+		preferChromaticTextColor(
+			bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_secondary_container", widgetAccentFG), widgetAccentFG, 4.5, copyBG),
+			widgetAccentFG,
+			copyBG,
+			4.5,
+		),
+		blendHexColor(widgetAccentFG, getRoleOr(payload.Roles, "tertiary", widgetAccentFG), 0.34),
+		copyBG,
+		4.5,
+	)
+	weatherColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_primary", weatherColor), payload.Foreground)
+	weatherColor = ensureReadableTextColor(weatherBG, weatherColor, payload.Foreground)
+	weatherColor = nonBlackStatusColorForBG(weatherColor, payload.Foreground, payload.Background, 4.2)
+	chargingColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_secondary", chargingColor), payload.Foreground)
+	chargingColor = ensureReadableTextColor(chargingBG, chargingColor, payload.Foreground)
+	chargingColor = nonBlackStatusColorForBG(chargingColor, payload.Foreground, payload.Background, 4.2)
+	for i, c := range batteryLevelColors {
+		batteryLevelColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.3)
+	}
+	batteryEmptyMuted = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, batteryEmptyMuted, sessionFG), batteryEmptyMuted, batteryBG, 3.1)
+	for i, c := range batteryColors {
+		batteryColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.4)
+	}
+	for i, c := range batteryFullColors {
+		batteryFullColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.4)
+	}
+	for i, c := range batteryHalfColors {
+		batteryHalfColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.4)
+	}
+	for i, c := range batteryEmptyColors {
+		batteryEmptyColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(batteryBG, c, sessionFG), c, batteryBG, 3.1)
+	}
+	for i, c := range cpuColors {
+		cpuColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(cpuBG, c, sessionFG), c, cpuBG, 3.4)
+	}
+	for i, c := range ramColors {
+		ramColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(ramBG, c, sessionFG), c, ramBG, 3.4)
+	}
+	rightChipBGs := diversifyAdjacentStatusColors([]string{batteryBG, chargingBG, cpuBG, ramBG, weatherBG}, payload.Background, 22.0, 3.6)
+	batteryBG, chargingBG, cpuBG, ramBG, weatherBG = rightChipBGs[0], rightChipBGs[1], rightChipBGs[2], rightChipBGs[3], rightChipBGs[4]
+	batteryBG = ensureBackgroundContrastForText(batteryBG, widgetAccentFG, 3.8)
+	chargingBG = ensureBackgroundContrastForText(chargingBG, widgetAccentFG, 3.8)
+	cpuBG = ensureBackgroundContrastForText(cpuBG, widgetAccentFG, 3.8)
+	ramBG = ensureBackgroundContrastForText(ramBG, widgetAccentFG, 3.8)
+	weatherBG = ensureBackgroundContrastForText(weatherBG, widgetAccentFG, 3.8)
+	batteryColors = diversifyAdjacentStatusColors(batteryColors, batteryBG, 12.0, 3.3)
+	cpuColors = diversifyAdjacentStatusColors(cpuColors, cpuBG, 14.0, 3.4)
+	ramColors = diversifyAdjacentStatusColors(ramColors, ramBG, 14.0, 3.4)
 	batteryBGSetting := batteryBG
 	if statusTheme == "default" {
 		batteryBGSetting = "default"
@@ -953,29 +1887,45 @@ func renderTmuxBlock(payload computedPayload) string {
 	edgeStyle := "rounded"
 	leftEdgeStyle := edgeStyle
 	bgRight := "on"
-	leftGap := " "
+	leftGap := ""
+	leftSessionPad := "none"
 	rightGap := "space"
 	windowStatusFormat := fmt.Sprintf(`#[fg=%s,bg=%s,nobold,noitalics,nounderscore] #I `, windowInactiveFG, windowInactiveBG)
 	windowStatusCurrentFormat := fmt.Sprintf(`#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W `, windowActiveFG, windowActiveBG)
 	switch statusTheme {
 	case "rounded":
 		// One outer rounded capsule for the full window list, with active window inset as its own pill.
-		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag, #I ,#I }#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
-		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W #{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
+		leftGap = " "
+		rightGap = "space"
+		windowStatusFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#[fg=%s,bg=%s,nobold,noitalics,nounderscore]#{?window_start_flag,#I ,#{?window_end_flag,#I,#I }}#{?window_end_flag,#[fg=%s]#[bg=default],}`, windowInactiveBG, windowInactiveFG, windowInactiveBG, windowInactiveBG)
+		windowStatusCurrentFormat = fmt.Sprintf(`#{?window_start_flag,#[fg=%s]#[bg=default],}#{?window_start_flag,,#[fg=%s]#[bg=%s]}#[fg=%s,bg=%s,bold,noitalics,nounderscore]#W#{?window_end_flag,#[fg=%s]#[bg=default],}#{?window_end_flag,,#[fg=%s]#[bg=%s]}#{?window_end_flag,,#[fg=%s]#[bg=%s] }`, windowActiveBG, windowActiveBG, windowInactiveBG, windowAccentFG, windowActiveBG, windowActiveBG, windowActiveBG, windowInactiveBG, windowInactiveFG, windowInactiveBG)
 	case "rectangle":
 		edgeStyle = "flat"
 		leftEdgeStyle = "flat"
-		leftGap = " "
+		leftGap = ""
 		rightGap = "none"
+		leftSessionPad = "space"
 	default:
 		leftEdgeStyle = "flat"
 		bgRight = "off"
+		leftSessionPad = "space"
 	}
-	statusRule := strings.Repeat("─", 260)
+	statusRuleThin := strings.Repeat("─", 260)
+	statusRuleThick := strings.Repeat("━", 260)
+	statusRuleExpr := fmt.Sprintf(`#{?client_prefix,#[fg=%s]%s,#{?pane_in_mode,#[fg=%s]%s,#{?session_alerts,#[fg=%s,bold]%s,#[fg=%s]%s}}}`, rulePrefixColor, statusRuleThick, ruleCopyColor, statusRuleThick, alertColor, statusRuleThick, ruleBaseColor, statusRuleThin)
+	statusRows := 2
+	statusFormatCommands := "set -g status-format[1] \"\"\nset -gu status-format[2]"
+	if statusLayout == "single-line" {
+		statusRows = 1
+		statusFormatCommands = "set -gu status-format[1]\nset -gu status-format[2]"
+	} else {
+		statusFormatCommands = fmt.Sprintf("set -g status-format[1] %q\nset -gu status-format[2]", statusRuleExpr)
+	}
 	return fmt.Sprintf(`# >>> MATUGEN THEME START >>>
 # Generated by %s/theme apply
 set -g status-style "bg=default,fg=%s"
-set -g status 2
+set -g status-position "%s"
+set -g status %d
 set -g @status-tmux-edge-style "%s"
 set -g @status-tmux-left-edge-style "%s"
 set -g @status-tmux-bg-left "on"
@@ -983,16 +1933,26 @@ set -g @status-tmux-bg-right "%s"
 set -g @status-tmux-left-bg-session "%s"
 set -g @status-tmux-left-bg-prefix "%s"
 set -g @status-tmux-left-bg-copy "%s"
-set -g status-left " #(\$HOME/.config/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
-set -g status-right "#(\$HOME/.config/tmux/run-system-widget all)#(\$HOME/.config/tmux/widget-weather)"
-set -g status-format[1] "#[fg=%s]%s"
+set -g @status-tmux-left-fg-session "%s"
+set -g @status-tmux-left-fg-prefix "%s"
+set -g @status-tmux-left-fg-copy "%s"
+set -g @status-tmux-left-session-pad "%s"
+set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
+set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\$HOME/.config/tooie/configs/tmux/widget-weather)"
+%s
 set -g window-status-separator ""
+set -g mouse on
+set -g base-index 1
+setw -g pane-base-index 1
+set -g renumber-windows on
 set -g window-status-format "%s"
 set -g window-status-current-format "%s"
-set -g window-status-activity-style "fg=%s,bg=%s,bold"
-set -g window-status-bell-style "fg=%s,bg=%s,bold"
-setw -g monitor-activity on
-set -g visual-activity on
+set -g window-status-activity-style "fg=%s,bold"
+set -g window-status-bell-style "fg=%s,bold"
+setw -g monitor-activity off
+set -g visual-activity off
+setw -g monitor-bell on
+set -g visual-bell off
 set -g pane-border-style "fg=%s"
 set -g pane-active-border-style "fg=%s"
 set -g message-style "bg=default,fg=%s"
@@ -1016,6 +1976,30 @@ set -g @status-tmux-color-battery-3 "%s"
 set -g @status-tmux-color-battery-4 "%s"
 set -g @status-tmux-color-battery-5 "%s"
 set -g @status-tmux-color-battery-6 "%s"
+set -g @status-tmux-color-battery-full-1 "%s"
+set -g @status-tmux-color-battery-full-2 "%s"
+set -g @status-tmux-color-battery-full-3 "%s"
+set -g @status-tmux-color-battery-full-4 "%s"
+set -g @status-tmux-color-battery-half-1 "%s"
+set -g @status-tmux-color-battery-half-2 "%s"
+set -g @status-tmux-color-battery-half-3 "%s"
+set -g @status-tmux-color-battery-half-4 "%s"
+set -g @status-tmux-color-battery-empty-1 "%s"
+set -g @status-tmux-color-battery-empty-2 "%s"
+set -g @status-tmux-color-battery-empty-3 "%s"
+set -g @status-tmux-color-battery-empty-4 "%s"
+set -g @status-tmux-battery-segments "%d"
+set -g @status-tmux-color-battery-empty-muted "%s"
+set -g @status-tmux-color-battery-level-1 "%s"
+set -g @status-tmux-color-battery-level-2 "%s"
+set -g @status-tmux-color-battery-level-3 "%s"
+set -g @status-tmux-color-battery-level-4 "%s"
+set -g @status-tmux-color-battery-level-5 "%s"
+set -g @status-tmux-color-battery-level-6 "%s"
+set -g @status-tmux-color-battery-level-7 "%s"
+set -g @status-tmux-color-battery-level-8 "%s"
+set -g @status-tmux-color-battery-level-9 "%s"
+set -g @status-tmux-color-battery-level-10 "%s"
 set -g @status-tmux-color-cpu-1 "%s"
 set -g @status-tmux-color-cpu-2 "%s"
 set -g @status-tmux-color-cpu-3 "%s"
@@ -1029,6 +2013,7 @@ set -g @status-tmux-color-ram-4 "%s"
 set -g @status-tmux-color-ram-5 "%s"
 set -g @status-tmux-color-ram-6 "%s"
 set -g @status-tmux-bg-battery "%s"
+set -g @status-tmux-bg-charging "%s"
 set -g @status-tmux-bg-cpu "%s"
 set -g @status-tmux-bg-ram "%s"
 set -g @status-tmux-bg-weather "%s"
@@ -1036,17 +2021,23 @@ set -g @status-tmux-fg-on-accent "%s"
 # <<< MATUGEN THEME END <<<
 `, tooieConfigDir,
 		payload.Foreground,
+		statusPosition,
+		statusRows,
 		edgeStyle,
 		leftEdgeStyle,
 		bgRight,
 		sessionBG,
 		prefixBG,
 		copyBG,
+		sessionFG,
+		prefixFG,
+		copyFG,
+		leftSessionPad,
 		leftGap,
-		separatorColor, statusRule,
+		statusFormatCommands,
 		windowStatusFormat,
 		windowStatusCurrentFormat,
-		attentionFG, attentionBG, attentionFG, attentionBG,
+		alertColor, alertColor,
 		paneBorderColor, paneActiveBorderColor, payload.Foreground, payload.Foreground,
 		modeBG, modeFG,
 		matchBG, matchFG,
@@ -1057,9 +2048,17 @@ set -g @status-tmux-fg-on-accent "%s"
 		rightGap,
 		separatorColor, weatherColor, chargingColor,
 		batteryColors[0], batteryColors[1], batteryColors[2], batteryColors[3], batteryColors[4], batteryColors[5],
+		batteryFullColors[0], batteryFullColors[1], batteryFullColors[2], batteryFullColors[3],
+		batteryHalfColors[0], batteryHalfColors[1], batteryHalfColors[2], batteryHalfColors[3],
+		batteryEmptyColors[0], batteryEmptyColors[1], batteryEmptyColors[2], batteryEmptyColors[3],
+		5,
+		batteryEmptyMuted,
+		batteryLevelColors[0], batteryLevelColors[1], batteryLevelColors[2], batteryLevelColors[3], batteryLevelColors[4],
+		batteryLevelColors[5], batteryLevelColors[6], batteryLevelColors[7], batteryLevelColors[8], batteryLevelColors[9],
 		cpuColors[0], cpuColors[1], cpuColors[2], cpuColors[3], cpuColors[4], cpuColors[5],
 		ramColors[0], ramColors[1], ramColors[2], ramColors[3], ramColors[4], ramColors[5],
 		batteryBGSetting,
+		chargingBG,
 		cpuBG,
 		ramBG,
 		weatherBG,
@@ -1069,10 +2068,10 @@ set -g @status-tmux-fg-on-accent "%s"
 
 func tmuxGradientRamp(payload computedPayload) []string {
 	anchors := []string{
-		getRoleOr(payload.Roles, "error", payload.Colors[1]),
-		getRoleOr(payload.Roles, "secondary", payload.Colors[6]),
 		getRoleOr(payload.Roles, "primary", payload.Colors[4]),
+		getRoleOr(payload.Roles, "secondary", payload.Colors[6]),
 		getRoleOr(payload.Roles, "tertiary", payload.Colors[5]),
+		getRoleOr(payload.Roles, "primary_fixed", payload.Colors[12]),
 		getRoleOr(payload.Roles, "secondary_fixed", payload.Colors[16]),
 	}
 	ramp := make([]string, 21)
@@ -1100,6 +2099,213 @@ func nonBlackStatusColor(hex, fallback string) string {
 	return hex
 }
 
+func nonBlackStatusColorForBG(hex, fallback, bg string, minContrast float64) string {
+	hex = normalizeHexColor(hex)
+	fallback = normalizeHexColor(fallback)
+	bg = normalizeHexColor(bg)
+	if !itheme.IsHexColor(bg) {
+		return nonBlackStatusColor(hex, fallback)
+	}
+	cand := nonBlackStatusColor(hex, fallback)
+	if contrastRatioHex(cand, bg) >= minContrast {
+		return cand
+	}
+	if contrastRatioHex(fallback, bg) >= minContrast {
+		return fallback
+	}
+	seed := fallback
+	if !itheme.IsHexColor(seed) {
+		seed = cand
+	}
+	best := seed
+	bestRatio := contrastRatioHex(seed, bg)
+	for i := 1; i <= 16; i++ {
+		t := float64(i) / 16.0
+		lighter := normalizeHexColor(blendHexColor(seed, "#ffffff", t))
+		lr := contrastRatioHex(lighter, bg)
+		if lr > bestRatio {
+			best = lighter
+			bestRatio = lr
+		}
+		if lr >= minContrast {
+			return lighter
+		}
+		darker := normalizeHexColor(blendHexColor(seed, "#000000", t))
+		dr := contrastRatioHex(darker, bg)
+		if dr > bestRatio {
+			best = darker
+			bestRatio = dr
+		}
+		if dr >= minContrast {
+			return darker
+		}
+	}
+	return best
+}
+
+func avoidExtremeTextInk(bg, fg, fallback string) string {
+	fg = normalizeHexColor(fg)
+	if !itheme.IsHexColor(fg) {
+		return normalizeHexColor(fallback)
+	}
+	l := relativeLuminanceHex(fg)
+	if l > 0.95 || l < 0.05 {
+		seed := normalizeHexColor(blendHexColor(fg, fallback, 0.26))
+		return ensureReadableTextColor(bg, seed, fg)
+	}
+	return fg
+}
+
+func bestTextColorForBackgrounds(preferred, fallback string, minContrast float64, backgrounds ...string) string {
+	candidates := []string{
+		preferred,
+		fallback,
+		blendHexColor(preferred, fallback, 0.35),
+		blendHexColor(preferred, fallback, 0.65),
+	}
+	for _, bg := range backgrounds {
+		candidates = append(candidates, ensureReadableTextColor(bg, preferred, fallback))
+	}
+	best := normalizeHexColor(fallback)
+	bestMin := -1.0
+	for _, cand := range candidates {
+		cand = normalizeHexColor(cand)
+		if !itheme.IsHexColor(cand) {
+			continue
+		}
+		minSeen := 99.0
+		validBG := 0
+		for _, bg := range backgrounds {
+			bg = normalizeHexColor(bg)
+			if !itheme.IsHexColor(bg) {
+				continue
+			}
+			validBG++
+			r := contrastRatioHex(cand, bg)
+			if r < minSeen {
+				minSeen = r
+			}
+		}
+		if validBG == 0 {
+			return cand
+		}
+		if minSeen > bestMin {
+			bestMin = minSeen
+			best = cand
+		}
+		if minSeen >= minContrast {
+			if !isExtremeNeutral(cand) {
+				return cand
+			}
+		}
+	}
+	if bestMin >= minContrast {
+		return best
+	}
+	// Last resort only: allow pure neutral colors if chromatic options cannot satisfy contrast.
+	for _, cand := range []string{"#f5f7ff", "#ffffff", "#111111", "#000000"} {
+		minSeen := 99.0
+		validBG := 0
+		for _, bg := range backgrounds {
+			bg = normalizeHexColor(bg)
+			if !itheme.IsHexColor(bg) {
+				continue
+			}
+			validBG++
+			r := contrastRatioHex(cand, bg)
+			if r < minSeen {
+				minSeen = r
+			}
+		}
+		if validBG == 0 || minSeen >= minContrast {
+			return cand
+		}
+		if minSeen > bestMin {
+			bestMin = minSeen
+			best = cand
+		}
+	}
+	return best
+}
+
+func preferChromaticTextColor(candidate, fallback, bg string, minContrast float64) string {
+	candidate = normalizeHexColor(candidate)
+	fallback = normalizeHexColor(fallback)
+	bg = normalizeHexColor(bg)
+	if !itheme.IsHexColor(candidate) {
+		candidate = fallback
+	}
+	if itheme.IsHexColor(candidate) && !isExtremeNeutral(candidate) && contrastRatioHex(candidate, bg) >= minContrast {
+		return candidate
+	}
+	alts := []string{
+		fallback,
+		saturateHexColor(fallback, 0.22),
+		saturateHexColor(blendHexColor(fallback, candidate, 0.5), 0.18),
+		blendHexColor(fallback, "#9bb8ff", 0.25),
+		blendHexColor(fallback, "#8fe5d5", 0.25),
+	}
+	for _, alt := range alts {
+		alt = normalizeHexColor(alt)
+		if !itheme.IsHexColor(alt) {
+			continue
+		}
+		if contrastRatioHex(alt, bg) >= minContrast && !isExtremeNeutral(alt) {
+			return alt
+		}
+	}
+	if contrastRatioHex(candidate, bg) >= minContrast {
+		return candidate
+	}
+	return ensureReadableTextColor(bg, fallback, candidate)
+}
+
+func isExtremeNeutral(hex string) bool {
+	hex = normalizeHexColor(hex)
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	delta := maxv - minv
+	luma := relativeLuminanceHex(hex)
+	return delta < 0.06 || luma <= 0.06 || luma >= 0.94
+}
+
+func ensureBackgroundContrastForText(bg, fg string, minContrast float64) string {
+	bg = normalizeHexColor(bg)
+	fg = normalizeHexColor(fg)
+	if !itheme.IsHexColor(bg) || !itheme.IsHexColor(fg) {
+		return bg
+	}
+	if contrastRatioHex(bg, fg) >= minContrast {
+		return bg
+	}
+	target := "#000000"
+	if relativeLuminanceHex(fg) < 0.5 {
+		target = "#ffffff"
+	}
+	best := bg
+	bestRatio := contrastRatioHex(bg, fg)
+	for i := 1; i <= 14; i++ {
+		t := 0.06 * float64(i)
+		if t > 0.92 {
+			t = 0.92
+		}
+		cand := normalizeHexColor(blendHexColor(bg, target, t))
+		r := contrastRatioHex(cand, fg)
+		if r > bestRatio {
+			best = cand
+			bestRatio = r
+		}
+		if r >= minContrast {
+			return cand
+		}
+	}
+	return best
+}
+
 func avoidRedHue(hex string, fallbacks ...string) string {
 	hex = normalizeHexColor(hex)
 	if itheme.IsHexColor(hex) {
@@ -1120,6 +2326,31 @@ func avoidRedHue(hex string, fallbacks ...string) string {
 	}
 	// Last resort: push toward a cool non-red accent.
 	return normalizeHexColor(blendHexColor("#56c8ff", "#9b7dff", 0.35))
+}
+
+func diversifyAdjacentStatusColors(colors []string, bg string, minHueDelta, minContrast float64) []string {
+	if len(colors) <= 1 {
+		return colors
+	}
+	out := append([]string{}, colors...)
+	// Keep diversification chromatic but avoid injecting green into adjacent chips.
+	seeds := []string{"#4f8dff", "#8d7dff", "#ffd166", "#ff8f5a", "#c07dff", "#2dd4ff"}
+	for i := 1; i < len(out); i++ {
+		prev := normalizeHexColor(out[i-1])
+		cur := normalizeHexColor(out[i])
+		if !itheme.IsHexColor(prev) || !itheme.IsHexColor(cur) {
+			continue
+		}
+		hueDelta := hueDistanceDegrees(hueFromHex(prev), hueFromHex(cur))
+		if hueDelta >= minHueDelta && contrastRatioHex(prev, cur) >= 1.10 {
+			continue
+		}
+		seed := seeds[i%len(seeds)]
+		cand := normalizeHexColor(blendHexColor(cur, seed, 0.26))
+		cand = nonBlackStatusColorForBG(ensureReadableTextColor(bg, cand, cur), cand, bg, minContrast)
+		out[i] = cand
+	}
+	return out
 }
 
 func maxInt(a, b int) int {
@@ -1148,35 +2379,158 @@ style error %s
 }
 
 func applyStarshipTheme(path string, payload computedPayload) error {
-	c := payload.Colors
-	kv := []struct{ sec, key, val string }{
-		{"character", "success_symbol", fmt.Sprintf("\"[◎](bold %s)\"", c[3])},
-		{"character", "error_symbol", fmt.Sprintf("\"[○](bold %s)\"", c[1])},
-		{"character", "vimcmd_symbol", fmt.Sprintf("\"[■](bold %s)\"", c[2])},
-		{"directory", "style", fmt.Sprintf("\"italic %s\"", c[4])},
-		{"directory", "repo_root_style", fmt.Sprintf("\"bold %s\"", c[2])},
-		{"cmd_duration", "format", fmt.Sprintf("\"[◄ $duration ](italic %s)\"", c[15])},
-		{"git_branch", "symbol", fmt.Sprintf("\"[△](bold italic %s)\"", c[4])},
-		{"git_branch", "style", fmt.Sprintf("\"italic %s\"", c[4])},
-		{"git_status", "style", fmt.Sprintf("\"bold italic %s\"", c[2])},
-		{"time", "style", fmt.Sprintf("\"italic %s\"", c[14])},
-		{"username", "style_user", fmt.Sprintf("\"%s bold italic\"", c[3])},
-		{"username", "style_root", fmt.Sprintf("\"%s bold italic\"", c[1])},
-		{"sudo", "style", fmt.Sprintf("\"bold italic %s\"", c[5])},
-		{"jobs", "style", fmt.Sprintf("\"%s\"", c[15])},
-		{"jobs", "symbol", fmt.Sprintf("\"[▶](%s italic)\"", c[4])},
+	prompt := normalizeStarshipPrompt(payload.Meta["starship_prompt"])
+	if err := writeStarshipTemplate(path, payload.Meta["starship_prompt"]); err != nil {
+		return err
 	}
-	for _, item := range kv {
-		if err := tomlUpsert(path, item.sec, item.key, item.val); err != nil {
-			return err
+	if err := sanitizeStarshipConfig(path); err != nil {
+		return err
+	}
+	c := payload.Colors
+	if prompt == "jetpack" {
+		kv := []struct{ sec, key, val string }{
+			{"character", "success_symbol", fmt.Sprintf("\"[◎](bold %s)\"", c[3])},
+			{"character", "error_symbol", fmt.Sprintf("\"[○](bold %s)\"", c[1])},
+			{"character", "vimcmd_symbol", fmt.Sprintf("\"[■](bold %s)\"", c[2])},
+			{"directory", "style", fmt.Sprintf("\"italic %s\"", c[4])},
+			{"directory", "repo_root_style", fmt.Sprintf("\"bold %s\"", c[2])},
+			{"cmd_duration", "format", fmt.Sprintf("\"[◄ $duration ](italic %s)\"", c[15])},
+			{"git_branch", "symbol", fmt.Sprintf("\"[△](bold italic %s)\"", c[4])},
+			{"git_branch", "style", fmt.Sprintf("\"italic %s\"", c[4])},
+			{"git_status", "style", fmt.Sprintf("\"bold italic %s\"", c[2])},
+			{"time", "style", fmt.Sprintf("\"italic %s\"", c[14])},
+			{"username", "style_user", fmt.Sprintf("\"%s bold italic\"", c[3])},
+			{"username", "style_root", fmt.Sprintf("\"%s bold italic\"", c[1])},
+			{"sudo", "style", fmt.Sprintf("\"bold italic %s\"", c[5])},
+			{"jobs", "style", fmt.Sprintf("\"%s\"", c[15])},
+			{"jobs", "symbol", fmt.Sprintf("\"[▶](%s italic)\"", c[4])},
+		}
+		for _, item := range kv {
+			if err := tomlUpsert(path, item.sec, item.key, item.val); err != nil {
+				return err
+			}
 		}
 	}
+	if prompt == "gruvbox" {
+		fancyInk := bestTextColorForBackgrounds(
+			"#1a1a1a",
+			payload.Foreground,
+			4.5,
+			c[5],               // color_orange
+			c[15],              // color_yellow
+			c[3],               // color_aqua
+			c[4],               // color_blue
+			c[14],              // color_bg3
+			payload.Background, // color_bg1
+		)
+		gruvboxPalette := []struct{ key, val string }{
+			{"color_fg0", fmt.Sprintf("%q", fancyInk)},
+			{"color_bg1", fmt.Sprintf("%q", payload.Background)},
+			{"color_bg3", fmt.Sprintf("%q", c[14])},
+			{"color_blue", fmt.Sprintf("%q", c[4])},
+			{"color_aqua", fmt.Sprintf("%q", c[3])},
+			{"color_green", fmt.Sprintf("%q", c[2])},
+			{"color_orange", fmt.Sprintf("%q", c[5])},
+			{"color_purple", fmt.Sprintf("%q", c[6])},
+			{"color_red", fmt.Sprintf("%q", c[1])},
+			{"color_yellow", fmt.Sprintf("%q", c[15])},
+		}
+		if err := tomlUpsert(path, "", "palette", "\"tooie_gruvbox\""); err != nil {
+			return err
+		}
+		for _, item := range gruvboxPalette {
+			if err := tomlUpsert(path, "palettes.tooie_gruvbox", item.key, item.val); err != nil {
+				return err
+			}
+		}
+	}
+	// Keep the active Starship default path in sync so themed prompts apply
+	// immediately even when the shell does not export STARSHIP_CONFIG.
+	userStarship := filepath.Join(homeDir, ".config", "starship.toml")
+	if err := os.MkdirAll(filepath.Dir(userStarship), 0o755); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(userStarship, raw, 0o644); err != nil {
+		return err
+	}
 	return nil
+}
+
+func writeStarshipTemplate(dstPath, prompt string) error {
+	srcPath, err := managedStarshipTemplatePath(prompt)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dstPath, raw, 0o644)
+}
+
+func starshipTemplateRelativePath(prompt string) string {
+	switch normalizeStarshipPrompt(prompt) {
+	case "pure":
+		return filepath.Join("assets", "defaults", ".config", "starship-pure.toml")
+	case "gruvbox":
+		return filepath.Join("assets", "defaults", ".config", "starship-gruvbox.toml")
+	default:
+		return filepath.Join("assets", "defaults", ".config", "starship.toml")
+	}
+}
+
+func sanitizeStarshipConfig(path string) error {
+	raw, _ := os.ReadFile(path)
+	if len(raw) == 0 {
+		return nil
+	}
+	lines := strings.Split(string(raw), "\n")
+	out := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		trim := strings.TrimSpace(ln)
+		// Remove legacy/bad root keys that can trigger parser warnings.
+		if strings.HasPrefix(trim, "battery ") || strings.HasPrefix(trim, "battery=") {
+			continue
+		}
+		out = append(out, ln)
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }
 
 func tomlUpsert(path, section, key, value string) error {
 	raw, _ := os.ReadFile(path)
 	lines := strings.Split(string(raw), "\n")
+	if strings.TrimSpace(section) == "" {
+		replaced := false
+		for i, ln := range lines {
+			trim := strings.TrimSpace(ln)
+			if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+				break
+			}
+			if strings.HasPrefix(trim, key+" ") || strings.HasPrefix(trim, key+"=") {
+				lines[i] = fmt.Sprintf("%s = %s", key, value)
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			insertAt := 0
+			for i, ln := range lines {
+				trim := strings.TrimSpace(ln)
+				if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+					insertAt = i
+					break
+				}
+				insertAt = i + 1
+			}
+			lines = append(lines[:insertAt], append([]string{fmt.Sprintf("%s = %s", key, value)}, lines[insertAt:]...)...)
+		}
+		return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	}
 	secHdr := "[" + section + "]"
 	secStart := -1
 	secEnd := len(lines)
@@ -1319,34 +2673,10 @@ func pruneOldBackups(root string, keep int) error {
 }
 
 func resolveWallpaperPath() (string, error) {
-	if _, err := os.Stat(defaultWall); err == nil {
-		return defaultWall, nil
+	if wall, ok := bestWallpaperPath(homeDir); ok {
+		return wall, nil
 	}
-	bgDir := filepath.Join(homeDir, ".termux", "background")
-	ents, err := os.ReadDir(bgDir)
-	if err != nil {
-		return "", fmt.Errorf("wallpaper not found at %s", defaultWall)
-	}
-	type fi struct {
-		name string
-		mod  time.Time
-	}
-	items := []fi{}
-	for _, e := range ents {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		items = append(items, fi{name: e.Name(), mod: info.ModTime()})
-	}
-	if len(items) == 0 {
-		return "", fmt.Errorf("no wallpapers found in %s", bgDir)
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].mod.After(items[j].mod) })
-	return filepath.Join(bgDir, items[0].name), nil
+	return "", fmt.Errorf("wallpaper not found; set TOOIE_WALLPAPER=/path/to/image or place one in ~/Pictures")
 }
 
 func resolveMatugen(given string) (string, error) {
@@ -1366,12 +2696,130 @@ func resolveMatugen(given string) (string, error) {
 	return "", fmt.Errorf("matugen binary not found. Set --matugen-bin or install matugen")
 }
 
-func runMatugenImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int) ([]byte, error) {
-	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex), "-j", "hex", "--dry-run"}
+func runMatugenImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
+	cacheKey := strings.Join([]string{
+		bin,
+		wallpaper,
+		mode,
+		schemeType,
+		fmt.Sprintf("%d", sourceColorIndex),
+		strings.TrimSpace(prefer),
+		strings.TrimSpace(fallbackColor),
+		strings.TrimSpace(resizeFilter),
+	}, "|")
+	if raw := loadMatugenCache(cacheKey); len(raw) > 0 {
+		return raw, nil
+	}
+	raw, err := runMatugenTemplateImage(bin, wallpaper, mode, schemeType, sourceColorIndex, prefer, fallbackColor, resizeFilter)
+	if err == nil && len(raw) > 0 {
+		storeMatugenCache(cacheKey, raw)
+		return raw, nil
+	}
+	legacyRaw, legacyErr := runMatugenDryRunImage(bin, wallpaper, mode, schemeType, sourceColorIndex, prefer, fallbackColor, resizeFilter)
+	if legacyErr != nil {
+		if err != nil {
+			return nil, fmt.Errorf("matugen template path failed: %v; dry-run fallback failed: %v", err, legacyErr)
+		}
+		return nil, legacyErr
+	}
+	storeMatugenCache(cacheKey, legacyRaw)
+	return legacyRaw, nil
+}
+
+func loadMatugenCache(key string) []byte {
+	matugenResultCache.mu.Lock()
+	defer matugenResultCache.mu.Unlock()
+	raw := matugenResultCache.m[key]
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
+}
+
+func storeMatugenCache(key string, raw []byte) {
+	matugenResultCache.mu.Lock()
+	defer matugenResultCache.mu.Unlock()
+	cp := make([]byte, len(raw))
+	copy(cp, raw)
+	matugenResultCache.m[key] = cp
+}
+
+func runMatugenTemplateImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
+	cfgFile, err := os.CreateTemp("", "tooie-matugen-*.toml")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = os.Remove(cfgFile.Name())
+	}()
+	tmpDir, err := os.MkdirTemp("", "tooie-matugen-roles-*")
+	if err != nil {
+		_ = cfgFile.Close()
+		return nil, err
+	}
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
+	templatePath := filepath.Join(tmpDir, "roles.json")
+	outputPath := filepath.Join(tmpDir, "roles-out.json")
+	if err := os.WriteFile(templatePath, []byte(matugenRolesTemplate), 0o644); err != nil {
+		_ = cfgFile.Close()
+		return nil, err
+	}
+	config := fmt.Sprintf("[config]\n\n[templates.roles]\ninput_path = '%s'\noutput_path = '%s'\n", templatePath, outputPath)
+	if _, err := cfgFile.WriteString(config); err != nil {
+		_ = cfgFile.Close()
+		return nil, err
+	}
+	if err := cfgFile.Close(); err != nil {
+		return nil, err
+	}
+	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType, "-c", cfgFile.Name()}
+	if sourceColorIndex >= 0 {
+		args = append(args, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex))
+	}
+	if strings.TrimSpace(prefer) != "" {
+		args = append(args, "--prefer", strings.TrimSpace(prefer))
+	}
+	if strings.TrimSpace(fallbackColor) != "" {
+		args = append(args, "--fallback-color", strings.TrimSpace(fallbackColor))
+	}
+	if strings.TrimSpace(resizeFilter) != "" {
+		args = append(args, "--resize-filter", strings.TrimSpace(resizeFilter))
+	}
+	cmd := exec.Command(bin, args...)
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		return nil, fmt.Errorf("%v (%s)", runErr, strings.TrimSpace(string(out)))
+	}
+	raw, readErr := os.ReadFile(outputPath)
+	if readErr != nil {
+		return nil, readErr
+	}
+	return bytes.TrimSpace(raw), nil
+}
+
+func runMatugenDryRunImage(bin, wallpaper, mode, schemeType string, sourceColorIndex int, prefer, fallbackColor, resizeFilter string) ([]byte, error) {
+	args := []string{"image", wallpaper, "-m", mode, "-t", schemeType}
+	if sourceColorIndex >= 0 {
+		args = append(args, "--source-color-index", fmt.Sprintf("%d", sourceColorIndex))
+	}
+	if strings.TrimSpace(prefer) != "" {
+		args = append(args, "--prefer", strings.TrimSpace(prefer))
+	}
+	if strings.TrimSpace(fallbackColor) != "" {
+		args = append(args, "--fallback-color", strings.TrimSpace(fallbackColor))
+	}
+	if strings.TrimSpace(resizeFilter) != "" {
+		args = append(args, "--resize-filter", strings.TrimSpace(resizeFilter))
+	}
+	args = append(args, "-j", "hex", "--dry-run")
 	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("matugen failed for mode=%s scheme=%s idx=%d: %v (%s)", mode, schemeType, sourceColorIndex, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("matugen failed for mode=%s scheme=%s idx=%d prefer=%s: %v (%s)", mode, schemeType, sourceColorIndex, strings.TrimSpace(prefer), err, strings.TrimSpace(string(out)))
 	}
 	return bytes.TrimSpace(out), nil
 }
@@ -1421,6 +2869,9 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 
 	lumas := make([]float64, 0, target*target)
 	sats := make([]float64, 0, target*target)
+	const hueBins = 24
+	hist := make([]float64, hueBins)
+	histTotal := 0.0
 	grid := make([][]float64, target)
 	for y := 0; y < target; y++ {
 		grid[y] = make([]float64, target)
@@ -1444,6 +2895,21 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 			sat := 0.0
 			if maxv > 0 {
 				sat = (maxv - minv) / maxv
+			}
+			if sat > 0.12 && l > 0.06 && l < 0.94 {
+				h := hueFromRGB(r8, g8, b8)
+				bin := int(math.Round((h / 360.0) * float64(hueBins-1)))
+				if bin < 0 {
+					bin = 0
+				}
+				if bin >= hueBins {
+					bin = hueBins - 1
+				}
+				weight := sat * (0.55 + 0.45*(1.0-math.Abs(l-0.5)*2.0))
+				if weight > 0 {
+					hist[bin] += weight
+					histTotal += weight
+				}
 			}
 			lumas = append(lumas, l)
 			sats = append(sats, sat)
@@ -1493,6 +2959,25 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 	if edgeWeight > 0 {
 		edgeLuma = edgeSum / edgeWeight
 	}
+	dominantHue := -1.0
+	secondaryHue := -1.0
+	hueStrength := 0.0
+	if histTotal > 0 {
+		top1, top2 := 0, 0
+		for i := 1; i < len(hist); i++ {
+			if hist[i] > hist[top1] {
+				top2 = top1
+				top1 = i
+			} else if i != top1 && hist[i] > hist[top2] {
+				top2 = i
+			}
+		}
+		dominantHue = (float64(top1) + 0.5) * (360.0 / float64(hueBins))
+		if hist[top2] > 0 && top2 != top1 {
+			secondaryHue = (float64(top2) + 0.5) * (360.0 / float64(hueBins))
+		}
+		hueStrength = clamp01(hist[top1] / histTotal)
+	}
 	return autoDecisionMetrics{
 		MeanLuma:         mean,
 		P10:              p10,
@@ -1503,6 +2988,9 @@ func wallpaperImageMetrics(path string) (autoDecisionMetrics, bool) {
 		EdgeWeightedLuma: edgeLuma,
 		MeanSat:          meanSat,
 		P90Sat:           p90Sat,
+		DominantHue:      dominantHue,
+		SecondaryHue:     secondaryHue,
+		HueStrength:      hueStrength,
 	}, true
 }
 
@@ -1551,6 +3039,10 @@ func hueFromHex(hex string) float64 {
 	rf := float64(r) / 255.0
 	gf := float64(g) / 255.0
 	bf := float64(b) / 255.0
+	return hueFromRGB(rf, gf, bf)
+}
+
+func hueFromRGB(rf, gf, bf float64) float64 {
 	maxv := math.Max(rf, math.Max(gf, bf))
 	minv := math.Min(rf, math.Min(gf, bf))
 	delta := maxv - minv
@@ -1571,4 +3063,137 @@ func hueFromHex(hex string) float64 {
 		h += 360.0
 	}
 	return h
+}
+
+func hueDistanceDegrees(a, b float64) float64 {
+	d := math.Abs(a - b)
+	if d > 180 {
+		d = 360 - d
+	}
+	return d
+}
+
+func hexToHSL(hex string) (float64, float64, float64) {
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	light := (maxv + minv) / 2.0
+	if maxv == minv {
+		return 0, 0, light
+	}
+	delta := maxv - minv
+	var sat float64
+	if light > 0.5 {
+		sat = delta / (2.0 - maxv - minv)
+	} else {
+		sat = delta / (maxv + minv)
+	}
+	return hueFromRGB(rf, gf, bf), sat, light
+}
+
+func shiftHexHue(hex string, shift float64) string {
+	h, s, l := hexToHSL(hex)
+	return hslToHex(h+shift, s, l)
+}
+
+func pushHueAway(hex string, avoidHue, minDelta, fallbackShift float64) string {
+	h, s, l := hexToHSL(hex)
+	if hueDistanceDegrees(h, avoidHue) >= minDelta {
+		return normalizeHexColor(hex)
+	}
+	if fallbackShift == 0 {
+		fallbackShift = 60
+	}
+	return hslToHex(h+fallbackShift, s, l)
+}
+
+func saturateHexColor(hex string, boost float64) string {
+	h, sat, light := hexToHSL(hex)
+	if sat == 0 {
+		return normalizeHexColor(hex)
+	}
+	if boost >= 0 {
+		sat = clamp01(sat + boost*(1.0-sat))
+	} else {
+		sat = clamp01(sat * (1.0 + boost))
+	}
+	return hslToHex(h, sat, light)
+}
+
+func lightenHexColor(hex string, amount float64) string {
+	amount = clamp01(amount)
+	r, g, b := parseHexColor(hex)
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+	maxv := math.Max(rf, math.Max(gf, bf))
+	minv := math.Min(rf, math.Min(gf, bf))
+	light := (maxv + minv) / 2.0
+	if maxv == minv {
+		return hslToHex(0, 0, clamp01(light+amount*(1.0-light)))
+	}
+	var sat float64
+	delta := maxv - minv
+	if light > 0.5 {
+		sat = delta / (2.0 - maxv - minv)
+	} else {
+		sat = delta / (maxv + minv)
+	}
+	h := hueFromHex(hex)
+	return hslToHex(h, sat, clamp01(light+amount*(1.0-light)))
+}
+
+func hslToHex(h, s, l float64) string {
+	h = math.Mod(h, 360.0)
+	if h < 0 {
+		h += 360.0
+	}
+	h /= 360.0
+	if s <= 0 {
+		v := int(math.Round(l * 255.0))
+		return fmt.Sprintf("#%02x%02x%02x", clampInt(v, 0, 255), clampInt(v, 0, 255), clampInt(v, 0, 255))
+	}
+	var q float64
+	if l < 0.5 {
+		q = l * (1 + s)
+	} else {
+		q = l + s - l*s
+	}
+	p := 2*l - q
+	r := hue2rgb(p, q, h+1.0/3.0)
+	g := hue2rgb(p, q, h)
+	b := hue2rgb(p, q, h-1.0/3.0)
+	return fmt.Sprintf("#%02x%02x%02x", clampInt(int(math.Round(r*255.0)), 0, 255), clampInt(int(math.Round(g*255.0)), 0, 255), clampInt(int(math.Round(b*255.0)), 0, 255))
+}
+
+func hue2rgb(p, q, t float64) float64 {
+	if t < 0 {
+		t += 1
+	}
+	if t > 1 {
+		t -= 1
+	}
+	if t < 1.0/6.0 {
+		return p + (q-p)*6*t
+	}
+	if t < 1.0/2.0 {
+		return q
+	}
+	if t < 2.0/3.0 {
+		return p + (q-p)*(2.0/3.0-t)*6
+	}
+	return p
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

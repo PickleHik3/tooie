@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,77 +56,159 @@ type backendAppMeta struct {
 
 func runCLI(args []string) int {
 	if len(args) == 0 {
-		return 0
+		return runUICommand(nil)
+	}
+	if len(args) == 1 {
+		if handled, launchUI, code := runSetWallpaperPathCommand(args[0]); handled {
+			if launchUI {
+				return runUICommand(nil)
+			}
+			return code
+		}
 	}
 	if showClock, showCal, ok := parseMiniModeFlags(args); ok {
 		return runMiniTUI(showClock, showCal)
 	}
 	switch strings.TrimSpace(args[0]) {
+	case "ui":
+		return runUICommand(args[1:])
+	case "setup":
+		return runSetupCommand(args[1:])
+	case "restart", "--restart", "-restart":
+		if !canUseLauncherRestart() {
+			fmt.Fprintln(os.Stderr, "tooie restart: only available when setup profile is termux-shizuku")
+			return 2
+		}
+		return runRestartCommand(args[1:])
+	case "doctor":
+		return runDoctorCommand(args[1:])
+	case "helper":
+		return runHelperCommand(args[1:])
 	case "--clock", "clock":
 		return runClockCommand(args[1:])
 	case "--cal", "cal":
 		return runCalCommand(args[1:])
-	case "--restart", "-restart", "restart":
-		return runRestartCommand(args[1:])
-	case "apps":
-		return runAppsCommand(args[1:])
 	case "theme":
 		return runThemeCommand(args[1:])
 	case "help", "--help", "-h":
 		printCLIUsage(os.Stdout)
 		return 0
 	default:
+		switch strings.TrimSpace(args[0]) {
+		case "apps", "exec", "launch", "icon", "icons":
+			fmt.Fprintf(os.Stderr, "tooie: %q was removed in v2 portable mode\n\n", args[0])
+			printCLIUsage(os.Stderr)
+			return 2
+		}
 		fmt.Fprintf(os.Stderr, "tooie: unknown command %q\n\n", args[0])
 		printCLIUsage(os.Stderr)
 		return 2
 	}
 }
 
+func runSetWallpaperPathCommand(raw string) (bool, bool, int) {
+	arg := strings.TrimSpace(raw)
+	if arg == "" || strings.HasPrefix(arg, "-") {
+		return false, false, 0
+	}
+	if !looksLikeImagePath(arg) {
+		return false, false, 0
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		home = homeDir
+	}
+	wall := canonicalWallpaperCandidate(arg)
+	if wall == "" {
+		fmt.Fprintf(os.Stderr, "tooie: wallpaper image not found: %s\n", arg)
+		return true, false, 1
+	}
+	rememberWallpaperPath(home, wall)
+	fmt.Printf("Set wallpaper base image: %s\n", wall)
+	return true, true, 0
+}
+
+func looksLikeImagePath(arg string) bool {
+	v := strings.ToLower(strings.TrimSpace(arg))
+	return strings.HasSuffix(v, ".png") ||
+		strings.HasSuffix(v, ".jpg") ||
+		strings.HasSuffix(v, ".jpeg") ||
+		strings.HasSuffix(v, ".webp") ||
+		strings.HasSuffix(v, ".bmp") ||
+		strings.HasSuffix(v, ".gif")
+}
+
 func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "Tooie")
-	fmt.Fprintln(w, "  Termux dashboard and utilities.")
+	fmt.Fprintln(w, "  Portable dashboard + tmux/theme setup for Termux and Linux.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage")
 	fmt.Fprintln(w, "  tooie")
-	fmt.Fprintln(w, "      Start the Tooie TUI.")
+	fmt.Fprintln(w, "      Start the Tooie dashboard UI.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie --clock")
-	fmt.Fprintln(w, "      Start low-CPU clock-only mode.")
+	fmt.Fprintln(w, "  tooie /path/to/wallpaper.jpg")
+	fmt.Fprintln(w, "      Set and persist the base wallpaper image used for theme generation, then open the TUI.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie --cal")
-	fmt.Fprintln(w, "      Start low-CPU calendar-only mode.")
+	fmt.Fprintln(w, "  tooie ui")
+	fmt.Fprintln(w, "      Start the Tooie dashboard UI.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie --clock --cal")
-	fmt.Fprintln(w, "      Start low-CPU clock + calendar mode.")
+	fmt.Fprintln(w, "  tooie setup")
+	fmt.Fprintln(w, "      Run interactive guided setup (recommended).")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie --help")
-	fmt.Fprintln(w, "      Show this help screen.")
+	fmt.Fprintln(w, "  tooie doctor")
+	fmt.Fprintln(w, "      Show environment capability checks and dependency guidance.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  tooie --restart")
-	fmt.Fprintln(w, "      Restart termux-launcher via launcherctl.")
+	fmt.Fprintln(w, "  tooie helper btop setup [--runner auto|rish|root|su|tsu|sudo]")
+	fmt.Fprintln(w, "      Configure optional btop helper integration.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Commands")
-	fmt.Fprintln(w, "  tooie apps [--refresh]")
-	fmt.Fprintln(w, "      List launchable Android apps. Use --refresh to bypass cache.")
+	fmt.Fprintln(w, "  tooie helper uninstall [--snapshot latest|<id>]")
+	fmt.Fprintln(w, "      Restore files from the last install snapshot.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie theme apply [flags]")
-	fmt.Fprintln(w, "      Apply theme using Go engine (compat flags from apply-material.sh).")
+	fmt.Fprintln(w, "      Apply theme using Go engine.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie theme compute [flags]")
 	fmt.Fprintln(w, "      Print computed theme payload as JSON.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Examples")
-	fmt.Fprintln(w, "  tooie apps")
-	fmt.Fprintln(w, "  tooie apps --refresh")
-	fmt.Fprintln(w, "  tooie --clock")
-	fmt.Fprintln(w, "  tooie --cal")
-	fmt.Fprintln(w, "  tooie --clock --cal")
+	fmt.Fprintln(w, "  tooie setup")
+	fmt.Fprintln(w, "  tooie doctor")
+	fmt.Fprintln(w, "  tooie ~/Pictures/Wallpapers/my-wallpaper.jpg")
+	if canUseLauncherRestart() {
+		fmt.Fprintln(w, "  tooie restart")
+	}
+	fmt.Fprintln(w, "  tooie theme apply --theme-source preset --preset-family tokyo-night --preset-variant night")
+	fmt.Fprintln(w, "  tooie helper btop setup --runner auto")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Paths")
-	fmt.Fprintln(w, "  Apps cache:   ~/.cache/tooie/apps.json")
-	fmt.Fprintln(w, "  Icon cache:   ~/.cache/tooie/icons/")
-	fmt.Fprintln(w, "  Pinned apps:  ~/.config/tooie/pinned-apps.json")
+	fmt.Fprintln(w, "  Settings:     ~/.config/tooie/settings.json")
+	fmt.Fprintln(w, "  Backup root:  ~/.config/tooie/backups/")
+	fmt.Fprintln(w, "  Helper stats: ~/.cache/tooie/helper-stats.json")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Notes")
-	fmt.Fprintln(w, "  App discovery merges local launcher activity resolution with Tooie backend metadata when available.")
+	fmt.Fprintln(w, "  Launcher-specific commands were removed in v2 portable mode.")
+}
+
+func runUICommand(args []string) int {
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "tooie ui: unexpected arguments")
+		return 2
+	}
+	p := tea.NewProgram(initialModel(), tea.WithAltScreen(), tea.WithFPS(60))
+	_, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tooie error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func canUseLauncherRestart() bool {
+	settings, ok := loadTooieSettings()
+	if !ok {
+		return false
+	}
+	return normalizePlatformProfile(settings.Platform.Profile) == "termux-shizuku"
 }
 
 func isRestartCLIArgs(args []string) bool {

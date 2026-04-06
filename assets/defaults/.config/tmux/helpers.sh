@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+#!/usr/bin/env sh
 
 get_tmux_option() {
   key="$1"
@@ -20,4 +20,15 @@ is_on() {
     1|on|true|yes|enabled) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+load_tmux_profile_env() {
+  profile_file="$1"
+  if [ ! -f "$profile_file" ]; then
+    return 0
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  . "$profile_file"
+  set +a
 }

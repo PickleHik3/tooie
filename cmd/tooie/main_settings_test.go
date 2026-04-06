@@ -1,12 +1,25 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func withTempTooieSettingsHome(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+}
 
 func TestPageNavigationTwoPages(t *testing.T) {
 	m := model{page: pageHome}
@@ -86,6 +99,97 @@ func TestPersistedShellSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStarshipPromptRowShowsNAWhenStarshipIsOff(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "off"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{starshipPrompt: defaultStarship}
+	_, state, _, _ := m.settingsRowView("starship_prompt")
+	if state != "N/A" {
+		t.Fatalf("starship prompt state = %q, want N/A", state)
+	}
+	if got := m.settingMenuChoices("starship_prompt"); len(got) != 0 {
+		t.Fatalf("starship prompt choices should be empty when starship is off")
+	}
+}
+
+func TestStarshipPromptRowListsHotSwapOptions(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "themed"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{starshipPrompt: "jetpack"}
+	label, state, _, _ := m.settingsRowView("starship_prompt")
+	if !strings.Contains(label, "Starship") {
+		t.Fatalf("starship label should be Starship, got %q", label)
+	}
+	if state != "Jetpack ▾" {
+		t.Fatalf("starship prompt state = %q, want %q", state, "Jetpack ▾")
+	}
+}
+
+func TestThemeSourceLabelIsLowercase(t *testing.T) {
+	m := model{}
+	label, _, _, _ := m.settingsRowView("theme_source")
+	if !strings.Contains(label, "source") {
+		t.Fatalf("theme source label should include lowercase source, got %q", label)
+	}
+	if settingMenuLabel("theme_source") != "source" {
+		t.Fatalf("settingMenuLabel(theme_source) = %q, want %q", settingMenuLabel("theme_source"), "source")
+	}
+}
+
+func TestSelectingStarshipPromptForcesThemedMode(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "default"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{}
+	m.applySettingChoice("starship_prompt", "jetpack")
+
+	out, ok := loadTooieSettings()
+	if !ok {
+		t.Fatalf("loadTooieSettings() expected ok")
+	}
+	if out.Modules.StarshipMode != "themed" {
+		t.Fatalf("StarshipMode = %q, want themed", out.Modules.StarshipMode)
+	}
+	if out.Starship.Prompt != "jetpack" {
+		t.Fatalf("Starship.Prompt = %q, want jetpack", out.Starship.Prompt)
+	}
+}
+
+func TestStarshipPromptMenuSelectionDoesNotAutoApply(t *testing.T) {
+	m := model{
+		page:              pageTheme,
+		themeSource:       defaultSource,
+		mode:              defaultMode,
+		profile:           defaultProfile,
+		statusTheme:       defaultStatusTheme,
+		settingMenuTarget: "starship_prompt",
+		settingMenuIndex:  1,
+		lastAppliedTheme:  "stale",
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if cmd != nil {
+		t.Fatalf("did not expect command after starship preset change")
+	}
+	if got.applying {
+		t.Fatalf("did not expect applying state after starship preset change")
+	}
+}
+
 func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	m := model{
 		page:          pageTheme,
@@ -109,11 +213,11 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	got := m.renderThemePage(96, 18)
 	for _, want := range []string{
 		"Colors",
-		"Status Bar",
-		"Battery: on",
-		"Weather: on",
-		"Apply (Shift+A)",
-		"#aeb1f4 primary",
+		"Misc",
+		"tmux status",
+		"Update Colors",
+		"Backups",
+		"Apply",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderThemePage() missing %q in:\n%s", want, got)
@@ -123,6 +227,128 @@ func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("renderThemePage() unexpectedly contains %q in:\n%s", unwanted, got)
 		}
+	}
+}
+
+func TestLowercaseAOpensApplyConfirmOnThemePage(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	got := next.(model)
+	if !got.showApplyConfirm {
+		t.Fatalf("expected lowercase a to open apply confirmation")
+	}
+}
+
+func TestUppercaseAStillAppliesImmediatelyOnThemePage(t *testing.T) {
+	m := model{
+		page:             pageTheme,
+		themeSource:      defaultSource,
+		mode:             defaultMode,
+		profile:          defaultProfile,
+		statusTheme:      defaultStatusTheme,
+		widgetBattery:    true,
+		widgetCPU:        true,
+		widgetRAM:        true,
+		widgetWeather:    true,
+		lastAppliedTheme: "stale",
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	got := next.(model)
+	if cmd == nil || !got.applying {
+		t.Fatalf("expected uppercase A to start immediate apply")
+	}
+}
+
+func TestKeybindsCycleThemeSettings(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "themed"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+		statusTheme: defaultStatusTheme,
+		starshipPrompt: "gruvbox",
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	got := next.(model)
+	if got.themeSource == defaultSource {
+		t.Fatalf("expected s to cycle source")
+	}
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	got = next.(model)
+	if got.statusTheme == defaultStatusTheme {
+		t.Fatalf("expected t to cycle tmux theme")
+	}
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	got = next.(model)
+	if got.starshipPrompt != "pure" {
+		t.Fatalf("expected S to cycle starship prompt, got %q", got.starshipPrompt)
+	}
+	if got.settingMenuTarget != "" {
+		t.Fatalf("expected S shortcut not to open menu, got target %q", got.settingMenuTarget)
+	}
+}
+
+func TestKeybindPCyclesPaletteType(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+		paletteType: defaultPaletteType,
+		statusTheme: defaultStatusTheme,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	got := next.(model)
+	if got.paletteType == defaultPaletteType {
+		t.Fatalf("expected p to cycle palette type")
+	}
+}
+
+func TestKeybindPDoesNotCyclePaletteTypeForPreset(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: "preset",
+		mode:        defaultMode,
+		profile:     defaultProfile,
+		paletteType: defaultPaletteType,
+		statusTheme: defaultStatusTheme,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	got := next.(model)
+	if got.paletteType != defaultPaletteType {
+		t.Fatalf("paletteType changed for preset source: %q", got.paletteType)
+	}
+}
+
+func TestSourceAndModeDoNotMutateProfileViaHotkeys(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     "source-3",
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	got := next.(model)
+	if got.profile != "source-3" {
+		t.Fatalf("profile changed after source hotkey: got %q", got.profile)
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got = next.(model)
+	if got.profile != "source-3" {
+		t.Fatalf("profile changed after mode hotkey: got %q", got.profile)
 	}
 }
 
@@ -173,7 +399,7 @@ func TestRequestThemeApplyStartsWhenChanged(t *testing.T) {
 	}
 }
 
-func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
+func TestToggleSegmentPersists(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
@@ -187,20 +413,15 @@ func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 		widgetRAM:     false,
 		widgetWeather: true,
 	}
-	for i, item := range m.mergedPageItems() {
-		if item.Target == "widget_battery" {
-			m.settingIndex = i
-			break
-		}
-	}
-
-	next, cmd := m.activateSetting()
-	got := next.(model)
-	if got.widgetBattery {
+	m.toggleSegment("widget_battery")
+	if m.widgetBattery {
 		t.Fatalf("widget battery should toggle off")
 	}
-	if cmd == nil {
-		t.Fatalf("activateSetting() should return sync command for widget toggle")
+	if m.switchAnimTarget != "widget_battery" {
+		t.Fatalf("switch animation target = %q, want widget_battery", m.switchAnimTarget)
+	}
+	if m.switchAnimProg != 0 {
+		t.Fatalf("switch animation progress = %v, want 0", m.switchAnimProg)
 	}
 
 	settings, ok := loadPersistedShellSettings()
@@ -209,5 +430,123 @@ func TestActivateSettingTogglesWidgetAndPersists(t *testing.T) {
 	}
 	if settings.WidgetBattery {
 		t.Fatalf("persisted battery toggle should be off, got %#v", settings)
+	}
+}
+
+func TestTwoColumnWidthsBiasesLeftColumn(t *testing.T) {
+	left, right := twoColumnWidths(96)
+	if left <= 0 || right <= 0 {
+		t.Fatalf("twoColumnWidths() returned invalid widths: left=%d right=%d", left, right)
+	}
+	if left <= right {
+		t.Fatalf("expected left column wider than right: left=%d right=%d", left, right)
+	}
+	if left-right < 2 {
+		t.Fatalf("expected left column to be at least 2 chars wider: left=%d right=%d", left, right)
+	}
+}
+
+func TestWallpaperBlockFallbackUsesInsetSpacing(t *testing.T) {
+	m := model{}
+	got := m.wallpaperBlock(8, 24)
+	lines := strings.Split(got, "\n")
+	foundContent := false
+	for i, line := range lines {
+		if i < 2 {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		foundContent = true
+		if !strings.HasPrefix(line, " ") {
+			t.Fatalf("wallpaperBlock() content line missing left inset padding: %q", line)
+		}
+		break
+	}
+	if !foundContent {
+		t.Fatalf("wallpaperBlock() did not render any content lines:\n%s", got)
+	}
+}
+
+func TestAdvanceSwitchAnimationClearsTarget(t *testing.T) {
+	m := model{}
+	m.startSwitchAnimation("widget_cpu", false, true)
+	if m.switchAnimTarget != "widget_cpu" {
+		t.Fatalf("switchAnimTarget = %q", m.switchAnimTarget)
+	}
+	m.advanceSwitchAnimation(0.25)
+	if m.switchAnimTarget != "" {
+		t.Fatalf("switch animation should finish and clear target, got %q", m.switchAnimTarget)
+	}
+	if m.switchAnimProg != 1 {
+		t.Fatalf("switchAnimProg = %v, want 1", m.switchAnimProg)
+	}
+}
+
+func TestEnterOnListSettingOpensDropdown(t *testing.T) {
+	m := model{
+		page:        pageTheme,
+		themeSource: defaultSource,
+		mode:        defaultMode,
+		profile:     defaultProfile,
+	}
+	for i, item := range m.mergedPageItems() {
+		if item.Target == "theme_source" {
+			m.settingIndex = i
+			break
+		}
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.settingMenuTarget != "theme_source" {
+		t.Fatalf("settingMenuTarget = %q, want theme_source", got.settingMenuTarget)
+	}
+}
+
+func TestDropdownEnterAppliesSelection(t *testing.T) {
+	m := model{
+		page:              pageTheme,
+		themeSource:       "wallpaper",
+		settingMenuTarget: "theme_source",
+		settingMenuIndex:  1,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.themeSource != "preset" {
+		t.Fatalf("themeSource = %q, want preset", got.themeSource)
+	}
+	if got.settingMenuTarget != "" {
+		t.Fatalf("expected dropdown to close after selection")
+	}
+}
+
+func TestDropdownSourceAndModeDoNotMutateProfile(t *testing.T) {
+	m := model{
+		page:              pageTheme,
+		themeSource:       "wallpaper",
+		mode:              "dark",
+		profile:           "source-3",
+		settingMenuTarget: "theme_source",
+		settingMenuIndex:  1,
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.themeSource != "preset" {
+		t.Fatalf("themeSource = %q, want preset", got.themeSource)
+	}
+	if got.profile != "source-3" {
+		t.Fatalf("profile changed after source dropdown: got %q", got.profile)
+	}
+
+	got.settingMenuTarget = "mode"
+	got.settingMenuIndex = 0
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(model)
+	if got.mode != "dark" {
+		t.Fatalf("mode = %q, want dark", got.mode)
+	}
+	if got.profile != "source-3" {
+		t.Fatalf("profile changed after mode dropdown: got %q", got.profile)
 	}
 }

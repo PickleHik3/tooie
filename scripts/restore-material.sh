@@ -1,13 +1,13 @@
-#!/data/data/com.termux/files/usr/bin/sh
+#!/usr/bin/env sh
 set -eu
 
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
 TOOIE_DIR="$HOME_DIR/.config/tooie"
 BACKUP_ROOT="$TOOIE_DIR/backups"
-TERMUX_COLORS="$HOME_DIR/.termux/colors.properties"
-TMUX_CONF="$HOME_DIR/.tmux.conf"
-PEACLOCK_CONFIG="$HOME_DIR/.config/peaclock/config"
-STARSHIP_CONFIG="$HOME_DIR/.config/starship.toml"
+TERMUX_COLORS="$TOOIE_DIR/configs/termux/colors.properties"
+TMUX_CONF="$TOOIE_DIR/configs/tmux/tmux.conf"
+PEACLOCK_CONFIG="$TOOIE_DIR/configs/peaclock/config"
+STARSHIP_CONFIG="$TOOIE_DIR/configs/starship.toml"
 
 usage() {
   cat <<'EOF'
@@ -84,7 +84,7 @@ if command -v termux-reload-settings >/dev/null 2>&1; then
   termux-reload-settings || true
 fi
 if command -v tmux >/dev/null 2>&1; then
-  tmux source-file "$TMUX_CONF" 2>/dev/null || true
+  tmux source-file "$HOME_DIR/.tmux.conf" 2>/dev/null || true
 fi
 
 echo "Restored backup: $BACKUP_ID"

@@ -18,6 +18,8 @@ const (
 type Options struct {
 	Source         Source
 	Mode           string
+	Platform       string
+	StyleFamily    string
 	Profile        string
 	StatusPalette  string
 	TextOverride   string
@@ -54,9 +56,27 @@ type matugenJSON struct {
 }
 
 func ParseMatugenColors(raw []byte) (map[string]string, error) {
+	return ParseMatugenColorsForMode(raw, "dark")
+}
+
+func ParseMatugenColorsForMode(raw []byte, mode string) (map[string]string, error) {
+	mode = canonicalMode(mode)
+	if mode == "" {
+		mode = "dark"
+	}
+	if out, ok := parseLegacyMatugenColors(raw); ok {
+		return out, nil
+	}
+	if out, ok := parseTemplateMatugenColors(raw, mode); ok {
+		return out, nil
+	}
+	return nil, fmt.Errorf("matugen output had no usable colors")
+}
+
+func parseLegacyMatugenColors(raw []byte) (map[string]string, bool) {
 	var data matugenJSON
 	if err := json.Unmarshal(raw, &data); err != nil {
-		return nil, err
+		return nil, false
 	}
 	out := map[string]string{}
 	for k, v := range data.Colors {
@@ -65,10 +85,28 @@ func ParseMatugenColors(raw []byte) (map[string]string, error) {
 			out[k] = NormalizeHex(c)
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("matugen output had no usable colors")
+	return out, len(out) > 0
+}
+
+func parseTemplateMatugenColors(raw []byte, mode string) (map[string]string, bool) {
+	var data struct {
+		Colors map[string]map[string]string `json:"colors"`
 	}
-	return out, nil
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, false
+	}
+	roleMap := data.Colors[mode]
+	if len(roleMap) == 0 {
+		return nil, false
+	}
+	out := map[string]string{}
+	for k, v := range roleMap {
+		c := strings.TrimSpace(v)
+		if IsHexColor(c) {
+			out[k] = NormalizeHex(c)
+		}
+	}
+	return out, len(out) > 0
 }
 
 func BuildPresetRoles(family, variant string) (map[string]string, string, error) {
@@ -123,31 +161,59 @@ func BuildRolesJSON(roles map[string]string) ([]byte, error) {
 func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	roles := normalizeRoleMap(rolesInput)
 	mode := canonicalMode(opts.Mode)
-	profile := canonicalProfile(opts.Profile)
 	if mode == "" {
 		mode = "dark"
 	}
-	if opts.Source == SourceWallpaper {
-		roles = applyProfile(roles, profile, mode)
+	platform := strings.ToLower(strings.TrimSpace(opts.Platform))
+	if platform != "linux" {
+		platform = "termux"
+	}
+
+	primaryTarget := 4.0
+	secondaryTarget := 4.0
+	tertiaryTarget := 4.0
+	errorTarget := 4.0
+	fgTarget := 7.0
+	accentTarget := 4.4
+	textPrimaryTarget := 4.8
+	textMutedTarget := 3.8
+	widgetTarget := 3.6
+	if mode == "dark" {
+		accentTarget = 4.6
+	}
+	if platform == "termux" {
+		primaryTarget = 4.4
+		secondaryTarget = 4.4
+		tertiaryTarget = 4.4
+		errorTarget = 4.4
+		fgTarget = 9.0
+		if accentTarget < 4.8 {
+			accentTarget = 4.8
+		}
+		textPrimaryTarget = 5.2
+		textMutedTarget = 4.2
+		widgetTarget = 4.0
 	}
 
 	bg := role(roles, "background", tern(mode == "dark", "#1a1b26", "#eff1f5"))
 	surface := role(roles, "surface_container", blendHex(bg, tern(mode == "dark", "#000000", "#ffffff"), 0.12))
-	primary := ensureContrast(role(roles, "primary", "#7aa2f7"), bg, 4.0)
-	secondary := ensureContrast(role(roles, "secondary", "#7dcfff"), bg, 4.0)
-	tertiary := ensureContrast(role(roles, "tertiary", "#bb9af7"), bg, 4.0)
-	errorC := ensureContrast(role(roles, "error", "#ff5f5f"), bg, 4.0)
-	fg := ensureContrast(role(roles, "on_background", role(roles, "on_surface", tern(mode == "dark", "#c0caf5", "#4c4f69"))), bg, 7.0)
+	primary := ensureContrast(role(roles, "primary", "#7aa2f7"), bg, primaryTarget)
+	secondary := ensureContrast(role(roles, "secondary", "#7dcfff"), bg, secondaryTarget)
+	tertiary := ensureContrast(role(roles, "tertiary", "#bb9af7"), bg, tertiaryTarget)
+	errorC := ensureContrast(role(roles, "error", "#ff5f5f"), bg, errorTarget)
+	lightTextAnchor := NormalizeHex(blendHex(blendHex(primary, secondary, 0.50), "#f6f3ff", 0.70))
+	darkTextAnchor := NormalizeHex(blendHex(blendHex(primary, tertiary, 0.55), "#131522", 0.82))
+	fg := ensureContrast(role(roles, "on_background", role(roles, "on_surface", tern(mode == "dark", "#c0caf5", "#4c4f69"))), bg, fgTarget)
 	muted := ensureContrast(role(roles, "on_surface_variant", blendHex(fg, bg, 0.38)), bg, 4.5)
 	outline := ensureContrast(role(roles, "outline", blendHex(fg, bg, 0.54)), bg, 3.2)
 	cursor := ensureContrast(primary, bg, 4.5)
 
 	guard := role(roles, tern(mode == "dark", "surface_bright", "surface_dim"), blendHex(bg, tern(mode == "dark", "#ffffff", "#000000"), 0.18))
-	fg = ensureDualContrast(fg, bg, guard, 7.0)
+	fg = ensureDualContrastAnchored(fg, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	cursor = ensureDualContrast(cursor, bg, guard, 4.5)
 
 	if IsHexColor(opts.TextOverride) {
-		fg = ensureDualContrast(opts.TextOverride, bg, guard, 7.0)
+		fg = ensureDualContrastAnchored(opts.TextOverride, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	}
 	if IsHexColor(opts.CursorOverride) {
 		cursor = ensureDualContrast(opts.CursorOverride, bg, guard, 4.5)
@@ -156,21 +222,42 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	bgLuma := relLuma(bg)
 	fgLuma := relLuma(fg)
 	if mode == "dark" && fgLuma <= bgLuma {
-		fg = ensureDualContrast("#f2f2f8", bg, guard, 7.0)
+		fg = ensureDualContrastAnchored(lightTextAnchor, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	}
 	if mode == "light" && fgLuma >= bgLuma {
-		fg = ensureDualContrast("#111118", bg, guard, 7.0)
+		fg = ensureDualContrastAnchored(darkTextAnchor, bg, guard, fgTarget, lightTextAnchor, darkTextAnchor)
 	}
+	lockedANSI := map[int]bool{}
 
 	c := map[int]string{}
 	c[0] = NormalizeHex(surface)
 	c[1] = ensureContrast(errorC, bg, 3.6)
-	c[2] = ensureContrast(blendHex(secondary, "#46d37b", 0.45), bg, 3.6)
-	c[3] = ensureContrast(blendHex(tertiary, "#ffd75f", 0.55), bg, 3.6)
+	c[2] = ensureContrast(role(roles, "secondary_fixed", secondary), bg, 3.6)
+	c[3] = ensureContrast(role(roles, "tertiary_fixed", tertiary), bg, 3.6)
 	c[4] = ensureContrast(primary, bg, 3.6)
 	c[5] = ensureContrast(tertiary, bg, 3.6)
 	c[6] = ensureContrast(secondary, bg, 3.6)
-	c[7] = ensureContrast(role(roles, "on_surface", fg), bg, 6.0)
+	c[7] = ensureDualContrastAnchored(blendHex(role(roles, "on_surface", fg), blendHex(primary, secondary, 0.52), ternf(mode == "dark", 0.14, 0.08)), bg, guard, 6.0, lightTextAnchor, darkTextAnchor)
+	if opts.Source == SourceWallpaper {
+		bgTone := relLuma(bg)
+		switch {
+		case bgTone < 0.22:
+			// Dark scenes: prefer softer pastel-like ANSI accents that still exceed contrast thresholds.
+			for i := 1; i <= 6; i++ {
+				c[i] = ensureContrast(blendHex(c[i], fg, 0.16), bg, 3.9)
+			}
+		case bgTone > 0.58:
+			// Bright scenes: push accents deeper to avoid washed-out terminal text against light backgrounds.
+			for i := 1; i <= 6; i++ {
+				c[i] = ensureContrast(blendHex(c[i], "#000000", 0.20), bg, 4.0)
+			}
+		default:
+			// Mid-tone scenes: keep accents vivid but controlled.
+			for i := 1; i <= 6; i++ {
+				c[i] = ensureContrast(blendHex(c[i], fg, 0.08), bg, 3.8)
+			}
+		}
+	}
 
 	brightMix := "#ffffff"
 	brightT := 0.24
@@ -178,14 +265,14 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		brightMix = "#000000"
 		brightT = 0.22
 	}
-	c[8] = ensureContrast(role(roles, "surface_container_high", blendHex(c[0], brightMix, 0.14)), bg, 1.3)
+	c[8] = ensureContrast(blendHex(role(roles, "surface_container_high", blendHex(c[0], brightMix, 0.14)), blendHex(secondary, tertiary, 0.48), ternf(mode == "dark", 0.08, 0.06)), bg, 3.1)
 	for i := 1; i <= 5; i++ {
-		c[8+i] = ensureContrast(blendHex(c[i], brightMix, brightT), bg, 4.0)
+		c[8+i] = ensureContrast(blendHex(c[i], brightMix, brightT), bg, 4.5)
 	}
-	c[14] = outline
-	c[15] = muted
-	c[16] = ensureContrast(role(roles, "secondary_fixed", blendHex(c[2], c[6], 0.50)), bg, 3.2)
-	c[17] = ensureContrast(role(roles, "tertiary_fixed", blendHex(c[5], c[4], 0.40)), bg, 3.2)
+	c[14] = ensureContrast(outline, bg, 3.4)
+	c[15] = ensureDualContrastAnchored(blendHex(muted, blendHex(secondary, tertiary, 0.45), ternf(mode == "dark", 0.20, 0.13)), bg, guard, 4.8, lightTextAnchor, darkTextAnchor)
+	c[16] = ensureContrast(role(roles, "secondary_fixed", blendHex(c[2], c[6], 0.50)), bg, 3.8)
+	c[17] = ensureContrast(role(roles, "tertiary_fixed", blendHex(c[5], c[4], 0.40)), bg, 3.8)
 	c[18] = role(roles, "surface_dim", blendHex(bg, "#000000", ternf(mode == "dark", 0.10, 0.06)))
 	c[19] = role(roles, "surface_bright", blendHex(bg, "#ffffff", ternf(mode == "dark", 0.12, 0.06)))
 	c[20] = role(roles, "surface_variant", blendHex(c[0], c[15], 0.26))
@@ -194,33 +281,83 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	if opts.AnsiOverrides != nil {
 		if v := opts.AnsiOverrides["red"]; IsHexColor(v) {
 			c[1], c[9] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[1] = true
 		}
 		if v := opts.AnsiOverrides["green"]; IsHexColor(v) {
 			c[2], c[10] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[2] = true
 		}
 		if v := opts.AnsiOverrides["yellow"]; IsHexColor(v) {
 			c[3], c[11] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[3] = true
 		}
 		if v := opts.AnsiOverrides["blue"]; IsHexColor(v) {
 			c[4], c[12] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[4] = true
 		}
 		if v := opts.AnsiOverrides["magenta"]; IsHexColor(v) {
 			c[5], c[13] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[5] = true
 		}
 		if v := opts.AnsiOverrides["cyan"]; IsHexColor(v) {
 			c[6], c[14] = NormalizeHex(v), NormalizeHex(v)
+			lockedANSI[6] = true
+		}
+	}
+	guardedMeta := map[string]string{}
+	if !lockedANSI[1] {
+		c[1] = ensureDualContrast(c[1], bg, guard, accentTarget)
+		c[9] = ensureDualContrast(blendHex(c[1], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[2] {
+		before := NormalizeHex(c[2])
+		c[2] = guardReadableAccent(c[2], bg, guard, accentTarget, "#6fd5cf")
+		c[10] = ensureDualContrast(blendHex(c[2], brightMix, brightT), bg, guard, 4.5)
+		if before != c[2] {
+			guardedMeta["ansi_guard_green"] = "adjusted"
+		}
+	}
+	if !lockedANSI[3] {
+		c[3] = ensureDualContrast(blendHex(c[3], "#ffd97a", 0.10), bg, guard, accentTarget)
+		c[11] = ensureDualContrast(blendHex(c[3], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[4] {
+		c[4] = ensureDualContrast(c[4], bg, guard, accentTarget)
+		c[12] = ensureDualContrast(blendHex(c[4], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[5] {
+		c[5] = ensureDualContrast(c[5], bg, guard, accentTarget)
+		c[13] = ensureDualContrast(blendHex(c[5], brightMix, brightT), bg, guard, 4.5)
+	}
+	if !lockedANSI[6] {
+		before := NormalizeHex(c[6])
+		c[6] = guardReadableAccent(c[6], bg, guard, accentTarget, "#77d8f2")
+		if !lockedANSI[6] {
+			c[14] = ensureDualContrast(c[14], bg, guard, 3.4)
+		}
+		if before != c[6] {
+			guardedMeta["ansi_guard_cyan"] = "adjusted"
 		}
 	}
 
-	stateRed := ensureContrast(c[1], bg, 3.6)
-	stateOrange := ensureContrast(blendHex(c[1], c[3], 0.58), bg, 3.6)
-	stateYellow := ensureContrast(c[3], bg, 3.6)
-	stateGreen := ensureContrast(c[2], bg, 3.6)
-	stateMint := ensureContrast(blendHex(c[2], c[6], 0.42), bg, 3.6)
-	stateBlue := ensureContrast(c[4], bg, 3.6)
-	stateTeal := ensureContrast(c[6], bg, 3.6)
-	stateViolet := ensureContrast(blendHex(c[4], c[5], 0.55), bg, 3.6)
-	stateMagenta := ensureContrast(c[5], bg, 3.6)
+	textPrimary := ensureDualContrastAnchored(blendHex(fg, blendHex(primary, secondary, 0.55), ternf(mode == "dark", 0.10, 0.06)), bg, guard, textPrimaryTarget, lightTextAnchor, darkTextAnchor)
+	textMuted := ensureDualContrastAnchored(blendHex(blendHex(muted, fg, 0.22), blendHex(secondary, tertiary, 0.50), ternf(mode == "dark", 0.16, 0.10)), bg, guard, textMutedTarget, lightTextAnchor, darkTextAnchor)
+	textAccentPrimary := guardReadableAccent(primary, bg, guard, 4.2, "#6fcbff")
+	textAccentSecondary := guardReadableAccent(secondary, bg, guard, 4.2, "#73d7d5")
+	textInfoBG := NormalizeHex(blendHex(role(roles, "surface_variant", c[20]), textAccentPrimary, 0.18))
+	textActionBG := NormalizeHex(blendHex(role(roles, "surface_container_high", c[19]), tertiary, 0.22))
+	textInfoFG := ensureDualContrast(textPrimary, textInfoBG, bg, 4.5)
+	textActionFG := ensureDualContrast(textPrimary, textActionBG, bg, 4.5)
+
+	stateRed := ensureContrast(c[1], bg, widgetTarget)
+	stateOrange := ensureContrast(blendHex(c[1], c[3], 0.58), bg, widgetTarget)
+	stateYellow := ensureContrast(c[3], bg, widgetTarget)
+	stateGreen := ensureContrast(c[2], bg, widgetTarget)
+	stateMint := ensureContrast(blendHex(c[2], c[6], 0.42), bg, widgetTarget)
+	stateBlue := ensureContrast(c[4], bg, widgetTarget)
+	stateTeal := ensureContrast(c[6], bg, widgetTarget)
+	stateViolet := ensureContrast(blendHex(c[4], c[5], 0.55), bg, widgetTarget)
+	stateMagenta := ensureContrast(c[5], bg, widgetTarget)
 
 	status := StatusColors{}
 	if strings.TrimSpace(opts.StatusPalette) == "vibrant" {
@@ -244,6 +381,14 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 	roles["secondary"] = NormalizeHex(secondary)
 	roles["tertiary"] = NormalizeHex(tertiary)
 	roles["error"] = NormalizeHex(errorC)
+	roles["text_primary"] = NormalizeHex(textPrimary)
+	roles["text_muted"] = NormalizeHex(textMuted)
+	roles["text_accent_primary"] = NormalizeHex(textAccentPrimary)
+	roles["text_accent_secondary"] = NormalizeHex(textAccentSecondary)
+	roles["text_info_bg"] = NormalizeHex(textInfoBG)
+	roles["text_info_fg"] = NormalizeHex(textInfoFG)
+	roles["text_action_bg"] = NormalizeHex(textActionBG)
+	roles["text_action_fg"] = NormalizeHex(textActionFG)
 
 	meta := map[string]string{
 		"effective_background":      roles["background"],
@@ -255,6 +400,11 @@ func Compute(rolesInput map[string]string, opts Options) (Result, error) {
 		"effective_tertiary":        roles["tertiary"],
 		"effective_error":           roles["error"],
 		"contrast_guard_background": NormalizeHex(guard),
+		"style_family":              "native",
+		"style_family_version":      "2",
+	}
+	for k, v := range guardedMeta {
+		meta[k] = v
 	}
 
 	return Result{
@@ -280,7 +430,7 @@ func canonicalMode(v string) string {
 	}
 }
 
-func canonicalProfile(v string) string {
+func canonicalStyleFamily(v string) string {
 	switch strings.TrimSpace(strings.ToLower(v)) {
 	case "", "adaptive":
 		return "adaptive"
@@ -303,7 +453,11 @@ func canonicalProfile(v string) string {
 	}
 }
 
-func applyProfile(in map[string]string, profile, mode string) map[string]string {
+func canonicalProfile(v string) string {
+	return canonicalStyleFamily(v)
+}
+
+func applyStyleFamily(in map[string]string, styleFamily, mode string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
 		out[k] = NormalizeHex(v)
@@ -313,61 +467,107 @@ func applyProfile(in map[string]string, profile, mode string) map[string]string 
 	t := role(out, "tertiary", "#bb9af7")
 	e := role(out, "error", "#ff5f5f")
 	bg := role(out, "background", tern(mode == "dark", "#1a1b26", "#eff1f5"))
+	surface := role(out, "surface", blendHex(bg, tern(mode == "dark", "#000000", "#ffffff"), 0.10))
+	outline := role(out, "outline", blendHex(tern(mode == "dark", "#d8daf0", "#2a2c3d"), bg, 0.68))
 	fgAnchor := tern(mode == "dark", "#f5f5f8", "#111118")
-	switch profile {
+	switch styleFamily {
 	case "soft-pastel":
-		p = blendHex(p, "#89b4fa", 0.34)
-		s = blendHex(s, "#94e2d5", 0.30)
-		t = blendHex(t, "#cba6f7", 0.30)
-		e = blendHex(e, "#f38ba8", 0.32)
-		bg = blendHex(bg, tern(mode == "dark", "#1e1e2e", "#eff1f5"), 0.28)
+		p = blendHex(p, "#c6b6ff", 0.66)
+		s = blendHex(s, "#a7d9ff", 0.64)
+		t = blendHex(t, "#f0b8d8", 0.64)
+		e = blendHex(e, "#ff9db8", 0.58)
+		bg = blendHex(bg, tern(mode == "dark", "#2b2233", "#f8f1ff"), 0.58)
+		surface = blendHex(surface, tern(mode == "dark", "#34293f", "#f2e9fb"), 0.56)
+		outline = blendHex(outline, tern(mode == "dark", "#b8a9d0", "#8c79a8"), 0.52)
 	case "studio-dark":
-		p = blendHex(p, "#61afef", 0.36)
-		s = blendHex(s, "#56b6c2", 0.32)
-		t = blendHex(t, "#c678dd", 0.34)
-		e = blendHex(e, "#e06c75", 0.36)
-		bg = blendHex(bg, tern(mode == "dark", "#282c34", "#fafafa"), 0.24)
+		p = blendHex(p, "#7ea8d9", 0.58)
+		s = blendHex(s, "#78b7c8", 0.56)
+		t = blendHex(t, "#a58fc0", 0.54)
+		e = blendHex(e, "#d07d86", 0.56)
+		bg = blendHex(bg, tern(mode == "dark", "#1d232e", "#eef2f7"), 0.62)
+		surface = blendHex(surface, tern(mode == "dark", "#252d3a", "#e6ecf4"), 0.58)
+		outline = blendHex(outline, tern(mode == "dark", "#7f8fa6", "#5e6f87"), 0.54)
 	case "neon-night":
-		p = blendHex(p, "#7aa2f7", 0.40)
-		s = blendHex(s, "#7dcfff", 0.35)
-		t = blendHex(t, "#bb9af7", 0.36)
-		e = blendHex(e, "#f7768e", 0.38)
-		bg = blendHex(bg, tern(mode == "dark", "#1a1b26", "#e6e7ed"), 0.26)
+		p = blendHex(p, "#5ea2ff", 0.72)
+		s = blendHex(s, "#38e3ff", 0.70)
+		t = blendHex(t, "#d180ff", 0.70)
+		e = blendHex(e, "#ff6d93", 0.66)
+		bg = blendHex(bg, tern(mode == "dark", "#101226", "#e9ecff"), 0.68)
+		surface = blendHex(surface, tern(mode == "dark", "#171a31", "#dde3ff"), 0.64)
+		outline = blendHex(outline, tern(mode == "dark", "#6a79b8", "#5f6bb5"), 0.60)
 	case "warm-retro":
-		p = blendHex(p, "#458588", 0.44)
-		s = blendHex(s, "#689d6a", 0.42)
-		t = blendHex(t, "#b16286", 0.40)
-		e = blendHex(e, "#cc241d", 0.44)
-		bg = blendHex(bg, tern(mode == "dark", "#282828", "#fbf1c7"), 0.30)
+		p = blendHex(p, "#b98f5a", 0.68)
+		s = blendHex(s, "#8ea467", 0.66)
+		t = blendHex(t, "#c17374", 0.64)
+		e = blendHex(e, "#dc6e4e", 0.66)
+		bg = blendHex(bg, tern(mode == "dark", "#2b1f1a", "#f7e7cf"), 0.64)
+		surface = blendHex(surface, tern(mode == "dark", "#362821", "#ecdac1"), 0.60)
+		outline = blendHex(outline, tern(mode == "dark", "#b79b79", "#8f6f4f"), 0.56)
 	case "vivid-noir":
-		p = blendHex(p, "#bd93f9", 0.40)
-		s = blendHex(s, "#8be9fd", 0.38)
-		t = blendHex(t, "#ff79c6", 0.36)
-		e = blendHex(e, "#ff5555", 0.40)
-		bg = blendHex(bg, tern(mode == "dark", "#282a36", "#fffbeb"), 0.24)
+		p = blendHex(p, "#b58bff", 0.74)
+		s = blendHex(s, "#68e1ff", 0.72)
+		t = blendHex(t, "#ff69c7", 0.72)
+		e = blendHex(e, "#ff6262", 0.70)
+		bg = blendHex(bg, tern(mode == "dark", "#141119", "#fff6eb"), 0.70)
+		surface = blendHex(surface, tern(mode == "dark", "#1c1623", "#f6ecdf"), 0.66)
+		outline = blendHex(outline, tern(mode == "dark", "#8d78a9", "#8f6aa5"), 0.60)
 	case "arctic-calm":
-		p = blendHex(p, "#81a1c1", 0.42)
-		s = blendHex(s, "#88c0d0", 0.40)
-		t = blendHex(t, "#b48ead", 0.38)
-		e = blendHex(e, "#bf616a", 0.42)
-		bg = blendHex(bg, tern(mode == "dark", "#2e3440", "#eceff4"), 0.28)
+		p = blendHex(p, "#8ea5d6", 0.62)
+		s = blendHex(s, "#7dc0d2", 0.60)
+		t = blendHex(t, "#9ab2cb", 0.62)
+		e = blendHex(e, "#d08086", 0.58)
+		bg = blendHex(bg, tern(mode == "dark", "#1a2431", "#eaf2f8"), 0.64)
+		surface = blendHex(surface, tern(mode == "dark", "#223041", "#e1ebf4"), 0.62)
+		outline = blendHex(outline, tern(mode == "dark", "#8ea2bb", "#6f879f"), 0.58)
 	default: // adaptive
 		p = blendHex(p, "#4f8dff", 0.22)
 		s = blendHex(s, "#31c6c9", 0.24)
 		t = blendHex(t, "#cf63ff", 0.22)
 		e = blendHex(e, "#ff5f5f", 0.26)
+		surface = blendHex(surface, tern(mode == "dark", "#1f2230", "#f2f4f8"), 0.18)
+		outline = blendHex(outline, tern(mode == "dark", "#8a8fb0", "#6b718f"), 0.20)
 	}
 	// Keep accents from flattening against surfaces.
-	p = blendHex(blendHex(p, fgAnchor, 0.06), bg, 0.04)
-	s = blendHex(blendHex(s, fgAnchor, 0.06), bg, 0.04)
-	t = blendHex(blendHex(t, fgAnchor, 0.06), bg, 0.04)
-	e = blendHex(e, bg, 0.02)
+	accentLift := 0.06
+	accentSink := 0.04
+	if styleFamily != "adaptive" {
+		accentLift = 0.03
+		accentSink = 0.01
+	}
+	p = blendHex(blendHex(p, fgAnchor, accentLift), bg, accentSink)
+	s = blendHex(blendHex(s, fgAnchor, accentLift), bg, accentSink)
+	t = blendHex(blendHex(t, fgAnchor, accentLift), bg, accentSink)
+	e = blendHex(e, bg, 0.01)
+	surfaceContainer := blendHex(surface, bg, 0.22)
+	surfaceContainerHigh := blendHex(surface, fgAnchor, ternf(mode == "dark", 0.12, 0.08))
+	surfaceVariant := blendHex(surface, outline, 0.30)
+	outlineVariant := blendHex(outline, surface, 0.34)
+	out["surface"] = NormalizeHex(surface)
+	out["surface_container"] = NormalizeHex(surfaceContainer)
+	out["surface_container_high"] = NormalizeHex(surfaceContainerHigh)
+	out["surface_variant"] = NormalizeHex(surfaceVariant)
+	out["outline"] = NormalizeHex(outline)
+	out["outline_variant"] = NormalizeHex(outlineVariant)
+	out["primary_fixed"] = NormalizeHex(blendHex(p, fgAnchor, 0.16))
+	out["secondary_fixed"] = NormalizeHex(blendHex(s, fgAnchor, 0.14))
+	out["tertiary_fixed"] = NormalizeHex(blendHex(t, fgAnchor, 0.14))
+	out["primary_fixed_dim"] = NormalizeHex(blendHex(p, bg, 0.08))
+	out["secondary_fixed_dim"] = NormalizeHex(blendHex(s, bg, 0.08))
+	out["tertiary_fixed_dim"] = NormalizeHex(blendHex(t, bg, 0.08))
+	out["primary_container"] = NormalizeHex(blendHex(p, surface, 0.48))
+	out["secondary_container"] = NormalizeHex(blendHex(s, surface, 0.50))
+	out["tertiary_container"] = NormalizeHex(blendHex(t, surface, 0.52))
+	out["error_container"] = NormalizeHex(blendHex(e, surface, 0.54))
 	out["background"] = NormalizeHex(bg)
 	out["primary"] = NormalizeHex(p)
 	out["secondary"] = NormalizeHex(s)
 	out["tertiary"] = NormalizeHex(t)
 	out["error"] = NormalizeHex(e)
 	return out
+}
+
+func applyProfile(in map[string]string, profile, mode string) map[string]string {
+	return applyStyleFamily(in, profile, mode)
 }
 
 func normalizeRoleMap(in map[string]string) map[string]string {
@@ -390,6 +590,17 @@ func role(m map[string]string, key, fallback string) string {
 func ensureDualContrast(fg, bgA, bgB string, target float64) string {
 	candA := ensureContrast(fg, bgA, target)
 	candB := ensureContrast(fg, bgB, target)
+	minA := minContrastSet(candA, bgA, bgB)
+	minB := minContrastSet(candB, bgA, bgB)
+	if minA >= minB {
+		return candA
+	}
+	return candB
+}
+
+func ensureDualContrastAnchored(fg, bgA, bgB string, target float64, lightAnchor, darkAnchor string) string {
+	candA := ensureContrastAnchored(fg, bgA, target, lightAnchor, darkAnchor)
+	candB := ensureContrastAnchored(fg, bgB, target, lightAnchor, darkAnchor)
 	minA := minContrastSet(candA, bgA, bgB)
 	minB := minContrastSet(candB, bgA, bgB)
 	if minA >= minB {
@@ -426,6 +637,77 @@ func ensureContrast(fg, bg string, target float64) string {
 		}
 	}
 	return NormalizeHex(anchor)
+}
+
+func ensureContrastAnchored(fg, bg string, target float64, lightAnchor, darkAnchor string) string {
+	fg = NormalizeHex(fg)
+	bg = NormalizeHex(bg)
+	if contrastRatio(fg, bg) >= target {
+		return fg
+	}
+	anchor := bestContrastColor(bg, NormalizeHex(lightAnchor), NormalizeHex(darkAnchor))
+	for _, t := range []float64{0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.00} {
+		cand := blendHex(fg, anchor, t)
+		if contrastRatio(cand, bg) >= target {
+			return NormalizeHex(cand)
+		}
+	}
+	return NormalizeHex(anchor)
+}
+
+func guardReadableAccent(fg, bgA, bgB string, target float64, pivot string) string {
+	out := ensureDualContrast(fg, bgA, bgB, target)
+	if !accentReadabilityRisk(out, bgA, target) {
+		return NormalizeHex(out)
+	}
+	shifted := ensureDualContrast(blendHex(out, pivot, 0.34), bgA, bgB, target)
+	if minContrastSet(shifted, bgA, bgB) >= minContrastSet(out, bgA, bgB)+0.05 {
+		return NormalizeHex(shifted)
+	}
+	return NormalizeHex(out)
+}
+
+func accentReadabilityRisk(fg, bg string, target float64) bool {
+	h, s, l := hslHex(fg)
+	if contrastRatio(fg, bg) < target {
+		return true
+	}
+	if h >= 70 && h <= 158 && (s < 0.44 || l < 0.56) {
+		return true
+	}
+	return false
+}
+
+func hslHex(hex string) (h, s, l float64) {
+	r8, g8, b8 := parseHex(hex)
+	r := float64(r8) / 255.0
+	g := float64(g8) / 255.0
+	b := float64(b8) / 255.0
+	maxv := math.Max(r, math.Max(g, b))
+	minv := math.Min(r, math.Min(g, b))
+	l = (maxv + minv) / 2
+	if maxv == minv {
+		return 0, 0, l
+	}
+	d := maxv - minv
+	if l > 0.5 {
+		s = d / (2.0 - maxv - minv)
+	} else {
+		s = d / (maxv + minv)
+	}
+	switch maxv {
+	case r:
+		h = (g - b) / d
+		if g < b {
+			h += 6
+		}
+	case g:
+		h = ((b - r) / d) + 2
+	default:
+		h = ((r - g) / d) + 4
+	}
+	h *= 60
+	return h, s, l
 }
 
 func bestContrastColor(bg, a, b string) string {

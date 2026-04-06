@@ -1,22 +1,21 @@
 # Tooie
 
-This is a companion bootstrap script + TUI I vibe-coded for my Termux launcher for Android: https://github.com/PickleHik3/termux-launcher. As such, I do not expect it to work in other Termux setups.
+This is a companion bootstrap script + TUI for Termux/Linux shell environments.
 
 What it does:
 - Installs necessary packages (`tmux`, `fish`, `starship`, `zoxide`, `eza`, `go`, `matugen`, etc.)
 - Copies over config files to their respective locations (~/.config & ~/.termux)
 - Builds the 'tooie' binary and places it at ~/.local/bin/tooie
+- Runs a guided setup with platform profile selection
 
 ## Usage Notes
 
 Press keybind "prefix + i" to bring up quick reference to the tmux keybinds. The prefix is "Ctrl + b" and "Ctrl + Space".
 
 The TUI is split into 2 pages:
-- First page includes the clock, live system stats and an android app launcher.
-  - Pressing `/` brings up app search. From there you can press `Ctrl+p` to pin the highlighted app to the home screen.
-  - Pinned apps can be launched directly by pressing their respective number keys `1-7`.
+- First page includes the clock and live system stats.
 - Second page is a merged theme/status screen. The top row contains theme controls and the generated palette view. The bottom row contains tmux status widget toggles (`battery`, `cpu`, `ram`, `weather`) and their current on/off state summary.
-- Theme generation still uses `matugen` against the terminal background at `~/.termux/background/`, with adaptive/curated profiles and fixed preset themes available from the merged page.
+- Theme generation still uses `matugen` against the terminal background at `~/.termux/background/`, now with native extraction controls (source index / prefer modes) and fixed preset themes available from the merged page.
 
 ## Screenshots
 
@@ -37,15 +36,33 @@ The TUI is split into 2 pages:
 
 ## Install
 
+Quick install from `v2-dev`:
+
 ```sh
-pkg update -y
-pkg i -y git
-termux-setup-storage
-git clone https://github.com/PickleHik3/tooie
-cd ~/tooie
+git clone --branch v2-dev --single-branch https://github.com/PickleHik3/tooie.git
+cd tooie
 ./install.sh
-chsh -s fish
-~/.local/bin/tooie --restart
+```
+
+`install.sh` now asks:
+- platform (`termux` or `linux`)
+- termux backend (if termux): `none`, `rish`, `root`, `shizuku`
+- themed items (single choice)
+- final summary + confirm
+
+## Clone + Build Binary Only
+
+```sh
+git clone --branch v2-dev --single-branch https://github.com/PickleHik3/tooie.git
+cd tooie
+go build -o ~/.local/bin/tooie ./cmd/tooie
+chmod +x ~/.local/bin/tooie
+```
+
+Then run:
+
+```sh
+~/.local/bin/tooie
 ```
 
 ## Run
@@ -61,10 +78,12 @@ tooie --help
 tooie --clock
 tooie --cal
 tooie --clock --cal
-tooie apps
-tooie apps --refresh
+tooie setup
+tooie doctor
+tooie helper btop setup --runner auto
+tooie helper uninstall --snapshot latest
 tooie theme compute --theme-source preset --preset-family catppuccin --preset-variant mocha
-tooie theme apply --theme-source wallpaper --mode auto --status-palette vibrant
+tooie theme apply --theme-source wallpaper --mode dark --status-palette vibrant
 ```
 
 ## Installed Paths
@@ -72,37 +91,32 @@ tooie theme apply --theme-source wallpaper --mode auto --status-palette vibrant
 The installer places files here:
 
 - binary: `~/.local/bin/tooie`
-- Tooie helper scripts and state files: `~/.config/tooie/`
-- app cache: `~/.cache/tooie/apps.json`
-- icon cache: `~/.cache/tooie/icons/`
-- pinned apps: `~/.config/tooie/pinned-apps.json`
+- Tooie managed root: `~/.config/tooie/`
+- managed config container: `~/.config/tooie/configs/`
 - theme backups: `~/.config/tooie/backups/`
-- installer safety backups: `~/.local/state/tooie/backups/<timestamp>/`
+- install snapshots (for restore on uninstall): `~/.local/state/tooie/install/snapshots/<timestamp>/`
 
 ## What `install.sh` Deploys
 
-- `~/.tmux.conf`
-- `~/.termux/termux.properties`
-- `~/.termux/colors.properties`
-- `~/.termux/font.ttf`
-- `~/.termux/font-italic.ttf`
-- `~/.termux/bin/`
-- `~/.config/starship.toml`
-- `~/.config/fish/config.fish`
-- `~/.config/peaclock/config`
-- `~/.config/tmux/`
+- `~/.config/tooie/configs/tmux/`
+- `~/.config/tooie/configs/tmux/tmux.conf`
+- `~/.config/tooie/configs/termux/*`
+- `~/.config/tooie/configs/fish/config.fish`
+- `~/.config/tooie/configs/starship.toml`
+- `~/.config/tooie/configs/peaclock/config`
+- tmux bootstrap in `~/.tmux.conf`
+- fish snippet in `~/.config/fish/conf.d/tooie.fish` (when shell theming is selected)
+- symlinked fixed-path consumers (`~/.termux/*`, `~/.config/peaclock/config`) when selected
 - `~/.config/tooie/apply-material.sh`
 - `~/.config/tooie/restore-material.sh`
 - `~/.config/tooie/list-material-backups.sh`
 - `~/.config/tooie/reset-bootstrap-defaults.sh`
-- `~/.config/tooie/setup-btop-shizuku.sh`
-- `~/.config/tooie/bootstrap-defaults/`
+- `~/.config/tooie/setup-btop-helper.sh`
 
-It supports both `pkg` and `pacman`.
+Supported package managers in installer: `pkg`, `pacman`, `apt`, `dnf`.
 
 ## CLI Notes
 
-- `tooie apps` caches launcher app discovery in `~/.cache/tooie/apps.json`.
 - `tooie theme apply` is the runtime theme engine for Termux, tmux, peaclock, and starship.
 - `~/.config/tooie/apply-material.sh` is a compatibility shim that forwards to `tooie theme apply`.
 - `tooie --clock` starts the low-CPU standalone clock widget.
@@ -112,15 +126,11 @@ It supports both `pkg` and `pacman`.
 ## Uninstall
 
 ```sh
-rm ~/.local/bin/tooie
-rm -rf ~/.config/tooie
-```
-or
-```sh
-cd ~/tooie
+cd ~/.tmp/tooie
 ./uninstall.sh
 ```
-The script removes only the installed binary at `~/.local/bin/tooie`. Configs, helper scripts, and backups are left in place.
+The script restores files from the latest install snapshot when available.  
+Fallback behavior (if no snapshot exists): remove only `~/.local/bin/tooie`.
 
 ## Acknowledgements
 

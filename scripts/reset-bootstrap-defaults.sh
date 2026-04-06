@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+#!/usr/bin/env sh
 set -eu
 
 HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
@@ -47,6 +47,17 @@ resolve_defaults_dir() {
   return 1
 }
 
+current_profile() {
+  settings_path="$TOOIE_DIR/settings.json"
+  if [ ! -f "$settings_path" ]; then
+    printf '%s' ""
+    return 0
+  fi
+  # Keep parsing dependency-free; settings.json stores platform.profile once.
+  profile="$(sed -n 's/.*"profile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$settings_path" | head -n 1)"
+  printf '%s' "$profile"
+}
+
 reload_surfaces() {
   if command -v termux-reload-settings >/dev/null 2>&1; then
     termux-reload-settings || true
@@ -85,8 +96,11 @@ main() {
   rm -f "$HOME_DIR/.config/fish/conf.d/tooie-btop.fish"
   install_file "$defaults_dir/.config/peaclock/config" "$HOME_DIR/.config/peaclock/config"
 
-  # Preserve launcherctl endpoint/token auth files by replacing only config.json.
-  install_file "$defaults_dir/.launcherctl/config.json" "$HOME_DIR/.launcherctl/config.json"
+  profile="$(current_profile)"
+  if [ "$profile" = "termux-shizuku" ]; then
+    # Preserve launcherctl endpoint/token auth files by replacing only config.json.
+    install_file "$defaults_dir/.launcherctl/config.json" "$HOME_DIR/.launcherctl/config.json"
+  fi
 
   install_dir "$defaults_dir/.config/tmux" "$HOME_DIR/.config/tmux"
   backup_if_exists "$TOOIE_DIR/btop"

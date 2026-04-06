@@ -239,6 +239,10 @@ func TestApplyArgsPresetOmitsMode(t *testing.T) {
 		"--theme-source", "preset",
 		"--status-palette", "default",
 		"--status-theme", "default",
+		"--starship-prompt", "gruvbox",
+		"--status-position", "top",
+		"--status-layout", "two-line",
+		"--status-separator", "on",
 		"--preset-family", "catppuccin",
 		"--preset-variant", "mocha",
 		"--widget-battery", "on",
@@ -256,7 +260,7 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 		mode:          "mocha",
 		presetFamily:  "catppuccin",
 		presetVariant: "mocha",
-		profile:       "adaptive",
+		profile:       "auto",
 	}
 
 	m.normalizeThemeSelection()
@@ -266,11 +270,11 @@ func TestNormalizeThemeSelectionResetsInvalidMode(t *testing.T) {
 	}
 }
 
-func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
+func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 	m := model{
 		themeSource:   "wallpaper",
-		mode:          "auto",
-		profile:       "neon-night",
+		mode:          "dark",
+		profile:       "source-2",
 		palette:       "vibrant",
 		widgetBattery: false,
 		widgetCPU:     true,
@@ -282,8 +286,13 @@ func TestApplyArgsWallpaperUsesProfile(t *testing.T) {
 		"--theme-source", "wallpaper",
 		"--status-palette", "vibrant",
 		"--status-theme", "default",
-		"-m", "auto",
-		"--profile", "neon-night",
+		"--starship-prompt", "gruvbox",
+		"--status-position", "top",
+		"--status-layout", "two-line",
+		"--status-separator", "on",
+		"-m", "dark",
+		"--style-family", "source-2",
+		"--type", "tonal-spot",
 		"--widget-battery", "off",
 		"--widget-cpu", "on",
 		"--widget-ram", "off",
