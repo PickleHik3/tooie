@@ -2382,7 +2382,7 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 	}
 	if prompt == "gruvbox" {
 		gruvboxPalette := []struct{ key, val string }{
-			{"color_fg0", fmt.Sprintf("%q", c[7])},
+			{"color_fg0", "\"#1a1a1a\""},
 			{"color_bg1", fmt.Sprintf("%q", payload.Background)},
 			{"color_bg3", fmt.Sprintf("%q", c[14])},
 			{"color_blue", fmt.Sprintf("%q", c[4])},
