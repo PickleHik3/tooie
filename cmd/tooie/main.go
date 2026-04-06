@@ -2671,6 +2671,8 @@ func (m *model) applySettingChoice(target, value string) {
 		if !ok {
 			settings = defaultTooieSettings()
 		}
+		// Choosing a specific prompt preset implies themed Starship mode.
+		settings.Modules.StarshipMode = "themed"
 		settings.Starship.Prompt = m.starshipPrompt
 		_ = saveTooieSettings(settings)
 	}

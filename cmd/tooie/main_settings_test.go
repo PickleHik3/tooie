@@ -146,6 +146,29 @@ func TestThemeSourceLabelIsLowercase(t *testing.T) {
 	}
 }
 
+func TestSelectingStarshipPromptForcesThemedMode(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "default"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{}
+	m.applySettingChoice("starship_prompt", "jetpack")
+
+	out, ok := loadTooieSettings()
+	if !ok {
+		t.Fatalf("loadTooieSettings() expected ok")
+	}
+	if out.Modules.StarshipMode != "themed" {
+		t.Fatalf("StarshipMode = %q, want themed", out.Modules.StarshipMode)
+	}
+	if out.Starship.Prompt != "jetpack" {
+		t.Fatalf("Starship.Prompt = %q, want jetpack", out.Starship.Prompt)
+	}
+}
+
 func TestStarshipPromptMenuSelectionDoesNotAutoApply(t *testing.T) {
 	m := model{
 		page:              pageTheme,
