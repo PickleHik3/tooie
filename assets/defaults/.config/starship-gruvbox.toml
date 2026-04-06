@@ -78,7 +78,7 @@ style = "fg:color_fg0 bg:color_yellow"
 format = "[ $path ]($style)"
 truncation_length = 3
 truncation_symbol = "…/"
-home_symbol = ""
+home_symbol = "󰋜"
 
 [directory.substitutions]
 "Documents" = "󰈙 "
