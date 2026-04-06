@@ -362,6 +362,44 @@ func TestApplyThemeFilesRefreshesStaleManagedStarshipTemplate(t *testing.T) {
 	}
 }
 
+func TestComputeThemePayloadCarriesStarshipPromptMeta(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+
+	cfg, err := parseThemeApplyFlags([]string{
+		"--theme-source", "preset",
+		"--preset-family", "tokyo-night",
+		"--preset-variant", "night",
+		"--status-palette", "default",
+		"--status-theme", "default",
+		"--starship-prompt", "jetpack",
+		"--status-position", "top",
+		"--status-layout", "two-line",
+		"--status-separator", "on",
+		"--widget-battery", "on",
+		"--widget-cpu", "on",
+		"--widget-ram", "on",
+		"--widget-weather", "on",
+	})
+	if err != nil {
+		t.Fatalf("parseThemeApplyFlags() error: %v", err)
+	}
+
+	payload, _, err := computeThemePayload(cfg, "")
+	if err != nil {
+		t.Fatalf("computeThemePayload() error: %v", err)
+	}
+	if got := payload.Meta["starship_prompt"]; got != "jetpack" {
+		t.Fatalf("payload.Meta[starship_prompt] = %q, want jetpack", got)
+	}
+}
+
 func TestApplyThemeFilesGruvboxKeepsPowerlineStyles(t *testing.T) {
 	tmp := t.TempDir()
 	oldHome, oldCfg := homeDir, tooieConfigDir

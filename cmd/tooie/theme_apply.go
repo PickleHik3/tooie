@@ -382,6 +382,7 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	}
 	out.Meta["status_palette"] = cfg.StatusPalette
 	out.Meta["status_theme"] = cfg.StatusTheme
+	out.Meta["starship_prompt"] = normalizeStarshipPrompt(cfg.StarshipPrompt)
 	out.Meta["status_position"] = cfg.StatusPosition
 	out.Meta["status_layout"] = cfg.StatusLayout
 	out.Meta["status_separator"] = cfg.StatusSeparator
