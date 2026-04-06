@@ -164,6 +164,15 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  tooie helper uninstall [--snapshot latest|<id>]")
 	fmt.Fprintln(w, "      Restore files from the last install snapshot.")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --clock")
+	fmt.Fprintln(w, "      Start standalone clock mini mode.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --cal")
+	fmt.Fprintln(w, "      Start standalone calendar mini mode.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  tooie --clock --cal")
+	fmt.Fprintln(w, "      Start side-by-side clock + calendar mini mode.")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  tooie theme apply [flags]")
 	fmt.Fprintln(w, "      Apply theme using Go engine.")
 	fmt.Fprintln(w)
@@ -184,9 +193,6 @@ func printCLIUsage(w io.Writer) {
 	fmt.Fprintln(w, "  Settings:     ~/.config/tooie/settings.json")
 	fmt.Fprintln(w, "  Backup root:  ~/.config/tooie/backups/")
 	fmt.Fprintln(w, "  Helper stats: ~/.cache/tooie/helper-stats.json")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Notes")
-	fmt.Fprintln(w, "  Launcher-specific commands were removed in v2 portable mode.")
 }
 
 func runUICommand(args []string) int {
