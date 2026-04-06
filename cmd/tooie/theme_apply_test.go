@@ -305,6 +305,9 @@ func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
 	if !strings.Contains(got, `format = """`) || !strings.Contains(got, `[character]`) {
 		t.Fatalf("expected pure template content, got:\n%s", got)
 	}
+	if strings.Contains(got, `symbol = "[△](bold italic`) {
+		t.Fatalf("expected pure template to avoid jetpack-specific dynamic symbol override, got:\n%s", got)
+	}
 	userCfg := filepath.Join(tmp, ".config", "starship.toml")
 	userRaw, err := os.ReadFile(userCfg)
 	if err != nil {

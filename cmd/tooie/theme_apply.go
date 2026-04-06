@@ -2376,7 +2376,7 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 		return err
 	}
 	c := payload.Colors
-	if prompt != "gruvbox" {
+	if prompt == "jetpack" {
 		kv := []struct{ sec, key, val string }{
 			{"character", "success_symbol", fmt.Sprintf("\"[◎](bold %s)\"", c[3])},
 			{"character", "error_symbol", fmt.Sprintf("\"[○](bold %s)\"", c[1])},
