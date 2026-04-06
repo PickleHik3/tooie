@@ -1187,9 +1187,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.applySettingChoice(m.settingMenuTarget, selected.Value)
 				m.settingMenuTarget = ""
 				m.settingMenuIndex = 0
-				if target == "starship_prompt" {
-					return m.requestThemeApply()
-				}
 				if m.themeSource == "wallpaper" && (target == "mode" || target == "palette_type" || target == "theme_source") {
 					m.extractLoading = true
 					return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
@@ -1385,7 +1382,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) settings() []settingItem {
 	items := []settingItem{
-		{Label: hotkeyLabel("Source", "s", "6") + ": " + displayThemeSource(m.themeSource), Target: "theme_source"},
+		{Label: hotkeyLabel("source", "s", "6") + ": " + displayThemeSource(m.themeSource), Target: "theme_source"},
 	}
 	if m.themeSource == "preset" {
 		items = append(items,
@@ -2294,9 +2291,18 @@ func (m model) settingsBlock(limit, width int) string {
 	rows := make([]string, 0, (end-start)*2)
 	for i := start; i < end; i++ {
 		label, state, kind, toggle := m.settingsRowView(items[i].Target)
-		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, i == m.settingIndex, width))
+		menuRows := []string(nil)
+		showMenuAbove := false
 		if m.settingMenuTarget == items[i].Target {
-			rows = append(rows, m.renderInlineSettingMenu(items[i].Target, width)...)
+			menuRows = m.renderInlineSettingMenu(items[i].Target, width)
+			showMenuAbove = m.shouldRenderInlineMenuAbove(i, start, end, len(menuRows))
+		}
+		if showMenuAbove {
+			rows = append(rows, menuRows...)
+		}
+		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, i == m.settingIndex, width))
+		if m.settingMenuTarget == items[i].Target && !showMenuAbove {
+			rows = append(rows, menuRows...)
 		}
 		if i < end-1 {
 			rows = append(rows, "")
@@ -2318,9 +2324,18 @@ func (m model) settingsPageBlock(limit, width int) string {
 	rows := make([]string, 0, (end-start)*2)
 	for i := start; i < end; i++ {
 		label, state, kind, toggle := m.settingsRowView(items[i].Target)
-		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, len(m.settings())+i == m.settingIndex, width))
+		menuRows := []string(nil)
+		showMenuAbove := false
 		if m.settingMenuTarget == items[i].Target {
-			rows = append(rows, m.renderInlineSettingMenu(items[i].Target, width)...)
+			menuRows = m.renderInlineSettingMenu(items[i].Target, width)
+			showMenuAbove = m.shouldRenderInlineMenuAbove(i, start, end, len(menuRows))
+		}
+		if showMenuAbove {
+			rows = append(rows, menuRows...)
+		}
+		rows = append(rows, m.renderSettingsMenuRow(label, state, kind, items[i].Target, toggle, len(m.settings())+i == m.settingIndex, width))
+		if m.settingMenuTarget == items[i].Target && !showMenuAbove {
+			rows = append(rows, menuRows...)
 		}
 		if i < end-1 {
 			rows = append(rows, "")
@@ -2328,6 +2343,18 @@ func (m model) settingsPageBlock(limit, width int) string {
 	}
 	lines = append(lines, m.renderSettingsGroupPanel(rows, width)...)
 	return strings.Join(lines, "\n")
+}
+
+func (m model) shouldRenderInlineMenuAbove(index, start, end, menuLineCount int) bool {
+	if menuLineCount <= 0 {
+		return false
+	}
+	itemsBelow := end - index - 1
+	if itemsBelow <= 0 {
+		return true
+	}
+	availableBelow := (itemsBelow * 2) - 1
+	return availableBelow < menuLineCount
 }
 
 func settingsSectionLines(itemCount int) int {
@@ -2649,7 +2676,7 @@ func (m *model) applySettingChoice(target, value string) {
 func settingMenuLabel(target string) string {
 	switch target {
 	case "theme_source":
-		return "Source"
+		return "source"
 	case "status_theme":
 		return "Status Theme"
 	case "mode":
@@ -2674,7 +2701,7 @@ func settingMenuLabel(target string) string {
 func (m model) settingsRowView(target string) (label, state, kind string, toggle bool) {
 	switch target {
 	case "theme_source":
-		return hotkeyLabel("Source", "s", "6"), displayThemeSource(m.themeSource) + " ▾", "info", false
+		return hotkeyLabel("source", "s", "6"), displayThemeSource(m.themeSource) + " ▾", "info", false
 	case "mode":
 		return hotkeyLabel("Mode", "m", "5"), displayMode(m.mode) + " ▾", "info", false
 	case "profile":

@@ -28,10 +28,10 @@ $fill\
 $time\
 $line_break$character"""
 
+palette = 'gruvbox_dark'
+
 [fill]
 symbol = " "
-
-palette = 'gruvbox_dark'
 
 [palettes.gruvbox_dark]
 color_fg0 = '#fbf1c7'

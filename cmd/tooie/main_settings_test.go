@@ -135,7 +135,18 @@ func TestStarshipPromptRowListsHotSwapOptions(t *testing.T) {
 	}
 }
 
-func TestStarshipPromptMenuSelectionAutoApplies(t *testing.T) {
+func TestThemeSourceLabelIsLowercase(t *testing.T) {
+	m := model{}
+	label, _, _, _ := m.settingsRowView("theme_source")
+	if !strings.Contains(label, "source") {
+		t.Fatalf("theme source label should include lowercase source, got %q", label)
+	}
+	if settingMenuLabel("theme_source") != "source" {
+		t.Fatalf("settingMenuLabel(theme_source) = %q, want %q", settingMenuLabel("theme_source"), "source")
+	}
+}
+
+func TestStarshipPromptMenuSelectionDoesNotAutoApply(t *testing.T) {
 	m := model{
 		page:              pageTheme,
 		themeSource:       defaultSource,
@@ -148,11 +159,11 @@ func TestStarshipPromptMenuSelectionAutoApplies(t *testing.T) {
 	}
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(model)
-	if cmd == nil {
-		t.Fatalf("expected command for auto-apply after starship preset change")
+	if cmd != nil {
+		t.Fatalf("did not expect command after starship preset change")
 	}
-	if !got.applying {
-		t.Fatalf("expected auto-apply state after starship preset change")
+	if got.applying {
+		t.Fatalf("did not expect applying state after starship preset change")
 	}
 }
 
