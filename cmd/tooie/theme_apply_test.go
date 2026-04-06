@@ -348,6 +348,9 @@ func TestApplyThemeFilesGruvboxKeepsPowerlineStyles(t *testing.T) {
 	if !strings.Contains(got, `style = "bg:color_bg1"`) {
 		t.Fatalf("expected time background style to be preserved, got:\n%s", got)
 	}
+	if strings.Contains(got, `color_fg0 = "#1a1a1a"`) {
+		t.Fatalf("expected adaptive Fancy foreground for dark palettes, got hardcoded dark ink:\n%s", got)
+	}
 }
 
 func TestScoreCandidatePrefersDarkForDarkScene(t *testing.T) {

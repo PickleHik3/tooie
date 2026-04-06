@@ -2381,8 +2381,19 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 		}
 	}
 	if prompt == "gruvbox" {
+		fancyInk := bestTextColorForBackgrounds(
+			"#1a1a1a",
+			payload.Foreground,
+			4.5,
+			c[5],               // color_orange
+			c[15],              // color_yellow
+			c[3],               // color_aqua
+			c[4],               // color_blue
+			c[14],              // color_bg3
+			payload.Background, // color_bg1
+		)
 		gruvboxPalette := []struct{ key, val string }{
-			{"color_fg0", "\"#1a1a1a\""},
+			{"color_fg0", fmt.Sprintf("%q", fancyInk)},
 			{"color_bg1", fmt.Sprintf("%q", payload.Background)},
 			{"color_bg3", fmt.Sprintf("%q", c[14])},
 			{"color_blue", fmt.Sprintf("%q", c[4])},
