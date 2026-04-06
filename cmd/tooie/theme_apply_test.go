@@ -315,6 +315,41 @@ func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
 	}
 }
 
+func TestApplyThemeFilesGruvboxKeepsPowerlineStyles(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+
+	backupDir := filepath.Join(tmp, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("mkdir backup: %v", err)
+	}
+	payload := testThemePayload()
+	payload.Meta["starship_prompt"] = "gruvbox"
+	if err := applyThemeFiles(payload, backupDir); err != nil {
+		t.Fatalf("applyThemeFiles() error: %v", err)
+	}
+	raw, err := os.ReadFile(managedStarshipPath())
+	if err != nil {
+		t.Fatalf("read managed starship cfg: %v", err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, `palette = "tooie_gruvbox"`) {
+		t.Fatalf("expected tooie gruvbox palette override, got:\n%s", got)
+	}
+	if !strings.Contains(got, `style = "fg:color_fg0 bg:color_yellow"`) {
+		t.Fatalf("expected directory powerline style to be preserved, got:\n%s", got)
+	}
+	if !strings.Contains(got, `style = "bg:color_bg1"`) {
+		t.Fatalf("expected time background style to be preserved, got:\n%s", got)
+	}
+}
+
 func TestScoreCandidatePrefersDarkForDarkScene(t *testing.T) {
 	metrics := autoDecisionMetrics{
 		MeanLuma:         0.22,

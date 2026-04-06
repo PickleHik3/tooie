@@ -2356,26 +2356,28 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 		return err
 	}
 	c := payload.Colors
-	kv := []struct{ sec, key, val string }{
-		{"character", "success_symbol", fmt.Sprintf("\"[◎](bold %s)\"", c[3])},
-		{"character", "error_symbol", fmt.Sprintf("\"[○](bold %s)\"", c[1])},
-		{"character", "vimcmd_symbol", fmt.Sprintf("\"[■](bold %s)\"", c[2])},
-		{"directory", "style", fmt.Sprintf("\"italic %s\"", c[4])},
-		{"directory", "repo_root_style", fmt.Sprintf("\"bold %s\"", c[2])},
-		{"cmd_duration", "format", fmt.Sprintf("\"[◄ $duration ](italic %s)\"", c[15])},
-		{"git_branch", "symbol", fmt.Sprintf("\"[△](bold italic %s)\"", c[4])},
-		{"git_branch", "style", fmt.Sprintf("\"italic %s\"", c[4])},
-		{"git_status", "style", fmt.Sprintf("\"bold italic %s\"", c[2])},
-		{"time", "style", fmt.Sprintf("\"italic %s\"", c[14])},
-		{"username", "style_user", fmt.Sprintf("\"%s bold italic\"", c[3])},
-		{"username", "style_root", fmt.Sprintf("\"%s bold italic\"", c[1])},
-		{"sudo", "style", fmt.Sprintf("\"bold italic %s\"", c[5])},
-		{"jobs", "style", fmt.Sprintf("\"%s\"", c[15])},
-		{"jobs", "symbol", fmt.Sprintf("\"[▶](%s italic)\"", c[4])},
-	}
-	for _, item := range kv {
-		if err := tomlUpsert(path, item.sec, item.key, item.val); err != nil {
-			return err
+	if prompt != "gruvbox" {
+		kv := []struct{ sec, key, val string }{
+			{"character", "success_symbol", fmt.Sprintf("\"[◎](bold %s)\"", c[3])},
+			{"character", "error_symbol", fmt.Sprintf("\"[○](bold %s)\"", c[1])},
+			{"character", "vimcmd_symbol", fmt.Sprintf("\"[■](bold %s)\"", c[2])},
+			{"directory", "style", fmt.Sprintf("\"italic %s\"", c[4])},
+			{"directory", "repo_root_style", fmt.Sprintf("\"bold %s\"", c[2])},
+			{"cmd_duration", "format", fmt.Sprintf("\"[◄ $duration ](italic %s)\"", c[15])},
+			{"git_branch", "symbol", fmt.Sprintf("\"[△](bold italic %s)\"", c[4])},
+			{"git_branch", "style", fmt.Sprintf("\"italic %s\"", c[4])},
+			{"git_status", "style", fmt.Sprintf("\"bold italic %s\"", c[2])},
+			{"time", "style", fmt.Sprintf("\"italic %s\"", c[14])},
+			{"username", "style_user", fmt.Sprintf("\"%s bold italic\"", c[3])},
+			{"username", "style_root", fmt.Sprintf("\"%s bold italic\"", c[1])},
+			{"sudo", "style", fmt.Sprintf("\"bold italic %s\"", c[5])},
+			{"jobs", "style", fmt.Sprintf("\"%s\"", c[15])},
+			{"jobs", "symbol", fmt.Sprintf("\"[▶](%s italic)\"", c[4])},
+		}
+		for _, item := range kv {
+			if err := tomlUpsert(path, item.sec, item.key, item.val); err != nil {
+				return err
+			}
 		}
 	}
 	if prompt == "gruvbox" {
