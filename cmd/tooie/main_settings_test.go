@@ -135,6 +135,27 @@ func TestStarshipPromptRowListsHotSwapOptions(t *testing.T) {
 	}
 }
 
+func TestStarshipPromptMenuSelectionAutoApplies(t *testing.T) {
+	m := model{
+		page:              pageTheme,
+		themeSource:       defaultSource,
+		mode:              defaultMode,
+		profile:           defaultProfile,
+		statusTheme:       defaultStatusTheme,
+		settingMenuTarget: "starship_prompt",
+		settingMenuIndex:  1,
+		lastAppliedTheme:  "stale",
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if cmd == nil {
+		t.Fatalf("expected command for auto-apply after starship preset change")
+	}
+	if !got.applying {
+		t.Fatalf("expected auto-apply state after starship preset change")
+	}
+}
+
 func TestRenderThemePageShowsMergedMatrix(t *testing.T) {
 	m := model{
 		page:          pageTheme,

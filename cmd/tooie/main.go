@@ -1187,6 +1187,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.applySettingChoice(m.settingMenuTarget, selected.Value)
 				m.settingMenuTarget = ""
 				m.settingMenuIndex = 0
+				if target == "starship_prompt" {
+					return m.requestThemeApply()
+				}
 				if m.themeSource == "wallpaper" && (target == "mode" || target == "palette_type" || target == "theme_source") {
 					m.extractLoading = true
 					return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
