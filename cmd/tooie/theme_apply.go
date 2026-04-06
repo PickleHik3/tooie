@@ -2392,13 +2392,9 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 			c[14],              // color_bg3
 			payload.Background, // color_bg1
 		)
-		fancyBG1 := nonBlackStatusColor(
-			blendHexColor(payload.Background, c[14], 0.30),
-			c[14],
-		)
 		gruvboxPalette := []struct{ key, val string }{
 			{"color_fg0", fmt.Sprintf("%q", fancyInk)},
-			{"color_bg1", fmt.Sprintf("%q", fancyBG1)},
+			{"color_bg1", fmt.Sprintf("%q", payload.Background)},
 			{"color_bg3", fmt.Sprintf("%q", c[14])},
 			{"color_blue", fmt.Sprintf("%q", c[4])},
 			{"color_aqua", fmt.Sprintf("%q", c[3])},
