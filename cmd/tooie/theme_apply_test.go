@@ -315,6 +315,53 @@ func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
 	}
 }
 
+func TestApplyThemeFilesRefreshesStaleManagedStarshipTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "themed"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	if err := os.MkdirAll(managedStarshipTemplateDir(), 0o755); err != nil {
+		t.Fatalf("mkdir managed starship template dir: %v", err)
+	}
+	// Seed a stale managed template and ensure apply refreshes it from repo.
+	if err := os.WriteFile(filepath.Join(managedStarshipTemplateDir(), "starship.toml"), []byte("[character]\nsuccess_symbol='stale'\n"), 0o644); err != nil {
+		t.Fatalf("seed stale managed template: %v", err)
+	}
+
+	backupDir := filepath.Join(tmp, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("mkdir backup: %v", err)
+	}
+	payload := testThemePayload()
+	payload.Meta["starship_prompt"] = "jetpack"
+	if err := applyThemeFiles(payload, backupDir); err != nil {
+		t.Fatalf("applyThemeFiles() error: %v", err)
+	}
+
+	raw, err := os.ReadFile(managedStarshipPath())
+	if err != nil {
+		t.Fatalf("read managed starship cfg: %v", err)
+	}
+	got := string(raw)
+	if strings.Contains(got, "stale") {
+		t.Fatalf("expected managed starship config not to use stale template content:\n%s", got)
+	}
+	if !strings.Contains(got, `right_format = """`) {
+		t.Fatalf("expected jetpack template to be applied, got:\n%s", got)
+	}
+}
+
 func TestApplyThemeFilesGruvboxKeepsPowerlineStyles(t *testing.T) {
 	tmp := t.TempDir()
 	oldHome, oldCfg := homeDir, tooieConfigDir

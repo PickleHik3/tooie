@@ -1336,7 +1336,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "S":
 			if m.page == pageTheme {
-				m.openSettingMenu("starship_prompt")
+				if !m.starshipConfigEnabled() {
+					return m, nil
+				}
+				m.applySettingChoice("starship_prompt", nextStarshipPrompt(m.starshipPrompt))
 			}
 			return m, nil
 		case "m":
@@ -4178,6 +4181,19 @@ func nextStatusTheme(cur string) string {
 		}
 	}
 	return statusThemePresets[0]
+}
+
+func nextStarshipPrompt(cur string) string {
+	if len(starshipPromptPresets) == 0 {
+		return cur
+	}
+	cur = normalizeStarshipPrompt(cur)
+	for i, prompt := range starshipPromptPresets {
+		if prompt == cur {
+			return starshipPromptPresets[(i+1)%len(starshipPromptPresets)]
+		}
+	}
+	return starshipPromptPresets[0]
 }
 
 func nextPresetFamily(cur string) string {

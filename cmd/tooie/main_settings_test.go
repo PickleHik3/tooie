@@ -242,12 +242,20 @@ func TestUppercaseAStillAppliesImmediatelyOnThemePage(t *testing.T) {
 }
 
 func TestKeybindsCycleThemeSettings(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "themed"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
 	m := model{
 		page:        pageTheme,
 		themeSource: defaultSource,
 		mode:        defaultMode,
 		profile:     defaultProfile,
 		statusTheme: defaultStatusTheme,
+		starshipPrompt: "gruvbox",
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	got := next.(model)
@@ -258,6 +266,14 @@ func TestKeybindsCycleThemeSettings(t *testing.T) {
 	got = next.(model)
 	if got.statusTheme == defaultStatusTheme {
 		t.Fatalf("expected t to cycle tmux theme")
+	}
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	got = next.(model)
+	if got.starshipPrompt != "pure" {
+		t.Fatalf("expected S to cycle starship prompt, got %q", got.starshipPrompt)
+	}
+	if got.settingMenuTarget != "" {
+		t.Fatalf("expected S shortcut not to open menu, got target %q", got.settingMenuTarget)
 	}
 }
 

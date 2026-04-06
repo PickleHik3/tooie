@@ -1265,6 +1265,7 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 	_ = writeApplyProgress("Writing tmux theme", 0.56)
 	_ = syncManagedTmuxRuntimeFilesFromRepo()
 	_ = syncManagedFishConfigFromRepo()
+	_ = syncManagedStarshipTemplatesFromRepo()
 	if err := ensureFileWithDirs(tmuxConf); err != nil {
 		return err
 	}
@@ -1286,7 +1287,8 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 		return err
 	}
 
-	if settings.Modules.StarshipMode == "themed" {
+	starshipMode := normalizeStarshipInstallMode(settings.Modules.StarshipMode)
+	if starshipMode == "themed" {
 		_ = writeApplyProgress("Writing starship theme", 0.78)
 		if err := ensureFileWithDirs(starshipCfg); err != nil {
 			return err
@@ -1303,7 +1305,7 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 	f, err := os.OpenFile(metaPath, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err == nil {
 		_, _ = f.WriteString("peaclock_themed=true\n")
-		if settings.Modules.StarshipMode == "themed" {
+		if starshipMode == "themed" {
 			_, _ = f.WriteString("starship_themed=true\n")
 		}
 		_ = f.Close()
@@ -1484,6 +1486,23 @@ func syncManagedFishConfigFromRepo() error {
 		return err
 	}
 	return copyFile(src, managedFishConfigPath(), 0o644)
+}
+
+func syncManagedStarshipTemplatesFromRepo() error {
+	if err := os.MkdirAll(managedStarshipTemplateDir(), 0o755); err != nil {
+		return err
+	}
+	for _, name := range []string{"starship.toml", "starship-pure.toml", "starship-gruvbox.toml"} {
+		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", name))
+		if err != nil {
+			// Applying a theme should still succeed from installed-only environments.
+			continue
+		}
+		if err := copyFile(src, filepath.Join(managedStarshipTemplateDir(), name), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func renderColorsProperties(payload computedPayload) string {
