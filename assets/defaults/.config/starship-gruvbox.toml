@@ -23,10 +23,10 @@ $python\
 $docker_context\
 $conda\
 $pixi\
+[](fg:color_bg3)\
 $line_break$character"""
 
-right_format = """
-$time"""
+right_format = "$time"
 
 palette = 'gruvbox_dark'
 
