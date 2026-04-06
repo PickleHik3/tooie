@@ -40,6 +40,101 @@ prompt_menu() {
   eval "printf '%s' \"\${$choice}\""
 }
 
+csv_has() {
+  csv="$1"
+  item="$2"
+  case ",$csv," in
+    *",$item,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+csv_append_unique() {
+  cur="$1"
+  val="$2"
+  if [ -z "$val" ]; then
+    printf '%s' "$cur"
+    return 0
+  fi
+  if csv_has "$cur" "$val"; then
+    printf '%s' "$cur"
+    return 0
+  fi
+  if [ -n "$cur" ]; then
+    printf '%s,%s' "$cur" "$val"
+  else
+    printf '%s' "$val"
+  fi
+}
+
+theme_selection_has() {
+  selection="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  key="$2"
+  if csv_has "$selection" "all"; then
+    return 0
+  fi
+  case "$key" in
+    starship)
+      if csv_has "$selection" "starship" || csv_has "$selection" "shell" || csv_has "$selection" "starship+eza+peaclock"; then
+        return 0
+      fi
+      return 1
+      ;;
+    tmux|termux)
+      csv_has "$selection" "$key"
+      return $?
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+prompt_multi_theme_items() {
+  prompt="$1"
+  default_csv="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+  shift 2
+  if [ "$#" -eq 0 ]; then
+    return 1
+  fi
+
+  printf '\n%s\n' "$prompt" >&2
+  idx=1
+  for item in "$@"; do
+    printf '  %d) %s\n' "$idx" "$item" >&2
+    idx=$((idx + 1))
+  done
+  printf 'Select one or more [1-%d], comma separated (default %s): ' "$#" "$default_csv" >&2
+  IFS= read -r choice || choice=""
+  if [ -z "$choice" ]; then
+    printf '%s' "$default_csv"
+    return 0
+  fi
+
+  picked=""
+  normalized="$(printf '%s' "$choice" | tr ',;' '  ')"
+  for tok in $normalized; do
+    case "$tok" in
+      ''|*[!0-9]*)
+        err "invalid choice token: $tok"
+        return 1
+        ;;
+    esac
+    if [ "$tok" -lt 1 ] || [ "$tok" -gt "$#" ]; then
+      err "choice out of range: $tok"
+      return 1
+    fi
+    eval "item=\${$tok}"
+    item="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')"
+    picked="$(csv_append_unique "$picked" "$item")"
+  done
+  if [ -z "$picked" ]; then
+    err "no items selected"
+    return 1
+  fi
+  printf '%s' "$picked"
+}
+
 confirm_yes_no() {
   prompt="$1"
   printf '%s ' "$prompt" >&2
@@ -131,30 +226,21 @@ resolve_logical_deps() {
   deps=""
   deps="$(append_unique_word "$deps" "go")"
 
-  case "$selection" in
-    all)
-      deps="$(append_unique_word "$deps" "tmux")"
-      deps="$(append_unique_word "$deps" "jq")"
-      deps="$(append_unique_word "$deps" "matugen")"
-      deps="$(append_unique_word "$deps" "eza")"
-      deps="$(append_unique_word "$deps" "peaclock")"
-      ;;
-    tmux)
-      deps="$(append_unique_word "$deps" "tmux")"
-      deps="$(append_unique_word "$deps" "jq")"
-      deps="$(append_unique_word "$deps" "matugen")"
-      ;;
-    termux)
-      deps="$(append_unique_word "$deps" "jq")"
-      deps="$(append_unique_word "$deps" "matugen")"
-      ;;
-    shell)
-      deps="$(append_unique_word "$deps" "jq")"
-      deps="$(append_unique_word "$deps" "matugen")"
-      deps="$(append_unique_word "$deps" "eza")"
-      deps="$(append_unique_word "$deps" "peaclock")"
-      ;;
-  esac
+  if theme_selection_has "$selection" "tmux"; then
+    deps="$(append_unique_word "$deps" "tmux")"
+    deps="$(append_unique_word "$deps" "jq")"
+    deps="$(append_unique_word "$deps" "matugen")"
+  fi
+  if theme_selection_has "$selection" "termux"; then
+    deps="$(append_unique_word "$deps" "jq")"
+    deps="$(append_unique_word "$deps" "matugen")"
+  fi
+  if theme_selection_has "$selection" "starship"; then
+    deps="$(append_unique_word "$deps" "jq")"
+    deps="$(append_unique_word "$deps" "matugen")"
+    deps="$(append_unique_word "$deps" "eza")"
+    deps="$(append_unique_word "$deps" "peaclock")"
+  fi
 
   if [ "$fish_mode" = "on" ]; then
     deps="$(append_unique_word "$deps" "fish")"
@@ -230,38 +316,23 @@ if [ "$platform" = "termux" ]; then
 fi
 
 if [ "$platform" = "linux" ]; then
-  items_pick="$(prompt_menu "Choose items to theme" 1 "all" "tmux" "starship+eza+peaclock")"
-  case "$items_pick" in
-    all) theme_items="all" ;;
-    tmux) theme_items="tmux" ;;
-    starship+eza+peaclock) theme_items="shell" ;;
-    *) err "unknown items selection: $items_pick"; exit 1 ;;
-  esac
+  theme_items="$(prompt_multi_theme_items "Choose items to theme" "all" "all" "tmux" "starship")"
 else
-  items_pick="$(prompt_menu "Choose items to theme" 1 "all" "tmux" "termux" "starship+eza+peaclock")"
-  case "$items_pick" in
-    all) theme_items="all" ;;
-    tmux) theme_items="tmux" ;;
-    termux) theme_items="termux" ;;
-    starship+eza+peaclock) theme_items="shell" ;;
-    *) err "unknown items selection: $items_pick"; exit 1 ;;
-  esac
+  theme_items="$(prompt_multi_theme_items "Choose items to theme" "all" "all" "tmux" "termux" "starship")"
 fi
 
-if [ "$theme_items" = "all" ] || [ "$theme_items" = "shell" ]; then
+if [ "$platform" = "linux" ] && theme_selection_has "$theme_items" "termux"; then
+  err "termux item is only valid on termux platform."
+  exit 1
+fi
+
+if theme_selection_has "$theme_items" "starship"; then
+  starship_mode="themed"
   fish_pick="$(prompt_menu "Install fish bootstrap snippet + managed bootstrap file?" 1 "yes" "no")"
   case "$fish_pick" in
     yes) fish_mode="on" ;;
     no) fish_mode="off" ;;
     *) err "unknown fish selection: $fish_pick"; exit 1 ;;
-  esac
-
-  starship_pick="$(prompt_menu "Starship config mode" 3 "off" "default" "themed")"
-  case "$starship_pick" in
-    off) starship_mode="off" ;;
-    default) starship_mode="default" ;;
-    themed) starship_mode="themed" ;;
-    *) err "unknown starship selection: $starship_pick"; exit 1 ;;
   esac
 fi
 
@@ -308,14 +379,21 @@ for logical in $logical_deps; do
   fi
 done
 
+fish_summary="$fish_mode"
+starship_summary="$starship_mode"
+if ! theme_selection_has "$theme_items" "starship"; then
+  fish_summary="N/A"
+  starship_summary="N/A"
+fi
+
 printf '\nInstallation summary\n'
 printf '  platform:      %s\n' "$platform"
 if [ "$platform" = "termux" ]; then
   printf '  backend:       %s\n' "$backend"
 fi
 printf '  themed items:  %s\n' "$theme_items"
-printf '  fish:          %s\n' "$fish_mode"
-printf '  starship:      %s\n' "$starship_mode"
+printf '  fish:          %s\n' "$fish_summary"
+printf '  starship:      %s\n' "$starship_summary"
 printf '  package mgr:   %s\n' "$pm"
 printf '  packages:      %s\n' "$resolved_pkgs"
 if [ -n "$missing_pkgs" ]; then

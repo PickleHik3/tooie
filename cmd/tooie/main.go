@@ -38,7 +38,7 @@ const (
 	defaultProfile     = "auto"
 	defaultPaletteType = "tonal-spot"
 	defaultSource      = "wallpaper"
-	defaultStarship    = "jetpack"
+	defaultStarship    = "gruvbox"
 	themeCacheSchema   = "2026-03-20-v2"
 	pageHome           = 0
 	pageTheme          = 1
@@ -47,7 +47,7 @@ const (
 
 var modePresets = []string{"dark", "light"}
 var statusThemePresets = []string{"default", "rounded", "rectangle"}
-var starshipPromptPresets = []string{"jetpack", "pure", "gruvbox"}
+var starshipPromptPresets = []string{"gruvbox", "pure", "jetpack"}
 var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad"}
 var profilePresets = []string{
 	"auto",
@@ -1334,6 +1334,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadExtractSwatchesCmd(m.mode, m.paletteType)
 			}
 			return m, nil
+		case "S":
+			if m.page == pageTheme {
+				m.openSettingMenu("starship_prompt")
+			}
+			return m, nil
 		case "m":
 			if m.themeSource == "preset" {
 				return m, nil
@@ -1398,10 +1403,14 @@ func (m model) settings() []settingItem {
 }
 
 func (m model) settingsPageItems() []settingItem {
+	starshipState := "N/A"
+	if m.starshipConfigEnabled() {
+		starshipState = displayStarshipPrompt(m.starshipPrompt)
+	}
 	return []settingItem{
 		{Label: hotkeyLabel("tmux status", "t", "3") + ": " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
 		{Label: "tmux status segments: " + m.segmentSummary(), Target: "segments"},
-		{Label: "Starship prompt: " + displayStarshipPrompt(m.starshipPrompt), Target: "starship_prompt"},
+		{Label: hotkeyLabel("Starship", "S", "10") + ": " + starshipState, Target: "starship_prompt"},
 	}
 }
 
@@ -2383,7 +2392,7 @@ func (m model) renderInlineSettingMenu(target string, width int) []string {
 		}
 		label := choice.Label
 		if target == "segments" {
-			mark := "☐ "
+			mark := "x "
 			if m.segmentEnabled(choice.Value) {
 				mark = "✓ "
 			}
@@ -2577,6 +2586,9 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 			{Value: "widget_weather", Label: "Weather"},
 		}
 	case "starship_prompt":
+		if !m.starshipConfigEnabled() {
+			return nil
+		}
 		out := make([]settingChoice, 0, len(starshipPromptPresets))
 		for _, sp := range starshipPromptPresets {
 			out = append(out, settingChoice{Value: sp, Label: displayStarshipPrompt(sp)})
@@ -2650,7 +2662,7 @@ func settingMenuLabel(target string) string {
 	case "segments":
 		return "tmux status segments"
 	case "starship_prompt":
-		return "Starship prompt"
+		return "Starship"
 	default:
 		return "Options"
 	}
@@ -2677,10 +2689,21 @@ func (m model) settingsRowView(target string) (label, state, kind string, toggle
 	case "segments":
 		return "tmux status segments", m.segmentSummary() + " ▾", "info", false
 	case "starship_prompt":
-		return "Starship prompt", displayStarshipPrompt(m.starshipPrompt) + " ▾", "info", false
+		if !m.starshipConfigEnabled() {
+			return hotkeyLabel("Starship", "S", "10"), "N/A", "info", false
+		}
+		return hotkeyLabel("Starship", "S", "10"), displayStarshipPrompt(m.starshipPrompt) + " ▾", "info", false
 	default:
 		return target, "", "info", false
 	}
+}
+
+func (m model) starshipConfigEnabled() bool {
+	settings, ok := loadTooieSettings()
+	if !ok {
+		return true
+	}
+	return normalizeStarshipInstallMode(settings.Modules.StarshipMode) != "off"
 }
 
 func (m model) renderSettingsMenuRow(label, state, kind, target string, toggle bool, selected bool, width int) string {
@@ -4284,12 +4307,12 @@ func displayPaletteType(name string) string {
 
 func displayStarshipPrompt(name string) string {
 	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "", "jetpack":
-		return "Jetpack"
+	case "", "gruvbox":
+		return "Fancy"
 	case "pure":
 		return "Pure"
-	case "gruvbox":
-		return "Gruvbox"
+	case "jetpack":
+		return "Jetpack"
 	default:
 		parts := strings.Split(strings.TrimSpace(name), "-")
 		for i := range parts {

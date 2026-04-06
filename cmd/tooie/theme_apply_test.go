@@ -305,8 +305,13 @@ func TestApplyThemeFilesUsesSelectedStarshipTemplate(t *testing.T) {
 	if !strings.Contains(got, `format = """`) || !strings.Contains(got, `[character]`) {
 		t.Fatalf("expected pure template content, got:\n%s", got)
 	}
-	if strings.Contains(got, "[battery]") {
-		t.Fatalf("expected battery section to be stripped, got:\n%s", got)
+	userCfg := filepath.Join(tmp, ".config", "starship.toml")
+	userRaw, err := os.ReadFile(userCfg)
+	if err != nil {
+		t.Fatalf("read user starship cfg: %v", err)
+	}
+	if string(userRaw) != got {
+		t.Fatalf("expected user starship config to mirror managed themed config")
 	}
 }
 

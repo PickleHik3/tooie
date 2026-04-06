@@ -2400,6 +2400,19 @@ func applyStarshipTheme(path string, payload computedPayload) error {
 			}
 		}
 	}
+	// Keep the active Starship default path in sync so themed prompts apply
+	// immediately even when the shell does not export STARSHIP_CONFIG.
+	userStarship := filepath.Join(homeDir, ".config", "starship.toml")
+	if err := os.MkdirAll(filepath.Dir(userStarship), 0o755); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(userStarship, raw, 0o644); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2433,18 +2446,8 @@ func sanitizeStarshipConfig(path string) error {
 	}
 	lines := strings.Split(string(raw), "\n")
 	out := make([]string, 0, len(lines))
-	skipSection := false
 	for _, ln := range lines {
 		trim := strings.TrimSpace(ln)
-		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			skipSection = (trim == "[battery]")
-			if skipSection {
-				continue
-			}
-		}
-		if skipSection {
-			continue
-		}
 		// Remove legacy/bad root keys that can trigger parser warnings.
 		if strings.HasPrefix(trim, "battery ") || strings.HasPrefix(trim, "battery=") {
 			continue

@@ -70,3 +70,33 @@ func TestApplyInstallPlanLinuxNoneKeepsCPUWidgetOn(t *testing.T) {
 		t.Fatalf("linux + backend none should keep cpu widget on")
 	}
 }
+
+func TestApplyInstallPlanTermuxCombinationTargets(t *testing.T) {
+	settings := defaultTooieSettings()
+	env := setupEnv{IsTermux: true}
+	plan := setupInstallPlan{Platform: "termux", Backend: "none", ThemeItems: "tmux,starship"}
+	if err := applyInstallPlan(&settings, env, plan); err != nil {
+		t.Fatalf("applyInstallPlan() error: %v", err)
+	}
+	if !settings.Modules.TmuxTheme {
+		t.Fatalf("tmux theme should be enabled for tmux selection")
+	}
+	if settings.Modules.TermuxAppearance {
+		t.Fatalf("termux appearance should be off when not selected")
+	}
+	if settings.Modules.StarshipMode != "themed" || !settings.Modules.PeaclockTheme || !settings.Modules.FishBootstrap {
+		t.Fatalf("starship selection should enable themed starship + peaclock + fish defaults")
+	}
+}
+
+func TestApplyInstallPlanLinuxAllSkipsTermuxAppearance(t *testing.T) {
+	settings := defaultTooieSettings()
+	env := setupEnv{IsTermux: false}
+	plan := setupInstallPlan{Platform: "linux", Backend: "none", ThemeItems: "all"}
+	if err := applyInstallPlan(&settings, env, plan); err != nil {
+		t.Fatalf("applyInstallPlan() error: %v", err)
+	}
+	if settings.Modules.TermuxAppearance {
+		t.Fatalf("linux all selection should not enable termux appearance")
+	}
+}

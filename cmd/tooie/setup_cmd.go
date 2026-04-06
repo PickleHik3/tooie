@@ -37,6 +37,13 @@ type setupInstallPlan struct {
 	Starship   string
 }
 
+type installItemSelection struct {
+	All      bool
+	Tmux     bool
+	Termux   bool
+	Starship bool
+}
+
 func normalizeInstallPlatform(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case "linux":
@@ -59,17 +66,56 @@ func normalizeInstallBackend(raw string) string {
 	}
 }
 
-func normalizeInstallItems(raw string) string {
+func normalizeInstallItemToken(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "all":
+		return "all"
 	case "tmux":
 		return "tmux"
 	case "termux":
 		return "termux"
-	case "shell":
-		return "shell"
+	case "shell", "starship", "starship+eza+peaclock", "eza", "peaclock":
+		return "starship"
 	default:
-		return "all"
+		return ""
 	}
+}
+
+func parseInstallItemSelection(raw string) (installItemSelection, error) {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	if v == "" {
+		return installItemSelection{All: true, Tmux: true, Starship: true}, nil
+	}
+	parts := strings.FieldsFunc(v, func(r rune) bool {
+		return r == ',' || r == ';' || r == '+' || r == ' ' || r == '\t' || r == '\n'
+	})
+	sel := installItemSelection{}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		token := normalizeInstallItemToken(part)
+		if token == "" {
+			return installItemSelection{}, fmt.Errorf("unknown install item %q", part)
+		}
+		switch token {
+		case "all":
+			sel.All = true
+			sel.Tmux = true
+			sel.Starship = true
+		case "tmux":
+			sel.Tmux = true
+		case "termux":
+			sel.Termux = true
+		case "starship":
+			sel.Starship = true
+		}
+	}
+	if !sel.Tmux && !sel.Termux && !sel.Starship {
+		return installItemSelection{All: true, Tmux: true, Starship: true}, nil
+	}
+	return sel, nil
 }
 
 func normalizeInstallFish(raw string) string {
@@ -104,11 +150,14 @@ func profileForInstallPlan(platform, backend string) string {
 func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) error {
 	plan.Platform = normalizeInstallPlatform(plan.Platform)
 	plan.Backend = normalizeInstallBackend(plan.Backend)
-	plan.ThemeItems = normalizeInstallItems(plan.ThemeItems)
+	items, err := parseInstallItemSelection(plan.ThemeItems)
+	if err != nil {
+		return err
+	}
 	if plan.Platform == "linux" && plan.Backend != "none" {
 		return fmt.Errorf("install backend %q is only valid for termux", plan.Backend)
 	}
-	if plan.Platform != "termux" && plan.ThemeItems == "termux" {
+	if plan.Platform != "termux" && items.Termux {
 		return fmt.Errorf("install items 'termux' are only valid when platform is termux")
 	}
 
@@ -120,24 +169,19 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 	cur.Modules.ShellTheme = false
 	cur.Modules.PeaclockTheme = false
 
-	switch plan.ThemeItems {
-	case "all":
+	if items.Tmux {
 		cur.Modules.TmuxTheme = true
+	}
+	if items.Starship {
 		cur.Modules.PeaclockTheme = true
-		if plan.Platform == "termux" {
-			cur.Modules.TermuxAppearance = true
-		}
-	case "tmux":
-		cur.Modules.TmuxTheme = true
-	case "termux":
+	}
+	if plan.Platform == "termux" && (items.Termux || items.All) {
 		cur.Modules.TermuxAppearance = true
-	case "shell":
-		cur.Modules.PeaclockTheme = true
 	}
 
 	defaultFish := "off"
 	defaultStarship := "off"
-	if plan.ThemeItems == "all" || plan.ThemeItems == "shell" {
+	if items.Starship {
 		defaultFish = "on"
 		defaultStarship = "themed"
 	}
@@ -1276,7 +1320,7 @@ func installManagedPaths(home string, settings tooieSettings, env setupEnv) []st
 	if settings.Modules.FishBootstrap {
 		paths = append(paths, filepath.Join(home, ".config", "fish", "conf.d", "tooie.fish"))
 	}
-	if settings.Modules.StarshipMode == "default" {
+	if settings.Modules.StarshipMode != "off" {
 		paths = append(paths, filepath.Join(home, ".config", "starship.toml"))
 	}
 	if settings.Modules.TermuxAppearance && env.IsTermux {

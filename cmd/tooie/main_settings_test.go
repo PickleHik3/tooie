@@ -1,12 +1,25 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func withTempTooieSettingsHome(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	oldHome, oldCfg := homeDir, tooieConfigDir
+	homeDir = tmp
+	tooieConfigDir = filepath.Join(tmp, ".config", "tooie")
+	t.Cleanup(func() {
+		homeDir = oldHome
+		tooieConfigDir = oldCfg
+	})
+}
 
 func TestPageNavigationTwoPages(t *testing.T) {
 	m := model{page: pageHome}
@@ -83,6 +96,42 @@ func TestPersistedShellSettingsRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(out, in) {
 		t.Fatalf("round trip = %#v, want %#v", out, in)
+	}
+}
+
+func TestStarshipPromptRowShowsNAWhenStarshipIsOff(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "off"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{starshipPrompt: defaultStarship}
+	_, state, _, _ := m.settingsRowView("starship_prompt")
+	if state != "N/A" {
+		t.Fatalf("starship prompt state = %q, want N/A", state)
+	}
+	if got := m.settingMenuChoices("starship_prompt"); len(got) != 0 {
+		t.Fatalf("starship prompt choices should be empty when starship is off")
+	}
+}
+
+func TestStarshipPromptRowListsHotSwapOptions(t *testing.T) {
+	withTempTooieSettingsHome(t)
+	settings := defaultTooieSettings()
+	settings.Modules.StarshipMode = "themed"
+	if err := saveTooieSettings(settings); err != nil {
+		t.Fatalf("saveTooieSettings() error: %v", err)
+	}
+
+	m := model{starshipPrompt: "jetpack"}
+	label, state, _, _ := m.settingsRowView("starship_prompt")
+	if !strings.Contains(label, "Starship") {
+		t.Fatalf("starship label should be Starship, got %q", label)
+	}
+	if state != "Jetpack ▾" {
+		t.Fatalf("starship prompt state = %q, want %q", state, "Jetpack ▾")
 	}
 }
 

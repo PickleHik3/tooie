@@ -3,7 +3,6 @@
 format = """
 [](color_orange)\
 $os\
-$username\
 [](bg:color_yellow fg:color_orange)\
 $directory\
 [](fg:color_yellow bg:color_aqua)\
@@ -71,17 +70,12 @@ Redhat = "󱄛"
 RedHatEnterprise = "󱄛"
 Pop = ""
 
-[username]
-show_always = true
-style_user = "bg:color_orange fg:color_fg0"
-style_root = "bg:color_orange fg:color_fg0"
-format = '[ $user ]($style)'
-
 [directory]
 style = "fg:color_fg0 bg:color_yellow"
 format = "[ $path ]($style)"
 truncation_length = 3
 truncation_symbol = "…/"
+home_symbol = "../files"
 
 [directory.substitutions]
 "Documents" = "󰈙 "
