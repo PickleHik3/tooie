@@ -24,9 +24,12 @@ $docker_context\
 $conda\
 $pixi\
 [](fg:color_bg3)\
+$fill\
+$time\
 $line_break$character"""
 
-right_format = "$time"
+[fill]
+symbol = " "
 
 palette = 'gruvbox_dark'
 
@@ -75,7 +78,7 @@ style = "fg:color_fg0 bg:color_yellow"
 format = "[ $path ]($style)"
 truncation_length = 3
 truncation_symbol = "…/"
-home_symbol = "~/"
+home_symbol = ""
 
 [directory.substitutions]
 "Documents" = "󰈙 "
