@@ -35,6 +35,7 @@ type setupInstallPlan struct {
 	ThemeItems string
 	Fish       string
 	Starship   string
+	Btop       string
 }
 
 type installItemSelection struct {
@@ -131,6 +132,17 @@ func normalizeInstallStarship(raw string) string {
 	return normalizeStarshipInstallMode(raw)
 }
 
+func normalizeInstallBtop(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "on", "yes", "true", "1":
+		return "on"
+	case "off", "no", "false", "0":
+		return "off"
+	default:
+		return "auto"
+	}
+}
+
 func profileForInstallPlan(platform, backend string) string {
 	if platform == "linux" {
 		return "linux"
@@ -205,10 +217,10 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 		cur.Modules.BtopHelper = false
 		cur.Privileged.Runner = "auto"
 		if plan.Platform == "termux" {
-			cur.Widgets.WidgetBattery = false
-			cur.Widgets.WidgetCPU = false
-			cur.Widgets.WidgetRAM = false
-			cur.Widgets.WidgetWeather = false
+			cur.Widgets.WidgetBattery = true
+			cur.Widgets.WidgetCPU = true
+			cur.Widgets.WidgetRAM = true
+			cur.Widgets.WidgetWeather = true
 		} else {
 			cur.Widgets.WidgetBattery = true
 			cur.Widgets.WidgetCPU = true
@@ -237,6 +249,17 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 		cur.Widgets.WidgetRAM = true
 		cur.Widgets.WidgetWeather = true
 	}
+
+	switch normalizeInstallBtop(plan.Btop) {
+	case "on":
+		if plan.Platform != "termux" || (plan.Backend != "rish" && plan.Backend != "shizuku") {
+			return fmt.Errorf("install btop=on is currently supported only for termux backend rish or shizuku")
+		}
+		cur.Modules.BtopHelper = true
+		cur.Privileged.Runner = "rish"
+	case "off":
+		cur.Modules.BtopHelper = false
+	}
 	return nil
 }
 
@@ -249,6 +272,7 @@ func runSetupCommand(args []string) int {
 	installItems := fs.String("install-items", "", "")
 	installFish := fs.String("install-fish", "", "")
 	installStarship := fs.String("install-starship", "", "")
+	installBtop := fs.String("install-btop", "", "")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "tooie setup: %v\n", err)
 		return 2
@@ -282,13 +306,14 @@ func runSetupCommand(args []string) int {
 	if !env.IsTermux {
 		settings.Modules.TermuxAppearance = false
 	}
-	if strings.TrimSpace(*installPlatform) != "" || strings.TrimSpace(*installBackend) != "" || strings.TrimSpace(*installItems) != "" || strings.TrimSpace(*installFish) != "" || strings.TrimSpace(*installStarship) != "" {
+	if strings.TrimSpace(*installPlatform) != "" || strings.TrimSpace(*installBackend) != "" || strings.TrimSpace(*installItems) != "" || strings.TrimSpace(*installFish) != "" || strings.TrimSpace(*installStarship) != "" || strings.TrimSpace(*installBtop) != "" {
 		plan := setupInstallPlan{
 			Platform:   *installPlatform,
 			Backend:    *installBackend,
 			ThemeItems: *installItems,
 			Fish:       *installFish,
 			Starship:   *installStarship,
+			Btop:       *installBtop,
 		}
 		if err := applyInstallPlan(&settings, env, plan); err != nil {
 			fmt.Fprintf(os.Stderr, "tooie setup: invalid install selection: %v\n", err)
@@ -784,6 +809,10 @@ func printSetupNextSteps(settings tooieSettings) {
 	if normalizePlatformProfile(settings.Platform.Profile) == "termux-shizuku" {
 		fmt.Printf("  %s  restart launcher (Shizuku profile)\n", cmdStyle.Render("tooie restart"))
 	}
+	if settings.Modules.BtopHelper && normalizeRunner(settings.Privileged.Runner) == "rish" {
+		fmt.Printf("  %s  launch remote btop via rish alias\n", cmdStyle.Render("btop"))
+		fmt.Printf("  %s  launch compact remote btop via rish alias\n", cmdStyle.Render("mini-btop"))
+	}
 }
 
 func reorderWithDefault(options []string, current string) []string {
@@ -1223,6 +1252,10 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 
 	if settings.Modules.BtopHelper {
 		runner := normalizeRunner(settings.Privileged.Runner)
+		profile := normalizePlatformProfile(settings.Platform.Profile)
+		if profile == "termux-rish" || profile == "termux-shizuku" {
+			runner = "rish"
+		}
 		if err := saveHelperConfig(helperConfig{Runner: runner}); err != nil {
 			return fmt.Errorf("failed to write helper config: %w", err)
 		}
@@ -1236,7 +1269,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		if err := copyFile(src, currentBtopSetupScriptPath(), 0o755); err != nil {
 			return err
 		}
-		cmd := exec.Command(currentBtopSetupScriptPath(), "--runner", runner)
+		cmd := exec.Command("sh", currentBtopSetupScriptPath(), "--runner", runner)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			msg := strings.TrimSpace(string(out))
 			if msg == "" {

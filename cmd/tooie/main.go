@@ -1236,7 +1236,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.lastStatus = "Restore unavailable: " + err.Error()
 					return m, nil
 				}
-				cmd := exec.Command(currentRestoreScriptPath(), id)
+				cmd := exec.Command("sh", currentRestoreScriptPath(), id)
 				m.lastStatus = "Restoring " + id + "..."
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 					if err != nil {
@@ -1621,7 +1621,7 @@ func runResetBootstrapCmd() tea.Cmd {
 		if err := ensureTooieSupportScripts(); err != nil {
 			return statusMsg("Reset unavailable: " + err.Error())
 		}
-		cmd := exec.Command(currentResetScriptPath())
+		cmd := exec.Command("sh", currentResetScriptPath())
 		out, err := cmd.CombinedOutput()
 		outText := strings.TrimSpace(string(out))
 		if err != nil {
@@ -1652,7 +1652,7 @@ func runSetupBtopCmd() tea.Cmd {
 		if err := ensureTooieSupportScripts(); err != nil {
 			return statusMsg("Btop setup unavailable: " + err.Error())
 		}
-		cmd := exec.Command(currentBtopSetupScriptPath())
+		cmd := exec.Command("sh", currentBtopSetupScriptPath())
 		out, err := cmd.CombinedOutput()
 		outText := strings.TrimSpace(string(out))
 		if err != nil {
@@ -5341,6 +5341,10 @@ func readTooieResources(timeout time.Duration) (cpuPct float64, memUsed uint64, 
 }
 
 func readTooieEndpointToken() (string, string, bool) {
+	settings, ok := loadTooieSettings()
+	if !ok || normalizePlatformProfile(settings.Platform.Profile) != "termux-shizuku" {
+		return "", "", false
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return "", "", false

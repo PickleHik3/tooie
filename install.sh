@@ -309,6 +309,7 @@ platform="$platform_pick"
 backend="none"
 fish_mode="off"
 starship_mode="off"
+btop_mode="auto"
 
 if [ "$platform" = "termux" ]; then
   backend_pick="$(prompt_menu "Choose Termux elevated backend" 1 "none" "rish" "root" "shizuku")"
@@ -336,6 +337,15 @@ if theme_selection_has "$theme_items" "starship"; then
   esac
 fi
 
+if [ "$platform" = "termux" ] && { [ "$backend" = "rish" ] || [ "$backend" = "shizuku" ]; }; then
+  btop_pick="$(prompt_menu "Setup remote btop helper + fish aliases (btop/mini-btop)?" 2 "yes" "no")"
+  case "$btop_pick" in
+    yes) btop_mode="on" ;;
+    no) btop_mode="off" ;;
+    *) err "unknown btop selection: $btop_pick"; exit 1 ;;
+  esac
+fi
+
 if [ "$platform" = "termux" ] && [ "$backend" = "shizuku" ]; then
   if ! have launcherctl; then
     err "backend=shizuku requires launcherctl (termux-launcher build)."
@@ -346,6 +356,13 @@ fi
 if [ "$platform" = "termux" ] && [ "$backend" = "rish" ]; then
   if ! have rish; then
     err "backend=rish requires a working 'rish' binary in PATH."
+    exit 1
+  fi
+fi
+
+if [ "$platform" = "termux" ] && [ "$backend" = "shizuku" ] && [ "$btop_mode" = "on" ]; then
+  if ! have rish; then
+    err "btop helper for backend=shizuku requires a working 'rish' binary in PATH."
     exit 1
   fi
 fi
@@ -394,6 +411,12 @@ fi
 printf '  themed items:  %s\n' "$theme_items"
 printf '  fish:          %s\n' "$fish_summary"
 printf '  starship:      %s\n' "$starship_summary"
+if [ "$platform" = "termux" ] && { [ "$backend" = "rish" ] || [ "$backend" = "shizuku" ]; }; then
+  printf '  btop helper:   %s\n' "$btop_mode"
+  if [ "$btop_mode" = "on" ]; then
+    printf '  btop aliases:  btop, mini-btop\n'
+  fi
+fi
 printf '  package mgr:   %s\n' "$pm"
 printf '  packages:      %s\n' "$resolved_pkgs"
 if [ -n "$missing_pkgs" ]; then
@@ -427,4 +450,5 @@ exec env TOOIE_REPO_DIR="$REPO_DIR" "$BIN_DIR/tooie" setup --non-interactive \
   --install-backend "$backend" \
   --install-items "$theme_items" \
   --install-fish "$fish_mode" \
-  --install-starship "$starship_mode"
+  --install-starship "$starship_mode" \
+  --install-btop "$btop_mode"

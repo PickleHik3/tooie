@@ -294,17 +294,7 @@ collect_local_json(){
       use_termux_api=1
     fi
 
-    # Prefer sysfs battery info to avoid noisy Termux:API socket failures from background tmux updates.
-    binfo="$(read_sysfs_battery 2>/dev/null || true)"
-    if [ -n "$binfo" ]; then
-      bat_level="${binfo%%|*}"
-      bchg="${binfo#*|}"
-      if [ "$bchg" = "1" ]; then
-        bat_charging=true
-      fi
-    fi
-
-    if [ "$bat_level" -eq 0 ] && [ "$use_termux_api" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
+    if [ "$use_termux_api" = "1" ] && command -v termux-battery-status >/dev/null 2>&1; then
       if command -v timeout >/dev/null 2>&1; then bjson="$(timeout 1 termux-battery-status 2>/dev/null || true)"; else bjson="$(termux-battery-status 2>/dev/null || true)"; fi
       if [ -n "$bjson" ]; then
         if command -v jq >/dev/null 2>&1; then
@@ -315,6 +305,18 @@ collect_local_json(){
           status="$(printf '%s' "$bjson" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
         fi
         case "$status" in CHARGING|FULL) bat_charging=true;; esac
+      fi
+    fi
+
+    if [ "$bat_level" -eq 0 ]; then
+      # Fallback to sysfs battery info if Termux API is unavailable/failing.
+      binfo="$(read_sysfs_battery 2>/dev/null || true)"
+      if [ -n "$binfo" ]; then
+        bat_level="${binfo%%|*}"
+        bchg="${binfo#*|}"
+        if [ "$bchg" = "1" ]; then
+          bat_charging=true
+        fi
       fi
     fi
   fi

@@ -1265,6 +1265,7 @@ func applyThemeFiles(payload computedPayload, backupDir string) error {
 
 	_ = writeApplyProgress("Writing tmux theme", 0.56)
 	_ = syncManagedTmuxRuntimeFilesFromRepo()
+	_ = syncManagedTmuxProfileEnvFromRepo(profile)
 	_ = syncManagedFishConfigFromRepo()
 	_ = syncManagedStarshipTemplatesFromRepo()
 	if err := ensureFileWithDirs(tmuxConf); err != nil {
@@ -1475,6 +1476,16 @@ func syncManagedTmuxRuntimeFilesFromRepo() error {
 		}
 	}
 	return nil
+}
+
+func syncManagedTmuxProfileEnvFromRepo(profile string) error {
+	profile = normalizePlatformProfile(profile)
+	src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", "profiles", profile+".env"))
+	if err != nil {
+		// Applying a theme should still succeed from installed-only environments.
+		return nil
+	}
+	return copyFile(src, filepath.Join(managedTmuxDir(), "profile.env"), 0o644)
 }
 
 func syncManagedFishConfigFromRepo() error {

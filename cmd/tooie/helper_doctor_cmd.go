@@ -101,7 +101,7 @@ func runBtopHelperCommand(args []string) int {
 		return 1
 	}
 	if _, err := os.Stat(currentBtopSetupScriptPath()); err == nil {
-		cmd := exec.Command(currentBtopSetupScriptPath(), "--runner", r)
+		cmd := exec.Command("sh", currentBtopSetupScriptPath(), "--runner", r)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {

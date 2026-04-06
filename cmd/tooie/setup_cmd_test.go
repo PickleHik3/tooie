@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestApplyInstallPlanTermuxNoneDisablesCPUWidget(t *testing.T) {
+func TestApplyInstallPlanTermuxNoneKeepsWidgetsEnabled(t *testing.T) {
 	settings := defaultTooieSettings()
 	env := setupEnv{IsTermux: true}
 	plan := setupInstallPlan{Platform: "termux", Backend: "none", ThemeItems: "tmux"}
@@ -15,8 +15,8 @@ func TestApplyInstallPlanTermuxNoneDisablesCPUWidget(t *testing.T) {
 	if settings.Modules.BtopHelper {
 		t.Fatalf("btop helper should be off for backend none")
 	}
-	if settings.Widgets.WidgetCPU {
-		t.Fatalf("cpu widget should default off for backend none")
+	if !settings.Widgets.WidgetBattery || !settings.Widgets.WidgetCPU || !settings.Widgets.WidgetRAM || !settings.Widgets.WidgetWeather {
+		t.Fatalf("termux backend none should keep all widgets enabled for unprivileged local metrics")
 	}
 	if !settings.Modules.TmuxTheme {
 		t.Fatalf("tmux theme should be enabled for tmux item")
@@ -86,6 +86,36 @@ func TestApplyInstallPlanTermuxCombinationTargets(t *testing.T) {
 	}
 	if settings.Modules.StarshipMode != "themed" || !settings.Modules.PeaclockTheme || !settings.Modules.FishBootstrap {
 		t.Fatalf("starship selection should enable themed starship + peaclock + fish defaults")
+	}
+}
+
+func TestApplyInstallPlanTermuxRishBtopOverrideOff(t *testing.T) {
+	settings := defaultTooieSettings()
+	env := setupEnv{IsTermux: true}
+	plan := setupInstallPlan{Platform: "termux", Backend: "rish", ThemeItems: "tmux", Btop: "off"}
+	if err := applyInstallPlan(&settings, env, plan); err != nil {
+		t.Fatalf("applyInstallPlan() error: %v", err)
+	}
+	if settings.Modules.BtopHelper {
+		t.Fatalf("btop helper should be off when explicitly disabled")
+	}
+	if settings.Privileged.Runner != "rish" {
+		t.Fatalf("runner should remain rish for termux-rish profile, got %q", settings.Privileged.Runner)
+	}
+}
+
+func TestApplyInstallPlanTermuxShizukuBtopOverrideOnForcesRishRunner(t *testing.T) {
+	settings := defaultTooieSettings()
+	env := setupEnv{IsTermux: true}
+	plan := setupInstallPlan{Platform: "termux", Backend: "shizuku", ThemeItems: "tmux", Btop: "on"}
+	if err := applyInstallPlan(&settings, env, plan); err != nil {
+		t.Fatalf("applyInstallPlan() error: %v", err)
+	}
+	if !settings.Modules.BtopHelper {
+		t.Fatalf("btop helper should be enabled when explicitly requested")
+	}
+	if settings.Privileged.Runner != "rish" {
+		t.Fatalf("runner should be forced to rish for shizuku+rish btop flow, got %q", settings.Privileged.Runner)
 	}
 }
 
