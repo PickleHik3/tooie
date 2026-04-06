@@ -780,9 +780,7 @@ func printSetupNextSteps(settings tooieSettings) {
 	fmt.Println()
 	fmt.Println("Next:")
 	fmt.Printf("  %s  open the Tooie TUI\n", cmdStyle.Render("tooie"))
-	if normalizePlatformProfile(settings.Platform.Profile) == "linux" {
-		fmt.Printf("  %s  set wallpaper path for theme generation\n", cmdStyle.Render("tooie /path/to/wallpaper.jpg"))
-	}
+	fmt.Printf("  %s  set wallpaper path for theme generation\n", cmdStyle.Render("tooie /path/to/wallpaper.jpg"))
 	if normalizePlatformProfile(settings.Platform.Profile) == "termux-shizuku" {
 		fmt.Printf("  %s  restart launcher (Shizuku profile)\n", cmdStyle.Render("tooie restart"))
 	}

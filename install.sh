@@ -401,6 +401,7 @@ if [ -n "$missing_pkgs" ]; then
 fi
 printf '  binary target: %s\n' "$BIN_DIR/tooie"
 printf '  config root:   %s\n' "$HOME_DIR/.config/tooie"
+printf '  wallpaper cmd: %s\n' "tooie /path/to/wallpaper.jpg"
 
 if ! confirm_yes_no "Proceed with installation (y/n)?"; then
   log "Installation cancelled."
