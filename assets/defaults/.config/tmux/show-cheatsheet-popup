@@ -8,26 +8,17 @@ title="$(tmux show-option -gqv '@tooie-cheatsheet-title' 2>/dev/null || true)"
 [ -n "$title" ] || title="    Keybinds    "
 client_w="$(tmux display-message -p '#{client_width}')"
 client_h="$(tmux display-message -p '#{client_height}')"
-mode="wide"
+width=$((client_w - 2))
+height=18
+pos_x="C"
+pos_y="C"
 
-if [ "$client_w" -lt 76 ] || [ "$client_h" -lt 35 ]; then
-  mode="narrow"
-  width="$client_w"
-  height=$((client_h - 2))
-  pos_x="C"
-  pos_y="C"
-else
-  width=72
-  height=23
-  pos_x="R"
-  pos_y="S"
-fi
-
-[ "$width" -lt 52 ] && width=52
+[ "$width" -gt 90 ] && width=90
+[ "$width" -lt 56 ] && width=56
 if [ "$height" -gt $((client_h - 2)) ]; then
   height=$((client_h - 2))
 fi
-[ "$height" -lt 12 ] && height=12
+[ "$height" -lt 14 ] && height=14
 
 tmux display-popup \
   -E \
@@ -36,4 +27,4 @@ tmux display-popup \
   -w "$width" \
   -h "$height" \
   -T "$title" \
-  "TOOIE_CHEATSHEET_MODE=$mode TOOIE_CHEATSHEET_WIDTH=$width $SCRIPT_DIR/show-cheatsheet-view"
+  "TOOIE_CHEATSHEET_WIDTH=$width TOOIE_CHEATSHEET_HEIGHT=$height $SCRIPT_DIR/show-cheatsheet-view"

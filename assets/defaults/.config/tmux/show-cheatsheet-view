@@ -6,19 +6,10 @@ cyan="$(printf '\033[38;5;117m')"
 green="$(printf '\033[38;5;114m')"
 yellow="$(printf '\033[38;5;221m')"
 muted="$(printf '\033[38;5;245m')"
-rose="$(printf '\033[38;5;217m')"
 
 client_w="$(tmux display-message -p '#{client_width}')"
-client_h="$(tmux display-message -p '#{client_height}')"
-mode="${TOOIE_CHEATSHEET_MODE:-}"
-if [ -z "$mode" ]; then
-  if [ "$client_w" -lt 76 ] || [ "$client_h" -lt 35 ]; then
-    mode="narrow"
-  else
-    mode="wide"
-  fi
-fi
 popup_w="${TOOIE_CHEATSHEET_WIDTH:-$client_w}"
+popup_h="${TOOIE_CHEATSHEET_HEIGHT:-0}"
 
 cleanup() {
   printf '\033[?25h'
@@ -26,21 +17,16 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 printf '\033[?25l'
-
-repeat_char() {
-  char="$1"
-  count="$2"
-  i=0
-  while [ "$i" -lt "$count" ]; do
-    printf '%s' "$char"
-    i=$((i + 1))
-  done
-}
+printf '\033[H\033[2J'
 
 pad_text() {
   text="$1"
   width="$2"
   len=${#text}
+  if [ "$len" -gt "$width" ]; then
+    text="$(printf '%s' "$text" | cut -c "1-$width")"
+    len=${#text}
+  fi
   printf '%s' "$text"
   while [ "$len" -lt "$width" ]; do
     printf ' '
@@ -48,177 +34,72 @@ pad_text() {
   done
 }
 
-emit_half_box() {
-  title="$1"
-  rows="$2"
-  shift 2
-  fill=$((30 - ${#title}))
-  [ "$fill" -lt 0 ] && fill=0
-  printf '┌ %s%s%s ' "$cyan" "$title" "$reset"
-  repeat_char '─' "$fill"
-  printf '┐\n'
-  i=0
-  while [ "$i" -lt "$rows" ]; do
-    action="$1"
-    bind="$2"
-    shift 2
-    action_p="$(pad_text "$action" 10)"
-    bind_p="$(pad_text "$bind" 18)"
-    printf '│ %s%s%s  %s%s%s │\n' \
-      "$yellow" "$action_p" "$reset" \
-      "$green" "$bind_p" "$reset"
-    i=$((i + 1))
-  done
-  printf '└'
-  repeat_char '─' 32
-  printf '┘\n'
-}
-
-emit_wide_box() {
-  title="$1"
-  rows="$2"
-  shift 2
-  fill=$((66 - ${#title}))
-  [ "$fill" -lt 0 ] && fill=0
-  printf '┌ %s%s%s ' "$cyan" "$title" "$reset"
-  repeat_char '─' "$fill"
-  printf '┐\n'
-  i=0
-  while [ "$i" -lt "$rows" ]; do
-    action="$1"
-    bind="$2"
-    shift 2
-    action_p="$(pad_text "$action" 12)"
-    bind_p="$(pad_text "$bind" 52)"
-    printf '│ %s%s%s  %s%s%s │\n' \
-      "$yellow" "$action_p" "$reset" \
-      "$green" "$bind_p" "$reset"
-    i=$((i + 1))
-  done
-  printf '└'
-  repeat_char '─' 68
-  printf '┘\n'
-}
-
-emit_full_box() {
-  title="$1"
-  rows="$2"
-  shift 2
-  inner_w=$((popup_w - 6))
-  [ "$inner_w" -lt 34 ] && inner_w=34
-  action_w=12
-  bind_w=$((inner_w - action_w - 2))
-  [ "$bind_w" -lt 18 ] && bind_w=18
-  fill=$((inner_w - ${#title} - 2))
-  [ "$fill" -lt 0 ] && fill=0
-  printf '┌ %s%s%s ' "$cyan" "$title" "$reset"
-  repeat_char '─' "$fill"
-  printf '┐\n'
-  i=0
-  while [ "$i" -lt "$rows" ]; do
-    action="$1"
-    bind="$2"
-    shift 2
-    action_p="$(pad_text "$action" "$action_w")"
-    bind_p="$(pad_text "$bind" "$bind_w")"
-    printf '│ %s%s%s  %s%s%s │\n' \
-      "$yellow" "$action_p" "$reset" \
-      "$green" "$bind_p" "$reset"
-    i=$((i + 1))
-  done
-  printf '└'
-  repeat_char '─' "$inner_w"
-  printf '┘\n'
-}
-
-emit_narrow_line() {
+format_cell() {
   action="$1"
   bind="$2"
-  printf ' %s%-12s%s  %s%s%s\n' \
-    "$yellow" "$action" "$reset" \
-    "$green" "$bind" "$reset"
+  cell_w="$3"
+  action_w="$4"
+  bind_w=$((cell_w - action_w - 2))
+  [ "$bind_w" -lt 4 ] && bind_w=4
+  action_p="$(pad_text "$action" "$action_w")"
+  bind_p="$(pad_text "$bind" "$bind_w")"
+  printf '%s%s%s %s%s%s' \
+    "$yellow" "$action_p" "$reset" \
+    "$green" "$bind_p" "$reset"
 }
 
-join_pair() {
-  left_file="$1"
-  right_file="$2"
-  paste "$left_file" "$right_file" | while IFS="	" read -r left right; do
-    printf '%s  %s\n' "$left" "$right"
-  done
+print_titles() {
+  left="$1"
+  right="$2"
+  left_p="$(pad_text "$left" "$col_w")"
+  right_p="$(pad_text "$right" "$col_w")"
+  printf ' %s%s%s  %s%s%s\n' \
+    "$cyan" "$left_p" "$reset" \
+    "$cyan" "$right_p" "$reset"
 }
 
-printf ' %sPrefix:%s %sCtrl+b / Ctrl+Space%s\n' \
-  "$muted" "$reset" "$rose" "$reset"
+print_row() {
+  l_action="$1"
+  l_bind="$2"
+  r_action="$3"
+  r_bind="$4"
+  l_cell="$(format_cell "$l_action" "$l_bind" "$col_w" "$action_w")"
+  r_cell="$(format_cell "$r_action" "$r_bind" "$col_w" "$action_w")"
+  printf ' %s  %s\n' "$l_cell" "$r_cell"
+}
 
-if [ "$mode" = "narrow" ]; then
-  printf '%sQuick Keys%s\n' "$cyan" "$reset"
-  emit_narrow_line "New Win" "Prefix + c"
-  emit_narrow_line "Rename Win" "Prefix + r"
-  emit_narrow_line "Close Win" "Prefix + k"
-  emit_narrow_line "Jump Win" "Alt + 1..9"
-  emit_narrow_line "Cycle Win" "Alt + L/R"
-  emit_narrow_line "Last Win" "Alt + z"
-  emit_narrow_line "Move Win" "Alt + Shift+L/R"
-  emit_narrow_line "Split Pane" "Prefix + h / Prefix + v"
-  emit_narrow_line "Close Pane" "Prefix + x"
-  emit_narrow_line "Pane Focus" "Ctrl+Alt + Arrows"
-  emit_narrow_line "Pane Resize" "Ctrl+Alt+Shift + Arrows"
-  emit_narrow_line "Session New" "Prefix + C"
-  emit_narrow_line "Session Name" "Prefix + R"
-  emit_narrow_line "Session Kill" "Prefix + K"
-  emit_narrow_line "Session Prev/Nxt" "Prefix + P / Prefix + N"
-  emit_narrow_line "Session Cycle" "Alt + Up/Dn"
-  emit_narrow_line "Apps Bar" "Alt + Enter"
-  emit_narrow_line "Search" "Type / in terminal"
-  emit_narrow_line "Customize" "Run launcherctl"
-  emit_narrow_line "Copy Mode" "v select, y copy"
-  printf '\n%sMisc%s\n' "$cyan" "$reset"
-  emit_narrow_line "Reload" "Prefix + q"
-  emit_narrow_line "Search / Theme" "Type /, run launcherctl"
+usable_w=$((popup_w - 4))
+[ "$usable_w" -lt 44 ] && usable_w=44
+col_w=$(( (usable_w - 2) / 2 ))
+[ "$col_w" -lt 21 ] && col_w=21
+action_w=11
+[ "$col_w" -lt 25 ] && action_w=10
+[ "$col_w" -lt 22 ] && action_w=9
+
+print_titles "Windows" "Panes"
+print_row "New" "Prefix + c" "Below" "Prefix + h"
+print_row "Rename" "Prefix + r" "Right" "Prefix + v"
+print_row "Close" "Prefix + k" "Close" "Prefix + x"
+print_row "Jump" "Alt + 1..9" "Focus" "C-A + Arrows"
+print_row "Cycle" "Alt + L/R" "Resize" "C-A-S + Arrows"
+print_row "Last" "Alt + z" "" ""
+print_row "Move" "Alt + Shift+L/R" "" ""
+printf '\n'
+print_titles "Sessions" "Copy Mode"
+print_row "New" "Prefix + C" "Start" "Prefix + ["
+print_row "Rename" "Prefix + R" "Select" "v"
+print_row "Close" "Prefix + K" "Square Select" "Ctrl + v"
+print_row "Prev/Next" "Prefix+P/N" "Copy + Exit" "y"
+print_row "Cycle" "Alt + Up/Dn" "Reload tmux" "Prefix + q"
+
+if [ "$popup_h" -gt 3 ] 2>/dev/null; then
+  hint_row=$((popup_h - 2))
+  [ "$hint_row" -lt 1 ] && hint_row=1
+  printf '\033[%s;2H\033[K' "$hint_row"
 else
-  left_top="$(mktemp)"
-  right_top="$(mktemp)"
-  left_mid="$(mktemp)"
-  right_mid="$(mktemp)"
-  trap 'rm -f "$left_top" "$right_top" "$left_mid" "$right_mid"; cleanup' EXIT HUP INT TERM
-
-  emit_half_box "Windows" 7 \
-    "New" "Prefix + c" \
-    "Rename" "Prefix + r" \
-    "Close" "Prefix + k" \
-    "Jump" "Alt + 1..9" \
-    "Cycle" "Alt + L/R" \
-    "Last" "Alt + z" \
-    "Move" "Alt + Shift+L/R" >"$left_top"
-  emit_half_box "Panes" 7 \
-    "Below" "Prefix + h" \
-    "Right" "Prefix + v" \
-    "Close" "Prefix + x" \
-    "Focus" "C-A + Arrows" \
-    "Resize" "C-A-S + Arrows" \
-    "" "" \
-    "" "" >"$right_top"
-  join_pair "$left_top" "$right_top"
-
-  emit_half_box "Sessions" 5 \
-    "New" "Prefix + C" \
-    "Rename" "Prefix + R" \
-    "Close" "Prefix + K" \
-    "Prev/Next" "Prefix+P/N" \
-    "Cycle" "Alt + Up/Dn" >"$left_mid"
-  emit_half_box "Apps" 5 \
-    "Apps Bar" "Alt + Enter" \
-    "Search" "Type / in terminal" \
-    "Customize" "Run launcherctl" \
-    "" "" \
-    "" "" >"$right_mid"
-  join_pair "$left_mid" "$right_mid"
-
-  emit_wide_box "Misc" 2 \
-    "Reload" "Prefix + q" \
-    "Copy Mode" "v select, y copy"
+  printf '\n'
 fi
+printf '%sAny key to close%s' "$muted" "$reset"
 
-printf ' %sAny key to close%s' "$muted" "$reset"
 stty -echo raw
 dd bs=1 count=1 >/dev/null 2>&1 || true
