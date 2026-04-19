@@ -15,7 +15,7 @@ func TestApplyInstallPlanTermuxNoneKeepsWidgetsEnabled(t *testing.T) {
 	if settings.Modules.BtopHelper {
 		t.Fatalf("btop helper should be off for backend none")
 	}
-	if !settings.Widgets.WidgetBattery || !settings.Widgets.WidgetCPU || !settings.Widgets.WidgetRAM || !settings.Widgets.WidgetWeather {
+	if !settings.Widgets.WidgetBattery || !settings.Widgets.WidgetCPU || !settings.Widgets.WidgetRAM || !settings.Widgets.WidgetStorage || !settings.Widgets.WidgetWeather {
 		t.Fatalf("termux backend none should keep all widgets enabled for unprivileged local metrics")
 	}
 	if !settings.Modules.TmuxTheme {

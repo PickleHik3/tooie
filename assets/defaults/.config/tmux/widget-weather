@@ -24,10 +24,11 @@ sep_color="$(get_tmux_option '@status-tmux-color-separator' 'colour8')"
 show_battery="$(get_tmux_option '@status-tmux-widget-battery' 'on')"
 show_cpu="$(get_tmux_option '@status-tmux-widget-cpu' 'on')"
 show_ram="$(get_tmux_option '@status-tmux-widget-ram' 'on')"
+show_storage="$(get_tmux_option '@status-tmux-widget-storage' 'on')"
 
 prefix=""
 if is_on "$bg_right"; then
-  if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram"; then
+  if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram" || is_on "$show_storage"; then
     case "$gap_right" in
       none) prefix="" ;;
       *) prefix=" " ;;
@@ -46,7 +47,7 @@ if is_on "$bg_right"; then
   exit 0
 fi
 
-if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram"; then
-  prefix="#[fg=${sep_color}] |#[default] "
+if is_on "$show_battery" || is_on "$show_cpu" || is_on "$show_ram" || is_on "$show_storage"; then
+	prefix="#[fg=${sep_color}] |#[default] "
 fi
 printf '%s#[fg=%s]%s#[default]' "$prefix" "$weather_color" "$wx"

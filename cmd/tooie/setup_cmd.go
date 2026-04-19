@@ -220,11 +220,13 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 			cur.Widgets.WidgetBattery = true
 			cur.Widgets.WidgetCPU = true
 			cur.Widgets.WidgetRAM = true
+			cur.Widgets.WidgetStorage = true
 			cur.Widgets.WidgetWeather = true
 		} else {
 			cur.Widgets.WidgetBattery = true
 			cur.Widgets.WidgetCPU = true
 			cur.Widgets.WidgetRAM = true
+			cur.Widgets.WidgetStorage = true
 			cur.Widgets.WidgetWeather = true
 		}
 	case "rish":
@@ -233,6 +235,7 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 		cur.Widgets.WidgetBattery = true
 		cur.Widgets.WidgetCPU = true
 		cur.Widgets.WidgetRAM = true
+		cur.Widgets.WidgetStorage = true
 		cur.Widgets.WidgetWeather = true
 	case "root":
 		cur.Modules.BtopHelper = true
@@ -240,6 +243,7 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 		cur.Widgets.WidgetBattery = true
 		cur.Widgets.WidgetCPU = true
 		cur.Widgets.WidgetRAM = true
+		cur.Widgets.WidgetStorage = true
 		cur.Widgets.WidgetWeather = true
 	case "shizuku":
 		cur.Modules.BtopHelper = true
@@ -247,6 +251,7 @@ func applyInstallPlan(cur *tooieSettings, env setupEnv, plan setupInstallPlan) e
 		cur.Widgets.WidgetBattery = true
 		cur.Widgets.WidgetCPU = true
 		cur.Widgets.WidgetRAM = true
+		cur.Widgets.WidgetStorage = true
 		cur.Widgets.WidgetWeather = true
 	}
 
@@ -1290,6 +1295,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		"--widget-battery", onOffFlag(settings.Widgets.WidgetBattery),
 		"--widget-cpu", onOffFlag(settings.Widgets.WidgetCPU),
 		"--widget-ram", onOffFlag(settings.Widgets.WidgetRAM),
+		"--widget-storage", onOffFlag(settings.Widgets.WidgetStorage),
 		"--widget-weather", onOffFlag(settings.Widgets.WidgetWeather),
 	}
 	if runThemeApplyCommand(themeArgs) != 0 {

@@ -111,6 +111,7 @@ type themeApplyConfig struct {
 	WidgetBattery        bool
 	WidgetCPU            bool
 	WidgetRAM            bool
+	WidgetStorage        bool
 	WidgetWeather        bool
 }
 
@@ -207,6 +208,7 @@ func runThemeApplyCommand(args []string) int {
 	meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
+	meta["widget_storage"] = onOffFlag(cfg.WidgetStorage)
 	meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	if cfg.ThemeSource != "preset" {
 		family := canonicalProfile(cfg.StyleFamily)
@@ -391,6 +393,7 @@ func computeThemePayload(cfg themeApplyConfig, workDir string) (computedPayload,
 	out.Meta["widget_battery"] = onOffFlag(cfg.WidgetBattery)
 	out.Meta["widget_cpu"] = onOffFlag(cfg.WidgetCPU)
 	out.Meta["widget_ram"] = onOffFlag(cfg.WidgetRAM)
+	out.Meta["widget_storage"] = onOffFlag(cfg.WidgetStorage)
 	out.Meta["widget_weather"] = onOffFlag(cfg.WidgetWeather)
 	for k, v := range autoMeta {
 		out.Meta[k] = v
@@ -828,11 +831,13 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 		WidgetBattery:      true,
 		WidgetCPU:          true,
 		WidgetRAM:          true,
+		WidgetStorage:      true,
 		WidgetWeather:      true,
 	}
 	widgetBattery := "on"
 	widgetCPU := "on"
 	widgetRAM := "on"
+	widgetStorage := "on"
 	widgetWeather := "on"
 	fs := flag.NewFlagSet("theme apply", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -870,6 +875,7 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	fs.StringVar(&widgetBattery, "widget-battery", widgetBattery, "")
 	fs.StringVar(&widgetCPU, "widget-cpu", widgetCPU, "")
 	fs.StringVar(&widgetRAM, "widget-ram", widgetRAM, "")
+	fs.StringVar(&widgetStorage, "widget-storage", widgetStorage, "")
 	fs.StringVar(&widgetWeather, "widget-weather", widgetWeather, "")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
@@ -981,6 +987,10 @@ func parseThemeApplyFlags(args []string) (themeApplyConfig, error) {
 	cfg.WidgetRAM, err = parseOnOffValue(widgetRAM)
 	if err != nil {
 		return cfg, fmt.Errorf("invalid --widget-ram value: %s", widgetRAM)
+	}
+	cfg.WidgetStorage, err = parseOnOffValue(widgetStorage)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid --widget-storage value: %s", widgetStorage)
 	}
 	cfg.WidgetWeather, err = parseOnOffValue(widgetWeather)
 	if err != nil {
@@ -1462,6 +1472,7 @@ func syncManagedTmuxRuntimeFilesFromRepo() error {
 		"widget-weather",
 		"widget-cpu",
 		"widget-ram",
+		"widget-storage",
 		"widget-battery",
 	}
 	for _, name := range files {
@@ -1698,6 +1709,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	widgetBattery := onOffFlag(parseOnOffDefault(payload.Meta["widget_battery"], true))
 	widgetCPU := onOffFlag(parseOnOffDefault(payload.Meta["widget_cpu"], true))
 	widgetRAM := onOffFlag(parseOnOffDefault(payload.Meta["widget_ram"], true))
+	widgetStorage := onOffFlag(parseOnOffDefault(payload.Meta["widget_storage"], true))
 	widgetWeather := onOffFlag(parseOnOffDefault(payload.Meta["widget_weather"], true))
 	surfaceHighest := statusHighestBG
 	primaryBase := nonBlackStatusColor(primaryRole, payload.Foreground)
@@ -1965,6 +1977,7 @@ set -g @status-tmux-palette "%s"
 set -g @status-tmux-widget-battery "%s"
 set -g @status-tmux-widget-cpu "%s"
 set -g @status-tmux-widget-ram "%s"
+set -g @status-tmux-widget-storage "%s"
 set -g @status-tmux-widget-weather "%s"
 set -g @status-tmux-widget-gap-right "%s"
 set -g @status-tmux-color-separator "%s"
@@ -2044,7 +2057,7 @@ set -g @status-tmux-fg-on-accent "%s"
 		currentMatchBG, currentMatchFG,
 		payload.Roles["secondary"],
 		statusPalette,
-		widgetBattery, widgetCPU, widgetRAM, widgetWeather,
+		widgetBattery, widgetCPU, widgetRAM, widgetStorage, widgetWeather,
 		rightGap,
 		separatorColor, weatherColor, chargingColor,
 		batteryColors[0], batteryColors[1], batteryColors[2], batteryColors[3], batteryColors[4], batteryColors[5],

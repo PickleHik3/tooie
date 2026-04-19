@@ -64,12 +64,14 @@ func TestLoadShellSettingsFromBackups(t *testing.T) {
 		"widget_battery": "off",
 		"widget_cpu":     "on",
 		"widget_ram":     "0",
+		"widget_storage": "1",
 		"widget_weather": "1",
 	}}})
 	want := persistedShellSettings{
 		WidgetBattery: false,
 		WidgetCPU:     true,
 		WidgetRAM:     false,
+		WidgetStorage: true,
 		WidgetWeather: true,
 	}
 	if !reflect.DeepEqual(settings, want) {
@@ -85,6 +87,7 @@ func TestPersistedShellSettingsRoundTrip(t *testing.T) {
 		WidgetBattery: false,
 		WidgetCPU:     true,
 		WidgetRAM:     true,
+		WidgetStorage: true,
 		WidgetWeather: false,
 	}
 	if err := savePersistedShellSettings(in); err != nil {
@@ -273,11 +276,11 @@ func TestKeybindsCycleThemeSettings(t *testing.T) {
 	}
 
 	m := model{
-		page:        pageTheme,
-		themeSource: defaultSource,
-		mode:        defaultMode,
-		profile:     defaultProfile,
-		statusTheme: defaultStatusTheme,
+		page:           pageTheme,
+		themeSource:    defaultSource,
+		mode:           defaultMode,
+		profile:        defaultProfile,
+		statusTheme:    defaultStatusTheme,
 		starshipPrompt: "gruvbox",
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})

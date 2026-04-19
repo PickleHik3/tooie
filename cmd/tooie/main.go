@@ -133,6 +133,7 @@ type persistedShellSettings struct {
 	WidgetBattery bool `json:"widget_battery"`
 	WidgetCPU     bool `json:"widget_cpu"`
 	WidgetRAM     bool `json:"widget_ram"`
+	WidgetStorage bool `json:"widget_storage"`
 	WidgetWeather bool `json:"widget_weather"`
 }
 
@@ -241,6 +242,7 @@ type model struct {
 	widgetBattery     bool
 	widgetCPU         bool
 	widgetRAM         bool
+	widgetStorage     bool
 	widgetWeather     bool
 	clockOnly         bool
 	miniShowClock     bool
@@ -318,6 +320,7 @@ func initialModel() model {
 		widgetBattery:   true,
 		widgetCPU:       true,
 		widgetRAM:       true,
+		widgetStorage:   true,
 		widgetWeather:   true,
 		extractSwatches: map[string]string{},
 	}
@@ -556,6 +559,7 @@ func defaultShellSettings() persistedShellSettings {
 		WidgetBattery: true,
 		WidgetCPU:     true,
 		WidgetRAM:     true,
+		WidgetStorage: true,
 		WidgetWeather: true,
 	}
 }
@@ -572,6 +576,7 @@ func (m *model) applyShellSettings(settings persistedShellSettings) {
 	m.widgetBattery = settings.WidgetBattery
 	m.widgetCPU = settings.WidgetCPU
 	m.widgetRAM = settings.WidgetRAM
+	m.widgetStorage = settings.WidgetStorage
 	m.widgetWeather = settings.WidgetWeather
 }
 
@@ -580,6 +585,7 @@ func (m model) currentShellSettings() persistedShellSettings {
 		WidgetBattery: m.widgetBattery,
 		WidgetCPU:     m.widgetCPU,
 		WidgetRAM:     m.widgetRAM,
+		WidgetStorage: m.widgetStorage,
 		WidgetWeather: m.widgetWeather,
 	}
 }
@@ -593,6 +599,7 @@ func loadShellSettingsFromBackups(backups []backup) persistedShellSettings {
 	out.WidgetBattery = parseOnOffDefault(meta["widget_battery"], true)
 	out.WidgetCPU = parseOnOffDefault(meta["widget_cpu"], true)
 	out.WidgetRAM = parseOnOffDefault(meta["widget_ram"], true)
+	out.WidgetStorage = parseOnOffDefault(meta["widget_storage"], true)
 	out.WidgetWeather = parseOnOffDefault(meta["widget_weather"], true)
 	return out
 }
@@ -1496,6 +1503,8 @@ func (m model) segmentEnabled(target string) bool {
 		return m.widgetCPU
 	case "widget_ram":
 		return m.widgetRAM
+	case "widget_storage":
+		return m.widgetStorage
 	case "widget_weather":
 		return m.widgetWeather
 	default:
@@ -1513,6 +1522,9 @@ func (m model) segmentSummary() string {
 	}
 	if m.widgetRAM {
 		labels = append(labels, "RAM")
+	}
+	if m.widgetStorage {
+		labels = append(labels, "Storage")
 	}
 	if m.widgetWeather {
 		labels = append(labels, "Weather")
@@ -1532,6 +1544,8 @@ func (m *model) toggleSegment(target string) {
 		m.widgetCPU = !m.widgetCPU
 	case "widget_ram":
 		m.widgetRAM = !m.widgetRAM
+	case "widget_storage":
+		m.widgetStorage = !m.widgetStorage
 	case "widget_weather":
 		m.widgetWeather = !m.widgetWeather
 	default:
@@ -1596,6 +1610,7 @@ func syncTmuxWidgetSettings(settings persistedShellSettings) error {
 		{key: "@status-tmux-widget-battery", val: settings.WidgetBattery},
 		{key: "@status-tmux-widget-cpu", val: settings.WidgetCPU},
 		{key: "@status-tmux-widget-ram", val: settings.WidgetRAM},
+		{key: "@status-tmux-widget-storage", val: settings.WidgetStorage},
 		{key: "@status-tmux-widget-weather", val: settings.WidgetWeather},
 	}
 	for _, item := range options {
@@ -2616,6 +2631,7 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 			{Value: "widget_battery", Label: "Battery"},
 			{Value: "widget_cpu", Label: "CPU"},
 			{Value: "widget_ram", Label: "RAM"},
+			{Value: "widget_storage", Label: "Storage"},
 			{Value: "widget_weather", Label: "Weather"},
 		}
 	case "starship_prompt":
@@ -3901,6 +3917,7 @@ func (m model) applyArgs(includeOverrides bool) []string {
 		"--widget-battery", onOffFlag(m.widgetBattery),
 		"--widget-cpu", onOffFlag(m.widgetCPU),
 		"--widget-ram", onOffFlag(m.widgetRAM),
+		"--widget-storage", onOffFlag(m.widgetStorage),
 		"--widget-weather", onOffFlag(m.widgetWeather),
 	)
 	return args

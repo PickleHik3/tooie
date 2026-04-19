@@ -97,6 +97,7 @@ func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 		`set -g @status-tmux-widget-battery "on"`,
 		`set -g @status-tmux-widget-cpu "on"`,
 		`set -g @status-tmux-widget-ram "on"`,
+		`set -g @status-tmux-widget-storage "on"`,
 		`set -g @status-tmux-widget-weather "on"`,
 	} {
 		if !strings.Contains(got, key) {
@@ -579,6 +580,7 @@ func TestParseThemeApplyFlagsWidgetToggles(t *testing.T) {
 		"--widget-battery", "off",
 		"--widget-cpu", "1",
 		"--widget-ram", "false",
+		"--widget-storage", "on",
 		"--widget-weather", "on",
 	})
 	if err != nil {
@@ -592,6 +594,9 @@ func TestParseThemeApplyFlagsWidgetToggles(t *testing.T) {
 	}
 	if cfg.WidgetRAM {
 		t.Fatalf("widget ram should be off")
+	}
+	if !cfg.WidgetStorage {
+		t.Fatalf("widget storage should be on")
 	}
 	if !cfg.WidgetWeather {
 		t.Fatalf("widget weather should be on")
