@@ -287,6 +287,17 @@ collect_backend_json(){
   [ -n "$mem_total" ] || return 1
   [ -n "$stor_used" ] || stor_used=0
   [ -n "$stor_total" ] || stor_total=0
+  if ! [ "$stor_total" -gt 0 ] 2>/dev/null; then
+    stor_line="$(df -Pk "${HOME:-/}" 2>/dev/null | awk 'NR==2 {print $3, $2}')"
+    if [ -n "$stor_line" ]; then
+      # shellcheck disable=SC2086
+      set -- $stor_line
+      local_used_kb="${1:-0}"
+      local_total_kb="${2:-0}"
+      stor_used=$((local_used_kb * 1024))
+      stor_total=$((local_total_kb * 1024))
+    fi
+  fi
   printf '{"cpuPercent":%s,"memUsedBytes":%s,"memTotalBytes":%s,"storageUsedBytes":%s,"storageTotalBytes":%s,"battery":{"levelPercent":%s,"charging":%s}}' "$cpu" "$mem_used" "$mem_total" "$stor_used" "$stor_total" "$bat_level" "$bat_charging"
 }
 
@@ -481,14 +492,18 @@ render_widgets(){
     h_mem_total="$(json_get memTotalBytes "$HELPER_STATS_FILE")"
     h_stor_used="$(json_get storageUsedBytes "$HELPER_STATS_FILE")"
     h_stor_total="$(json_get storageTotalBytes "$HELPER_STATS_FILE")"
+    [ -n "$h_stor_used" ] || h_stor_used="$(json_get storUsedBytes "$HELPER_STATS_FILE")"
+    [ -n "$h_stor_total" ] || h_stor_total="$(json_get storTotalBytes "$HELPER_STATS_FILE")"
     h_bat_level="$(json_get battery.levelPercent "$HELPER_STATS_FILE")"
     [ -n "$h_bat_level" ] || h_bat_level="$(json_get battery.level "$HELPER_STATS_FILE")"
     h_bat_charging="$(json_get battery.charging "$HELPER_STATS_FILE")"
     [ -n "$h_cpu" ] && cpu="$h_cpu"
     [ -n "$h_mem_used" ] && mem_used="$h_mem_used"
     [ -n "$h_mem_total" ] && mem_total="$h_mem_total"
-    [ -n "$h_stor_used" ] && stor_used="$h_stor_used"
-    [ -n "$h_stor_total" ] && stor_total="$h_stor_total"
+    if [ -n "$h_stor_total" ] && [ "$h_stor_total" -gt 0 ] 2>/dev/null; then
+      stor_total="$h_stor_total"
+      [ -n "$h_stor_used" ] && stor_used="$h_stor_used"
+    fi
     [ -n "$h_bat_level" ] && bat_level="$h_bat_level"
     [ -n "$h_bat_charging" ] && bat_charging="$h_bat_charging"
   fi

@@ -61,11 +61,12 @@ func TestPageLabelIncludesTheme(t *testing.T) {
 
 func TestLoadShellSettingsFromBackups(t *testing.T) {
 	settings := loadShellSettingsFromBackups([]backup{{Meta: map[string]string{
-		"widget_battery": "off",
-		"widget_cpu":     "on",
-		"widget_ram":     "0",
-		"widget_storage": "1",
-		"widget_weather": "1",
+		"widget_battery":      "off",
+		"widget_cpu":          "on",
+		"widget_ram":          "0",
+		"widget_storage":      "1",
+		"widget_weather":      "1",
+		"widget_poll_seconds": "20",
 	}}})
 	want := persistedShellSettings{
 		WidgetBattery: false,
@@ -73,6 +74,7 @@ func TestLoadShellSettingsFromBackups(t *testing.T) {
 		WidgetRAM:     false,
 		WidgetStorage: true,
 		WidgetWeather: true,
+		WidgetPollSec: 20,
 	}
 	if !reflect.DeepEqual(settings, want) {
 		t.Fatalf("loadShellSettingsFromBackups() = %#v, want %#v", settings, want)
@@ -89,6 +91,7 @@ func TestPersistedShellSettingsRoundTrip(t *testing.T) {
 		WidgetRAM:     true,
 		WidgetStorage: true,
 		WidgetWeather: false,
+		WidgetPollSec: 5,
 	}
 	if err := savePersistedShellSettings(in); err != nil {
 		t.Fatalf("savePersistedShellSettings() error: %v", err)
@@ -521,6 +524,29 @@ func TestDropdownEnterAppliesSelection(t *testing.T) {
 	}
 	if got.settingMenuTarget != "" {
 		t.Fatalf("expected dropdown to close after selection")
+	}
+}
+
+func TestDropdownEnterAppliesCPUPollInterval(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	m := model{
+		page:              pageTheme,
+		settingMenuTarget: "cpu_poll_interval",
+		settingMenuIndex:  2, // 20s
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.cpuPollInterval != 20 {
+		t.Fatalf("cpuPollInterval = %d, want 20", got.cpuPollInterval)
+	}
+	settings, ok := loadPersistedShellSettings()
+	if !ok {
+		t.Fatalf("loadPersistedShellSettings() expected ok after CPU poll update")
+	}
+	if settings.WidgetPollSec != 20 {
+		t.Fatalf("persisted poll interval = %d, want 20", settings.WidgetPollSec)
 	}
 }
 

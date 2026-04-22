@@ -248,7 +248,9 @@ func TestApplyArgsPresetOmitsMode(t *testing.T) {
 		"--widget-battery", "on",
 		"--widget-cpu", "on",
 		"--widget-ram", "on",
+		"--widget-storage", "off",
 		"--widget-weather", "on",
+		"--widget-poll-seconds", "10",
 	}) {
 		t.Fatalf("applyArgs() = %v", args)
 	}
@@ -296,7 +298,9 @@ func TestApplyArgsWallpaperUsesStyleFamily(t *testing.T) {
 		"--widget-battery", "off",
 		"--widget-cpu", "on",
 		"--widget-ram", "off",
+		"--widget-storage", "off",
 		"--widget-weather", "on",
+		"--widget-poll-seconds", "10",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("applyArgs() = %v, want %v", args, want)

@@ -99,6 +99,7 @@ func TestRenderTmuxBlockDefaultTheme(t *testing.T) {
 		`set -g @status-tmux-widget-ram "on"`,
 		`set -g @status-tmux-widget-storage "on"`,
 		`set -g @status-tmux-widget-weather "on"`,
+		`set -g @status-tmux-widget-ttl "10"`,
 	} {
 		if !strings.Contains(got, key) {
 			t.Fatalf("expected renderTmuxBlock() to include %s, got: %s", key, got)
@@ -582,6 +583,7 @@ func TestParseThemeApplyFlagsWidgetToggles(t *testing.T) {
 		"--widget-ram", "false",
 		"--widget-storage", "on",
 		"--widget-weather", "on",
+		"--widget-poll-seconds", "20",
 	})
 	if err != nil {
 		t.Fatalf("parseThemeApplyFlags() error: %v", err)
@@ -600,6 +602,9 @@ func TestParseThemeApplyFlagsWidgetToggles(t *testing.T) {
 	}
 	if !cfg.WidgetWeather {
 		t.Fatalf("widget weather should be on")
+	}
+	if cfg.WidgetPollSec != 20 {
+		t.Fatalf("widget poll seconds should be 20, got %d", cfg.WidgetPollSec)
 	}
 }
 

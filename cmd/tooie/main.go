@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ const (
 	defaultPaletteType = "tonal-spot"
 	defaultSource      = "wallpaper"
 	defaultStarship    = "gruvbox"
+	defaultWidgetPoll  = 10
 	themeCacheSchema   = "2026-03-20-v2"
 	pageHome           = 0
 	pageTheme          = 1
@@ -135,6 +137,7 @@ type persistedShellSettings struct {
 	WidgetRAM     bool `json:"widget_ram"`
 	WidgetStorage bool `json:"widget_storage"`
 	WidgetWeather bool `json:"widget_weather"`
+	WidgetPollSec int  `json:"widget_poll_seconds"`
 }
 
 type backup struct {
@@ -244,6 +247,7 @@ type model struct {
 	widgetRAM         bool
 	widgetStorage     bool
 	widgetWeather     bool
+	cpuPollInterval   int
 	clockOnly         bool
 	miniShowClock     bool
 	miniShowCal       bool
@@ -322,6 +326,7 @@ func initialModel() model {
 		widgetRAM:       true,
 		widgetStorage:   true,
 		widgetWeather:   true,
+		cpuPollInterval: defaultWidgetPoll,
 		extractSwatches: map[string]string{},
 	}
 	m.clockGlyphs = loadClockGlyphSet(m.clockFontDefs, m.clockFontIdx)
@@ -421,6 +426,7 @@ func initialMiniModel(showClock, showCal bool) model {
 		widgetCPU:       true,
 		widgetRAM:       true,
 		widgetWeather:   true,
+		cpuPollInterval: defaultWidgetPoll,
 		extractSwatches: map[string]string{},
 	}
 	if strings.TrimSpace(savedClock.Pattern) != "" {
@@ -561,6 +567,7 @@ func defaultShellSettings() persistedShellSettings {
 		WidgetRAM:     true,
 		WidgetStorage: true,
 		WidgetWeather: true,
+		WidgetPollSec: defaultWidgetPoll,
 	}
 }
 
@@ -578,6 +585,7 @@ func (m *model) applyShellSettings(settings persistedShellSettings) {
 	m.widgetRAM = settings.WidgetRAM
 	m.widgetStorage = settings.WidgetStorage
 	m.widgetWeather = settings.WidgetWeather
+	m.cpuPollInterval = normalizeWidgetPollSeconds(settings.WidgetPollSec)
 }
 
 func (m model) currentShellSettings() persistedShellSettings {
@@ -587,6 +595,7 @@ func (m model) currentShellSettings() persistedShellSettings {
 		WidgetRAM:     m.widgetRAM,
 		WidgetStorage: m.widgetStorage,
 		WidgetWeather: m.widgetWeather,
+		WidgetPollSec: normalizeWidgetPollSeconds(m.cpuPollInterval),
 	}
 }
 
@@ -601,6 +610,7 @@ func loadShellSettingsFromBackups(backups []backup) persistedShellSettings {
 	out.WidgetRAM = parseOnOffDefault(meta["widget_ram"], true)
 	out.WidgetStorage = parseOnOffDefault(meta["widget_storage"], true)
 	out.WidgetWeather = parseOnOffDefault(meta["widget_weather"], true)
+	out.WidgetPollSec = parseWidgetPollSeconds(meta["widget_poll_seconds"], defaultWidgetPoll)
 	return out
 }
 
@@ -657,6 +667,23 @@ func parseOnOffDefault(raw string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func normalizeWidgetPollSeconds(v int) int {
+	switch v {
+	case 5, 10, 20:
+		return v
+	default:
+		return defaultWidgetPoll
+	}
+}
+
+func parseWidgetPollSeconds(raw string, fallback int) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return normalizeWidgetPollSeconds(fallback)
+	}
+	return normalizeWidgetPollSeconds(n)
 }
 
 func canonicalMode(mode string) string {
@@ -1420,6 +1447,7 @@ func (m model) settingsPageItems() []settingItem {
 	return []settingItem{
 		{Label: hotkeyLabel("tmux status", "t", "3") + ": " + displayStatusTheme(m.statusTheme), Target: "status_theme"},
 		{Label: "tmux status segments: " + m.segmentSummary(), Target: "segments"},
+		{Label: fmt.Sprintf("CPU polling interval: %ds", normalizeWidgetPollSeconds(m.cpuPollInterval)), Target: "cpu_poll_interval"},
 		{Label: hotkeyLabel("Starship", "S", "10") + ": " + starshipState, Target: "starship_prompt"},
 	}
 }
@@ -1464,6 +1492,9 @@ func (m model) activateSetting() (tea.Model, tea.Cmd) {
 		return m, nil
 	case "starship_prompt":
 		m.openSettingMenu("starship_prompt")
+		return m, nil
+	case "cpu_poll_interval":
+		m.openSettingMenu("cpu_poll_interval")
 		return m, nil
 	case "mode":
 		m.openSettingMenu("mode")
@@ -1605,17 +1636,19 @@ func syncTmuxWidgetSettings(settings persistedShellSettings) error {
 	}
 	options := []struct {
 		key string
-		val bool
+		val string
 	}{
-		{key: "@status-tmux-widget-battery", val: settings.WidgetBattery},
-		{key: "@status-tmux-widget-cpu", val: settings.WidgetCPU},
-		{key: "@status-tmux-widget-ram", val: settings.WidgetRAM},
-		{key: "@status-tmux-widget-storage", val: settings.WidgetStorage},
-		{key: "@status-tmux-widget-weather", val: settings.WidgetWeather},
+		{key: "@status-tmux-widget-battery", val: onOffFlag(settings.WidgetBattery)},
+		{key: "@status-tmux-widget-cpu", val: onOffFlag(settings.WidgetCPU)},
+		{key: "@status-tmux-widget-ram", val: onOffFlag(settings.WidgetRAM)},
+		{key: "@status-tmux-widget-storage", val: onOffFlag(settings.WidgetStorage)},
+		{key: "@status-tmux-widget-weather", val: onOffFlag(settings.WidgetWeather)},
+		{key: "@status-tmux-widget-ttl", val: strconv.Itoa(normalizeWidgetPollSeconds(settings.WidgetPollSec))},
 	}
 	for _, item := range options {
-		_ = exec.Command("tmux", "set-option", "-g", item.key, onOffFlag(item.val)).Run()
+		_ = exec.Command("tmux", "set-option", "-g", item.key, item.val).Run()
 	}
+	_ = exec.Command("tmux", "set-option", "-g", "status-interval", strconv.Itoa(normalizeWidgetPollSeconds(settings.WidgetPollSec))).Run()
 	_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
 	_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
 	_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
@@ -2578,6 +2611,8 @@ func (m model) currentSettingChoice(target string) string {
 		return ""
 	case "starship_prompt":
 		return strings.TrimSpace(strings.ToLower(m.starshipPrompt))
+	case "cpu_poll_interval":
+		return strconv.Itoa(normalizeWidgetPollSeconds(m.cpuPollInterval))
 	default:
 		return ""
 	}
@@ -2643,6 +2678,12 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 			out = append(out, settingChoice{Value: sp, Label: displayStarshipPrompt(sp)})
 		}
 		return out
+	case "cpu_poll_interval":
+		return []settingChoice{
+			{Value: "5", Label: "5 seconds"},
+			{Value: "10", Label: "10 seconds"},
+			{Value: "20", Label: "20 seconds"},
+		}
 	default:
 		return nil
 	}
@@ -2691,6 +2732,17 @@ func (m *model) applySettingChoice(target, value string) {
 		settings.Modules.StarshipMode = "themed"
 		settings.Starship.Prompt = m.starshipPrompt
 		_ = saveTooieSettings(settings)
+	case "cpu_poll_interval":
+		next := parseWidgetPollSeconds(value, m.cpuPollInterval)
+		m.cpuPollInterval = next
+		if err := savePersistedShellSettings(m.currentShellSettings()); err != nil {
+			m.lastStatus = "Failed to save settings: " + err.Error()
+			return
+		}
+		m.lastStatus = fmt.Sprintf("CPU polling interval set to %ds", next)
+		go func(cfg persistedShellSettings) {
+			_ = syncTmuxWidgetSettings(cfg)
+		}(m.currentShellSettings())
 	}
 }
 
@@ -2714,6 +2766,8 @@ func settingMenuLabel(target string) string {
 		return "tmux status segments"
 	case "starship_prompt":
 		return "Starship"
+	case "cpu_poll_interval":
+		return "CPU polling interval"
 	default:
 		return "Options"
 	}
@@ -2744,6 +2798,8 @@ func (m model) settingsRowView(target string) (label, state, kind string, toggle
 			return hotkeyLabel("Starship", "S", "10"), "N/A", "info", false
 		}
 		return hotkeyLabel("Starship", "S", "10"), displayStarshipPrompt(m.starshipPrompt) + " ▾", "info", false
+	case "cpu_poll_interval":
+		return "CPU polling interval", fmt.Sprintf("%ds ▾", normalizeWidgetPollSeconds(m.cpuPollInterval)), "info", false
 	default:
 		return target, "", "info", false
 	}
@@ -3919,6 +3975,7 @@ func (m model) applyArgs(includeOverrides bool) []string {
 		"--widget-ram", onOffFlag(m.widgetRAM),
 		"--widget-storage", onOffFlag(m.widgetStorage),
 		"--widget-weather", onOffFlag(m.widgetWeather),
+		"--widget-poll-seconds", strconv.Itoa(normalizeWidgetPollSeconds(m.cpuPollInterval)),
 	)
 	return args
 }

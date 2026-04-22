@@ -189,6 +189,7 @@ func normalizeTooieSettings(s *tooieSettings) {
 	s.Modules.StarshipMode = normalizeStarshipInstallMode(s.Modules.StarshipMode)
 	s.Modules.ShellTheme = s.Modules.FishBootstrap || s.Modules.StarshipMode != "off"
 	s.Starship.Prompt = normalizeStarshipPrompt(s.Starship.Prompt)
+	s.Widgets.WidgetPollSec = normalizeWidgetPollSeconds(s.Widgets.WidgetPollSec)
 	if s.Tmux.StatusLayout == "single-line" {
 		s.Tmux.StatusSeparator = "off"
 	}

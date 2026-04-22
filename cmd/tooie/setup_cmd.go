@@ -1297,6 +1297,7 @@ func applySetupSelection(settings tooieSettings, env setupEnv) error {
 		"--widget-ram", onOffFlag(settings.Widgets.WidgetRAM),
 		"--widget-storage", onOffFlag(settings.Widgets.WidgetStorage),
 		"--widget-weather", onOffFlag(settings.Widgets.WidgetWeather),
+		"--widget-poll-seconds", strconv.Itoa(normalizeWidgetPollSeconds(settings.Widgets.WidgetPollSec)),
 	}
 	if runThemeApplyCommand(themeArgs) != 0 {
 		return fmt.Errorf("theme apply failed")
@@ -1329,9 +1330,11 @@ func seedHelperStats() error {
 		return err
 	}
 	payload := map[string]any{
-		"cpuPercent":    0,
-		"memUsedBytes":  0,
-		"memTotalBytes": 0,
+		"cpuPercent":        0,
+		"memUsedBytes":      0,
+		"memTotalBytes":     0,
+		"storageUsedBytes":  0,
+		"storageTotalBytes": 0,
 		"battery": map[string]any{
 			"levelPercent": 0,
 			"charging":     false,

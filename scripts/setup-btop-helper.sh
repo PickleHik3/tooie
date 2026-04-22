@@ -82,6 +82,8 @@ seed_helper_stats() {
   "cpuPercent": 0,
   "memUsedBytes": 0,
   "memTotalBytes": 0,
+  "storageUsedBytes": 0,
+  "storageTotalBytes": 0,
   "battery": {
     "levelPercent": 0,
     "charging": false
