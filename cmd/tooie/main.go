@@ -48,7 +48,7 @@ const (
 )
 
 var modePresets = []string{"dark", "light"}
-var statusThemePresets = []string{"default", "rounded", "rectangle"}
+var statusThemePresets = []string{"default", "rounded", "rectangle", "power"}
 var starshipPromptPresets = []string{"gruvbox", "pure", "jetpack"}
 var paletteTypePresets = []string{"tonal-spot", "expressive", "fidelity", "content", "vibrant", "neutral", "rainbow", "fruit-salad"}
 var profilePresets = []string{
@@ -1648,7 +1648,12 @@ func syncTmuxWidgetSettings(settings persistedShellSettings) error {
 	for _, item := range options {
 		_ = exec.Command("tmux", "set-option", "-g", item.key, item.val).Run()
 	}
-	_ = exec.Command("tmux", "set-option", "-g", "status-interval", strconv.Itoa(normalizeWidgetPollSeconds(settings.WidgetPollSec))).Run()
+	statusInterval := normalizeWidgetPollSeconds(settings.WidgetPollSec)
+	statusFormat2, _ := exec.Command("tmux", "show-option", "-gqv", "status-format[2]").Output()
+	if strings.Contains(string(statusFormat2), "run-system-widget-2row") {
+		statusInterval = 5
+	}
+	_ = exec.Command("tmux", "set-option", "-g", "status-interval", strconv.Itoa(statusInterval)).Run()
 	_ = exec.Command("tmux", "set-option", "-g", "base-index", "1").Run()
 	_ = exec.Command("tmux", "set-window-option", "-g", "pane-base-index", "1").Run()
 	_ = exec.Command("tmux", "set-option", "-g", "renumber-windows", "on").Run()
@@ -2630,6 +2635,7 @@ func (m model) settingMenuChoices(target string) []settingChoice {
 			{Value: "default", Label: "Default"},
 			{Value: "rounded", Label: "Rounded"},
 			{Value: "rectangle", Label: "Rectangle"},
+			{Value: "power", Label: "Power"},
 		}
 	case "mode":
 		return []settingChoice{
@@ -4461,6 +4467,8 @@ func displayStatusTheme(name string) string {
 		return "Rounded"
 	case "rectangle":
 		return "Rectangle"
+	case "power":
+		return "Power"
 	default:
 		return "Default"
 	}

@@ -4,6 +4,7 @@ PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/status-tmux"
 CACHE_FILE="$CACHE_DIR/resources.json"
+CPU_STATE_FILE="$CACHE_DIR/cpu.stat"
 LOCK_DIR="$CACHE_DIR/.lock"
 TTL_SECONDS="${STATUS_TMUX_WIDGET_TTL:-3}"
 LOCK_STALE_SECONDS=10
@@ -19,6 +20,19 @@ SHOW_STORAGE="${STATUS_TMUX_SHOW_STORAGE:-on}"
 MODE="${1:-all}"
 EDGE_STYLE="${STATUS_TMUX_EDGE_STYLE:-rounded}"
 WIDGET_GAP_RIGHT="${STATUS_TMUX_WIDGET_GAP_RIGHT:-space}"
+RAM_DISPLAY="${STATUS_TMUX_RAM_DISPLAY:-percent}"
+STORAGE_DISPLAY="${STATUS_TMUX_STORAGE_DISPLAY:-percent}"
+BAT_GRADIENT="${STATUS_TMUX_BAT_GRADIENT:-0}"
+CPU_DISPLAY_COLOR_OVERRIDE="${STATUS_TMUX_CPU_DISPLAY_COLOR_OVERRIDE:-}"
+RAM_USED_COLOR="${STATUS_TMUX_RAM_USED_COLOR:-}"
+RAM_TOTAL_COLOR="${STATUS_TMUX_RAM_TOTAL_COLOR:-$VALUE_TOTAL_COLOR}"
+STORAGE_USED_COLOR="${STATUS_TMUX_STORAGE_USED_COLOR:-}"
+STORAGE_TOTAL_COLOR="${STATUS_TMUX_STORAGE_TOTAL_COLOR:-$VALUE_TOTAL_COLOR}"
+VALUE_TOTAL_COLOR="${STATUS_TMUX_VALUE_TOTAL_COLOR:-}"
+VALUE_DIVIDER_COLOR="${STATUS_TMUX_VALUE_DIVIDER_COLOR:-$VALUE_TOTAL_COLOR}"
+COMPACT_SEPARATORS="${STATUS_TMUX_COMPACT_SEPARATORS:-0}"
+VALUE_ITALIC="${STATUS_TMUX_VALUE_ITALIC:-0}"
+CPU_VALUE_ITALIC="${STATUS_TMUX_CPU_VALUE_ITALIC:-$VALUE_ITALIC}"
 
 SEP_COLOR="${STATUS_TMUX_SEP_COLOR:-colour8}"
 METER_1_COLOR="${STATUS_TMUX_BAT_METER_1_COLOR:-colour160}"
@@ -99,6 +113,22 @@ is_termux_env(){
   return 1
 }
 
+humanize_bytes_compact(){
+  bytes="$1"
+  case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+  awk -v b="$bytes" 'BEGIN{
+    split("B KB MB GB TB", units, " ");
+    u = 1;
+    v = b + 0;
+    while (v >= 1024 && u < 5) {
+      v /= 1024;
+      u++;
+    }
+    if (u <= 2) printf "%.0f%s", v, units[u];
+    else printf "%.1f%s", v, units[u];
+  }'
+}
+
 runtime_source_mode(){
   # On regular Linux hosts, always prefer local /proc metrics so widgets match tools like btop.
   if is_termux_env; then
@@ -127,7 +157,7 @@ read_cpu_stat(){
   awk '/^cpu / {print $2, $3, $4, $5, $6, $7, $8, $9, $10, $11; exit}' /proc/stat 2>/dev/null || true
 }
 
-cpu_percent_from_procstat(){
+cpu_percent_from_procstat_quick(){
   s1="$(read_cpu_stat)"
   [ -n "$s1" ] || return 1
   sleep "${STATUS_TMUX_CPU_SAMPLE_SEC:-0.2}"
@@ -147,6 +177,35 @@ cpu_percent_from_procstat(){
   idle2=$((i2+w2))
   dt=$((t2-t1))
   didle=$((idle2-idle1))
+  [ "$dt" -gt 0 ] || return 1
+
+  awk -v dt="$dt" -v didle="$didle" 'BEGIN{u=((dt-didle)/dt)*100; if(u<0)u=0; if(u>100)u=100; printf "%.2f", u}'
+}
+
+cpu_percent_from_interval_state(){
+  s_now="$(read_cpu_stat)"
+  [ -n "$s_now" ] || return 1
+
+  # shellcheck disable=SC2086
+  set -- $s_now
+  u=${1:-0}; n=${2:-0}; sy=${3:-0}; i=${4:-0}; w=${5:-0}; ir=${6:-0}; si=${7:-0}; st=${8:-0}; g=${9:-0}; gn=${10:-0}
+  total_now=$((u+n+sy+i+w+ir+si+st+g+gn))
+  idle_now=$((i+w))
+
+  prev=""
+  if [ -f "$CPU_STATE_FILE" ]; then
+    prev="$(cat "$CPU_STATE_FILE" 2>/dev/null || true)"
+  fi
+  printf '%s %s\n' "$total_now" "$idle_now" > "$CPU_STATE_FILE"
+
+  [ -n "$prev" ] || return 1
+  # shellcheck disable=SC2086
+  set -- $prev
+  total_prev=${1:-0}
+  idle_prev=${2:-0}
+
+  dt=$((total_now-total_prev))
+  didle=$((idle_now-idle_prev))
   [ "$dt" -gt 0 ] || return 1
 
   awk -v dt="$dt" -v didle="$didle" 'BEGIN{u=((dt-didle)/dt)*100; if(u<0)u=0; if(u>100)u=100; printf "%.2f", u}'
@@ -282,6 +341,13 @@ collect_backend_json(){
     fi
   fi
 
+  # Prefer interval-delta CPU derived from /proc/stat so 5s/10s/20s polling reflects
+  # full-window usage instead of a short instant sample.
+  local_cpu="$(cpu_percent_from_interval_state 2>/dev/null || true)"
+  if [ -n "$local_cpu" ]; then
+    cpu="$local_cpu"
+  fi
+
   [ -n "$cpu" ] || return 1
   [ -n "$mem_used" ] || return 1
   [ -n "$mem_total" ] || return 1
@@ -303,7 +369,10 @@ collect_backend_json(){
 
 collect_local_json(){
   want_bat="$1"
-  cpu_pct="$(cpu_percent_from_procstat 2>/dev/null || true)"
+  cpu_pct="$(cpu_percent_from_interval_state 2>/dev/null || true)"
+  if [ -z "$cpu_pct" ]; then
+    cpu_pct="$(cpu_percent_from_procstat_quick 2>/dev/null || true)"
+  fi
   if [ -z "$cpu_pct" ]; then
     cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"; [ -n "$cores" ] || cores=1; [ "$cores" -gt 0 ] || cores=1
     load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
@@ -426,6 +495,28 @@ battery_level_color(){
 }
 battery_color_for_state(){
   state="$1"; slot="$2"; active="$3"
+  if is_on "$BAT_GRADIENT"; then
+    case "${state}:${slot}" in
+      full:1) echo "$BAT_FULL_1_COLOR" ;;
+      full:2) echo "$BAT_FULL_1_COLOR" ;;
+      full:3) echo "$BAT_FULL_2_COLOR" ;;
+      full:4) echo "$BAT_FULL_2_COLOR" ;;
+      full:5) echo "$BAT_FULL_3_COLOR" ;;
+      full:6) echo "$BAT_FULL_3_COLOR" ;;
+      full:7) echo "$BAT_FULL_4_COLOR" ;;
+      full:8|full:*) echo "$BAT_FULL_4_COLOR" ;;
+      half:1) echo "$BAT_HALF_1_COLOR" ;;
+      half:2) echo "$BAT_HALF_1_COLOR" ;;
+      half:3) echo "$BAT_HALF_2_COLOR" ;;
+      half:4) echo "$BAT_HALF_2_COLOR" ;;
+      half:5) echo "$BAT_HALF_3_COLOR" ;;
+      half:6) echo "$BAT_HALF_3_COLOR" ;;
+      half:7) echo "$BAT_HALF_4_COLOR" ;;
+      half:8|half:*) echo "$BAT_HALF_4_COLOR" ;;
+      empty:*) echo "$BAT_EMPTY_MUTED_COLOR" ;;
+    esac
+    return
+  fi
   case "${state}:${slot}" in
     full:*) echo "$active" ;;
     half:*) echo "$active" ;;
@@ -511,7 +602,48 @@ render_widgets(){
   if [ "$mem_total" -gt 0 ] 2>/dev/null; then ram_pct="$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.0f", (u*100)/t}')"; else ram_pct=0; fi; case "$ram_pct" in ''|*[!0-9]*) ram_pct=0;; esac; [ "$ram_pct" -gt 100 ] && ram_pct=100; [ "$ram_pct" -lt 0 ] && ram_pct=0
   if [ "$stor_total" -gt 0 ] 2>/dev/null; then stor_pct="$(awk -v u="$stor_used" -v t="$stor_total" 'BEGIN{printf "%.0f", (u*100)/t}')"; else stor_pct=0; fi; case "$stor_pct" in ''|*[!0-9]*) stor_pct=0;; esac; [ "$stor_pct" -gt 100 ] && stor_pct=100; [ "$stor_pct" -lt 0 ] && stor_pct=0
   cpu_color="$(cpu_usage_color "$cpu_pct")"; ram_color="$(ram_usage_color "$ram_pct")"; storage_color="$(storage_usage_color "$stor_pct")"; cpu_pct_fixed="$(printf "%02d" "$cpu_pct")"; ram_pct_fixed="$(printf "%02d" "$ram_pct")"; stor_pct_fixed="$(printf "%02d" "$stor_pct")"; show_bat_charge=true; is_on "$BG_RIGHT" && show_bat_charge=false; bat_text="$(render_battery "$bat_level" "$bat_charging" "$show_bat_charge")"
-  battery_segment="$bat_text"; cpu_segment="#[fg=${cpu_color}] ${cpu_pct_fixed}%"; ram_segment="#[fg=${ram_color}] ${ram_pct_fixed}%"; storage_segment="#[fg=${storage_color}] ${stor_pct_fixed}%"; out=""
+  ram_used_h="$(humanize_bytes_compact "$mem_used")"
+  ram_total_h="$(humanize_bytes_compact "$mem_total")"
+  stor_used_h="$(humanize_bytes_compact "$stor_used")"
+  stor_total_h="$(humanize_bytes_compact "$stor_total")"
+  ram_label="${ram_pct_fixed}%"
+  storage_label="${stor_pct_fixed}%"
+  cpu_label="${cpu_pct_fixed}%"
+  if is_on "$CPU_VALUE_ITALIC"; then
+    cpu_label="#[italics]${cpu_pct_fixed}%#[noitalics]"
+  fi
+  if [ "$RAM_DISPLAY" = "used_total" ]; then
+    if [ -n "$RAM_TOTAL_COLOR" ] || [ -n "$RAM_USED_COLOR" ]; then
+      ram_used_fg="${RAM_USED_COLOR:-$ram_color}"
+      ram_total_fg="${RAM_TOTAL_COLOR:-$VALUE_TOTAL_COLOR}"
+      ram_color="$ram_used_fg"
+      if is_on "$VALUE_ITALIC"; then
+        ram_label="#[fg=${ram_used_fg},italics]${ram_used_h}#[fg=${VALUE_DIVIDER_COLOR},italics]/#[fg=${ram_total_fg},italics]${ram_total_h}#[noitalics]"
+      else
+        ram_label="#[fg=${ram_used_fg}]${ram_used_h}#[fg=${VALUE_DIVIDER_COLOR}]/#[fg=${ram_total_fg}]${ram_total_h}"
+      fi
+    else
+      ram_label="${ram_used_h}/${ram_total_h}"
+    fi
+  fi
+  if [ "$STORAGE_DISPLAY" = "used_total" ]; then
+    if [ -n "$STORAGE_TOTAL_COLOR" ] || [ -n "$STORAGE_USED_COLOR" ]; then
+      storage_used_fg="${STORAGE_USED_COLOR:-$storage_color}"
+      storage_total_fg="${STORAGE_TOTAL_COLOR:-$VALUE_TOTAL_COLOR}"
+      storage_color="$storage_used_fg"
+      if is_on "$VALUE_ITALIC"; then
+        storage_label="#[fg=${storage_used_fg},italics]${stor_used_h}#[fg=${VALUE_DIVIDER_COLOR},italics]/#[fg=${storage_total_fg},italics]${stor_total_h}#[noitalics]"
+      else
+        storage_label="#[fg=${storage_used_fg}]${stor_used_h}#[fg=${VALUE_DIVIDER_COLOR}]/#[fg=${storage_total_fg}]${stor_total_h}"
+      fi
+    else
+      storage_label="${stor_used_h}/${stor_total_h}"
+    fi
+  fi
+  if [ -n "$CPU_DISPLAY_COLOR_OVERRIDE" ]; then
+    cpu_color="$CPU_DISPLAY_COLOR_OVERRIDE"
+  fi
+  battery_segment="$bat_text"; cpu_segment="#[fg=${cpu_color}] ${cpu_label}"; ram_segment="#[fg=${ram_color}] ${ram_label}"; storage_segment="#[fg=${storage_color}] ${storage_label}"; out=""
   if is_on "$BG_RIGHT"; then
     case "$EDGE_STYLE" in
       flat)
@@ -538,6 +670,9 @@ render_widgets(){
   fi
   case "$MODE" in battery) printf "%s#[default]" "$battery_segment"; return;; cpu) printf "%s#[default]" "$cpu_segment"; return;; ram) printf "%s#[default]" "$ram_segment"; return;; storage) printf "%s#[default]" "$storage_segment"; return;; all) ;; *) printf "%s#[default]" "$out"; return;; esac
   join_sep="#[fg=${SEP_COLOR}] | "
+  if is_on "$COMPACT_SEPARATORS"; then
+    join_sep=" #[fg=${SEP_COLOR}]| "
+  fi
   if is_on "$BG_RIGHT"; then
     case "$WIDGET_GAP_RIGHT" in
       none) join_sep="" ;;

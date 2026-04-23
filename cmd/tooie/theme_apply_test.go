@@ -178,6 +178,42 @@ func TestRenderTmuxBlockRectangleTheme(t *testing.T) {
 	}
 }
 
+func TestRenderTmuxBlockTwoRowTheme(t *testing.T) {
+	payload := testThemePayload()
+	payload.Meta["status_theme"] = "power"
+	got := renderTmuxBlock(payload)
+	if !strings.Contains(got, `set -g status 3`) {
+		t.Fatalf("expected power theme to force three-line status, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-right "#(\$HOME/.config/tooie/configs/tmux/widget-date-weather)"`) {
+		t.Fatalf("expected power theme row 1 to show date/weather segment, got: %s", got)
+	}
+	if strings.Contains(got, `set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)"`) {
+		t.Fatalf("expected power theme row 1 to move system widgets off first row, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-format[1] "#[align=centre]#($HOME/.config/tooie/configs/tmux/widget-battery-separator-2row)"`) {
+		t.Fatalf("expected power theme row 2 battery separator segment, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g status-format[2] "#[align=centre]#($HOME/.config/tooie/configs/tmux/run-system-widget-2row all)"`) {
+		t.Fatalf("expected power theme row 3 center-aligned system widget segment, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-color-separator-muted "`) {
+		t.Fatalf("expected power theme to emit muted separator color option, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-color-value-total "`) {
+		t.Fatalf("expected power theme to emit used/total contrast color option, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-color-date-weather-inset "`) {
+		t.Fatalf("expected power theme to emit inset foreground color option, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-color-date-weather-icon "`) {
+		t.Fatalf("expected power theme to emit weather icon color option, got: %s", got)
+	}
+	if !strings.Contains(got, `set -g @status-tmux-bg-date-weather-inset "`) {
+		t.Fatalf("expected power theme to emit inset background color option, got: %s", got)
+	}
+}
+
 func TestRenderTmuxBlockStatusLayoutOptions(t *testing.T) {
 	payload := testThemePayload()
 	payload.Meta["status_position"] = "bottom"

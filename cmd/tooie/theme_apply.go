@@ -1230,6 +1230,8 @@ func normalizeStatusTheme(raw string) string {
 		return "rounded"
 	case "rectangle", "rect":
 		return "rectangle"
+	case "power", "2row", "two-row", "two_row":
+		return "power"
 	default:
 		return ""
 	}
@@ -1475,13 +1477,16 @@ func syncManagedTmuxRuntimeFilesFromRepo() error {
 	files := []string{
 		"helpers.sh",
 		"run-system-widget",
+		"run-system-widget-2row",
 		"system-widgets",
+		"widget-battery-separator-2row",
 		"widget-left",
 		"widget-weather",
 		"widget-cpu",
 		"widget-ram",
 		"widget-storage",
 		"widget-battery",
+		"widget-date-weather",
 	}
 	for _, name := range files {
 		src, err := resolveRepoAssetPath(filepath.Join("assets", "defaults", ".config", "tmux", name))
@@ -1720,6 +1725,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	widgetStorage := onOffFlag(parseOnOffDefault(payload.Meta["widget_storage"], true))
 	widgetWeather := onOffFlag(parseOnOffDefault(payload.Meta["widget_weather"], true))
 	widgetPollSec := normalizeWidgetPollSeconds(parseWidgetPollSeconds(payload.Meta["widget_poll_seconds"], defaultWidgetPoll))
+	statusIntervalSec := widgetPollSec
 	surfaceHighest := statusHighestBG
 	primaryBase := nonBlackStatusColor(primaryRole, payload.Foreground)
 	primaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "primary_fixed", primaryBase), payload.Foreground)
@@ -1731,8 +1737,14 @@ func renderTmuxBlock(payload computedPayload) string {
 	tertiaryFixed := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed", tertiaryBase), payload.Foreground)
 	tertiaryFixedDim := nonBlackStatusColor(getRoleOr(payload.Roles, "tertiary_fixed_dim", tertiaryFixed), payload.Foreground)
 	weatherColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_primary", tertiaryFixedDim), payload.Foreground), tertiaryFixedDim, payload.Background, 4.2)
+	dateWeatherColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_info_fg", primaryFixedDim), payload.Foreground), primaryFixedDim, payload.Background, 4.2)
+	dateWeatherInsetColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "on_secondary_container", secondaryFixed), payload.Foreground), secondaryFixed, payload.Background, 4.2)
+	dateWeatherIconColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_warning_fg", "#ffd75f"), payload.Foreground), "#ffd75f", payload.Background, 3.0)
 	separatorBase := getRoleOr(payload.Roles, "outline_variant", blendHexColor(payload.Foreground, payload.Background, 0.48))
 	separatorColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, separatorBase, payload.Foreground), separatorBase, payload.Background, 3.2)
+	separatorMutedColor := normalizeHexColor(blendHexColor(payload.Background, separatorColor, 0.16))
+	valueTotalColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.18), payload.Foreground)
+	valueDividerColor := ensureReadableTextColor(payload.Background, blendHexColor(payload.Foreground, payload.Background, 0.42), payload.Foreground)
 	ruleBaseColor := ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "outline_variant", separatorColor), payload.Foreground)
 	rulePrefixColor := ensureReadableTextColor(payload.Background, blendHexColor(prefixBG, getRoleOr(payload.Roles, "primary", prefixBG), 0.42), payload.Foreground)
 	ruleCopyColor := ensureReadableTextColor(payload.Background, blendHexColor(copyBG, getRoleOr(payload.Roles, "secondary", copyBG), 0.40), payload.Foreground)
@@ -1814,13 +1826,15 @@ func renderTmuxBlock(payload computedPayload) string {
 	cpuBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(secondaryContainerRole, widgetBandBase, tuning.WidgetMix*0.52), 0.14), statusLift*0.28), payload.Foreground)
 	ramBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(blendHexColor(primaryContainerRole, tertiaryContainerRole, 0.44), widgetBandBase, tuning.WidgetMix*0.50), 0.14), statusLift*0.28), payload.Foreground)
 	weatherBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(blendHexColor(secondaryContainerRole, tertiaryContainerRole, 0.48), widgetBandBase, tuning.WidgetMix*0.50), 0.14), statusLift*0.28), payload.Foreground)
+	dateWeatherBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(blendHexColor(windowInactiveBG, sessionBG, 0.48), primaryContainerRole, 0.26), 0.12), statusLift*0.20), payload.Foreground)
+	dateWeatherInsetBG := nonBlackStatusColor(lightenHexColor(saturateHexColor(blendHexColor(secondaryContainerRole, weatherBG, 0.38), 0.16), statusLift*0.24), payload.Foreground)
 	accentFGA := getRoleOr(payload.Roles, "text_accent_primary", primaryBase)
 	accentFGB := getRoleOr(payload.Roles, "text_accent_secondary", secondaryBase)
 	widgetAccentFG := bestTextColorForBackgrounds(
 		accentFGA,
 		ensureReadableTextColor(payload.Background, payload.Foreground, accentFGB),
 		3.8,
-		payload.Background, sessionBG, prefixBG, copyBG, batteryBG, chargingBG, cpuBG, ramBG, weatherBG,
+		payload.Background, sessionBG, prefixBG, copyBG, batteryBG, chargingBG, cpuBG, ramBG, weatherBG, dateWeatherBG,
 	)
 	sessionBG = ensureBackgroundContrastForText(sessionBG, widgetAccentFG, 3.8)
 	prefixBG = ensureBackgroundContrastForText(prefixBG, widgetAccentFG, 3.8)
@@ -1830,6 +1844,8 @@ func renderTmuxBlock(payload computedPayload) string {
 	cpuBG = ensureBackgroundContrastForText(cpuBG, widgetAccentFG, 3.8)
 	ramBG = ensureBackgroundContrastForText(ramBG, widgetAccentFG, 3.8)
 	weatherBG = ensureBackgroundContrastForText(weatherBG, widgetAccentFG, 3.8)
+	dateWeatherBG = ensureBackgroundContrastForText(dateWeatherBG, widgetAccentFG, 3.8)
+	dateWeatherInsetBG = ensureBackgroundContrastForText(dateWeatherInsetBG, widgetAccentFG, 3.8)
 	sessionFG := nonBlackStatusColorForBG(
 		preferChromaticTextColor(
 			bestTextColorForBackgrounds(getRoleOr(payload.Roles, "on_tertiary_container", widgetAccentFG), widgetAccentFG, 4.5, sessionBG),
@@ -1866,6 +1882,15 @@ func renderTmuxBlock(payload computedPayload) string {
 	weatherColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_primary", weatherColor), payload.Foreground)
 	weatherColor = ensureReadableTextColor(weatherBG, weatherColor, payload.Foreground)
 	weatherColor = nonBlackStatusColorForBG(weatherColor, payload.Foreground, payload.Background, 4.2)
+	dateWeatherColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_info_fg", dateWeatherColor), payload.Foreground)
+	dateWeatherColor = ensureReadableTextColor(dateWeatherBG, dateWeatherColor, payload.Foreground)
+	dateWeatherColor = nonBlackStatusColorForBG(dateWeatherColor, payload.Foreground, payload.Background, 4.2)
+	dateWeatherInsetColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "on_secondary_container", dateWeatherInsetColor), payload.Foreground)
+	dateWeatherInsetColor = ensureReadableTextColor(dateWeatherInsetBG, dateWeatherInsetColor, payload.Foreground)
+	dateWeatherInsetColor = nonBlackStatusColorForBG(dateWeatherInsetColor, payload.Foreground, payload.Background, 4.2)
+	dateWeatherIconColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_warning_fg", dateWeatherIconColor), payload.Foreground)
+	dateWeatherIconColor = ensureReadableTextColor(dateWeatherInsetBG, dateWeatherIconColor, payload.Foreground)
+	dateWeatherIconColor = nonBlackStatusColorForBG(dateWeatherIconColor, payload.Foreground, payload.Background, 2.8)
 	chargingColor = ensureReadableTextColor(payload.Background, getRoleOr(payload.Roles, "text_accent_secondary", chargingColor), payload.Foreground)
 	chargingColor = ensureReadableTextColor(chargingBG, chargingColor, payload.Foreground)
 	chargingColor = nonBlackStatusColorForBG(chargingColor, payload.Foreground, payload.Background, 4.2)
@@ -1891,6 +1916,27 @@ func renderTmuxBlock(payload computedPayload) string {
 	for i, c := range ramColors {
 		ramColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(ramBG, c, sessionFG), c, ramBG, 3.4)
 	}
+	twoRowCPUColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, blendHexColor(cpuColors[1], payload.Background, 0.30), payload.Foreground), blendHexColor(cpuColors[1], payload.Background, 0.30), payload.Background, 3.2)
+	twoRowRamUsedColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, blendHexColor(ramColors[1], payload.Background, 0.28), payload.Foreground), blendHexColor(ramColors[1], payload.Background, 0.28), payload.Background, 3.0)
+	twoRowRamTotalColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, blendHexColor(ramColors[5], payload.Background, 0.06), payload.Foreground), blendHexColor(ramColors[5], payload.Background, 0.06), payload.Background, 3.3)
+	twoRowStorageUsedColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, blendHexColor(batteryColors[2], payload.Background, 0.34), payload.Foreground), blendHexColor(batteryColors[2], payload.Background, 0.34), payload.Background, 3.0)
+	twoRowStorageTotalColor := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, blendHexColor(batteryColors[4], payload.Background, 0.10), payload.Foreground), blendHexColor(batteryColors[4], payload.Background, 0.10), payload.Background, 3.3)
+	twoRowBatteryFullColors := [4]string{}
+	twoRowBatteryHalfColors := [4]string{}
+	twoRowBatteryEmptyColors := [4]string{}
+	for i, c := range batteryFullColors {
+		raw := blendHexColor(c, payload.Background, 0.18)
+		twoRowBatteryFullColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, raw, payload.Foreground), raw, payload.Background, 2.9)
+	}
+	for i, c := range batteryHalfColors {
+		raw := blendHexColor(c, payload.Background, 0.22)
+		twoRowBatteryHalfColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, raw, payload.Foreground), raw, payload.Background, 2.8)
+	}
+	for i, c := range batteryEmptyColors {
+		raw := blendHexColor(c, payload.Background, 0.28)
+		twoRowBatteryEmptyColors[i] = nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, raw, payload.Foreground), raw, payload.Background, 2.6)
+	}
+	twoRowBatteryEmptyMuted := nonBlackStatusColorForBG(ensureReadableTextColor(payload.Background, blendHexColor(batteryEmptyMuted, payload.Background, 0.24), payload.Foreground), blendHexColor(batteryEmptyMuted, payload.Background, 0.24), payload.Background, 2.7)
 	rightChipBGs := diversifyAdjacentStatusColors([]string{batteryBG, chargingBG, cpuBG, ramBG, weatherBG}, payload.Background, 22.0, 3.6)
 	batteryBG, chargingBG, cpuBG, ramBG, weatherBG = rightChipBGs[0], rightChipBGs[1], rightChipBGs[2], rightChipBGs[3], rightChipBGs[4]
 	batteryBG = ensureBackgroundContrastForText(batteryBG, widgetAccentFG, 3.8)
@@ -1898,6 +1944,10 @@ func renderTmuxBlock(payload computedPayload) string {
 	cpuBG = ensureBackgroundContrastForText(cpuBG, widgetAccentFG, 3.8)
 	ramBG = ensureBackgroundContrastForText(ramBG, widgetAccentFG, 3.8)
 	weatherBG = ensureBackgroundContrastForText(weatherBG, widgetAccentFG, 3.8)
+	dateWeatherBG = ensureBackgroundContrastForText(dateWeatherBG, widgetAccentFG, 3.8)
+	dateWeatherInsetBG = ensureBackgroundContrastForText(dateWeatherInsetBG, widgetAccentFG, 3.8)
+	dateWeatherAccentColors := diversifyAdjacentStatusColors([]string{dateWeatherInsetColor, dateWeatherIconColor}, dateWeatherInsetBG, 20.0, 2.8)
+	dateWeatherInsetColor, dateWeatherIconColor = dateWeatherAccentColors[0], dateWeatherAccentColors[1]
 	batteryColors = diversifyAdjacentStatusColors(batteryColors, batteryBG, 12.0, 3.3)
 	cpuColors = diversifyAdjacentStatusColors(cpuColors, cpuBG, 14.0, 3.4)
 	ramColors = diversifyAdjacentStatusColors(ramColors, ramBG, 14.0, 3.4)
@@ -1911,6 +1961,7 @@ func renderTmuxBlock(payload computedPayload) string {
 	leftGap := ""
 	leftSessionPad := "none"
 	rightGap := "space"
+	statusRight := "#(\\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\\$HOME/.config/tooie/configs/tmux/widget-weather)"
 	windowStatusFormat := fmt.Sprintf(`#[fg=%s,bg=%s,nobold,noitalics,nounderscore] #I `, windowInactiveFG, windowInactiveBG)
 	windowStatusCurrentFormat := fmt.Sprintf(`#[fg=%s,bg=%s,bold,noitalics,nounderscore] #W `, windowActiveFG, windowActiveBG)
 	switch statusTheme {
@@ -1942,6 +1993,13 @@ func renderTmuxBlock(payload computedPayload) string {
 	} else {
 		statusFormatCommands = fmt.Sprintf("set -g status-format[1] %q\nset -gu status-format[2]", statusRuleExpr)
 	}
+	if statusTheme == "power" {
+		// Power theme: top row weather/date, middle battery separator, bottom expanded system widgets.
+		statusIntervalSec = 5
+		statusRows = 3
+		statusRight = "#(\\$HOME/.config/tooie/configs/tmux/widget-date-weather)"
+		statusFormatCommands = fmt.Sprintf("set -g status-format[1] %q\nset -g status-format[2] %q", "#[align=centre]#($HOME/.config/tooie/configs/tmux/widget-battery-separator-2row)", "#[align=centre]#($HOME/.config/tooie/configs/tmux/run-system-widget-2row all)")
+	}
 	return fmt.Sprintf(`# >>> MATUGEN THEME START >>>
 # Generated by %s/theme apply
 set -g status-style "bg=default,fg=%s"
@@ -1960,7 +2018,7 @@ set -g @status-tmux-left-fg-prefix "%s"
 set -g @status-tmux-left-fg-copy "%s"
 set -g @status-tmux-left-session-pad "%s"
 set -g status-left "#(\$HOME/.config/tooie/configs/tmux/widget-left '#{session_name}' '#{client_prefix}' '#{pane_in_mode}')%s"
-set -g status-right "#(\$HOME/.config/tooie/configs/tmux/run-system-widget all)#(\$HOME/.config/tooie/configs/tmux/widget-weather)"
+set -g status-right "%s"
 %s
 set -g window-status-separator ""
 set -g mouse on
@@ -1992,7 +2050,18 @@ set -g @status-tmux-widget-weather "%s"
 set -g @status-tmux-widget-ttl "%d"
 set -g @status-tmux-widget-gap-right "%s"
 set -g @status-tmux-color-separator "%s"
+set -g @status-tmux-color-separator-muted "%s"
+set -g @status-tmux-color-value-total "%s"
+set -g @status-tmux-color-value-divider "%s"
+set -g @status-tmux-color-cpu-2row "%s"
+set -g @status-tmux-color-ram-used-2row "%s"
+set -g @status-tmux-color-ram-total-2row "%s"
+set -g @status-tmux-color-storage-used-2row "%s"
+set -g @status-tmux-color-storage-total-2row "%s"
 set -g @status-tmux-color-weather "%s"
+set -g @status-tmux-color-date-weather "%s"
+set -g @status-tmux-color-date-weather-inset "%s"
+set -g @status-tmux-color-date-weather-icon "%s"
 set -g @status-tmux-color-charging "%s"
 set -g @status-tmux-color-battery-1 "%s"
 set -g @status-tmux-color-battery-2 "%s"
@@ -2004,16 +2073,29 @@ set -g @status-tmux-color-battery-full-1 "%s"
 set -g @status-tmux-color-battery-full-2 "%s"
 set -g @status-tmux-color-battery-full-3 "%s"
 set -g @status-tmux-color-battery-full-4 "%s"
+set -g @status-tmux-color-battery-full-2row-1 "%s"
+set -g @status-tmux-color-battery-full-2row-2 "%s"
+set -g @status-tmux-color-battery-full-2row-3 "%s"
+set -g @status-tmux-color-battery-full-2row-4 "%s"
 set -g @status-tmux-color-battery-half-1 "%s"
 set -g @status-tmux-color-battery-half-2 "%s"
 set -g @status-tmux-color-battery-half-3 "%s"
 set -g @status-tmux-color-battery-half-4 "%s"
+set -g @status-tmux-color-battery-half-2row-1 "%s"
+set -g @status-tmux-color-battery-half-2row-2 "%s"
+set -g @status-tmux-color-battery-half-2row-3 "%s"
+set -g @status-tmux-color-battery-half-2row-4 "%s"
 set -g @status-tmux-color-battery-empty-1 "%s"
 set -g @status-tmux-color-battery-empty-2 "%s"
 set -g @status-tmux-color-battery-empty-3 "%s"
 set -g @status-tmux-color-battery-empty-4 "%s"
+set -g @status-tmux-color-battery-empty-2row-1 "%s"
+set -g @status-tmux-color-battery-empty-2row-2 "%s"
+set -g @status-tmux-color-battery-empty-2row-3 "%s"
+set -g @status-tmux-color-battery-empty-2row-4 "%s"
 set -g @status-tmux-battery-segments "%d"
 set -g @status-tmux-color-battery-empty-muted "%s"
+set -g @status-tmux-color-battery-empty-muted-2row "%s"
 set -g @status-tmux-color-battery-level-1 "%s"
 set -g @status-tmux-color-battery-level-2 "%s"
 set -g @status-tmux-color-battery-level-3 "%s"
@@ -2041,12 +2123,14 @@ set -g @status-tmux-bg-charging "%s"
 set -g @status-tmux-bg-cpu "%s"
 set -g @status-tmux-bg-ram "%s"
 set -g @status-tmux-bg-weather "%s"
+set -g @status-tmux-bg-date-weather "%s"
+set -g @status-tmux-bg-date-weather-inset "%s"
 set -g @status-tmux-fg-on-accent "%s"
 # <<< MATUGEN THEME END <<<
-`, tooieConfigDir,
+	`, tooieConfigDir,
 		payload.Foreground,
 		statusPosition,
-		widgetPollSec,
+		statusIntervalSec,
 		statusRows,
 		edgeStyle,
 		leftEdgeStyle,
@@ -2059,6 +2143,7 @@ set -g @status-tmux-fg-on-accent "%s"
 		copyFG,
 		leftSessionPad,
 		leftGap,
+		statusRight,
 		statusFormatCommands,
 		windowStatusFormat,
 		windowStatusCurrentFormat,
@@ -2072,13 +2157,17 @@ set -g @status-tmux-fg-on-accent "%s"
 		widgetBattery, widgetCPU, widgetRAM, widgetStorage, widgetWeather,
 		widgetPollSec,
 		rightGap,
-		separatorColor, weatherColor, chargingColor,
+		separatorColor, separatorMutedColor, valueTotalColor, valueDividerColor, twoRowCPUColor, twoRowRamUsedColor, twoRowRamTotalColor, twoRowStorageUsedColor, twoRowStorageTotalColor, weatherColor, dateWeatherColor, dateWeatherInsetColor, dateWeatherIconColor, chargingColor,
 		batteryColors[0], batteryColors[1], batteryColors[2], batteryColors[3], batteryColors[4], batteryColors[5],
 		batteryFullColors[0], batteryFullColors[1], batteryFullColors[2], batteryFullColors[3],
+		twoRowBatteryFullColors[0], twoRowBatteryFullColors[1], twoRowBatteryFullColors[2], twoRowBatteryFullColors[3],
 		batteryHalfColors[0], batteryHalfColors[1], batteryHalfColors[2], batteryHalfColors[3],
+		twoRowBatteryHalfColors[0], twoRowBatteryHalfColors[1], twoRowBatteryHalfColors[2], twoRowBatteryHalfColors[3],
 		batteryEmptyColors[0], batteryEmptyColors[1], batteryEmptyColors[2], batteryEmptyColors[3],
+		twoRowBatteryEmptyColors[0], twoRowBatteryEmptyColors[1], twoRowBatteryEmptyColors[2], twoRowBatteryEmptyColors[3],
 		5,
 		batteryEmptyMuted,
+		twoRowBatteryEmptyMuted,
 		batteryLevelColors[0], batteryLevelColors[1], batteryLevelColors[2], batteryLevelColors[3], batteryLevelColors[4],
 		batteryLevelColors[5], batteryLevelColors[6], batteryLevelColors[7], batteryLevelColors[8], batteryLevelColors[9],
 		cpuColors[0], cpuColors[1], cpuColors[2], cpuColors[3], cpuColors[4], cpuColors[5],
@@ -2088,6 +2177,8 @@ set -g @status-tmux-fg-on-accent "%s"
 		cpuBG,
 		ramBG,
 		weatherBG,
+		dateWeatherBG,
+		dateWeatherInsetBG,
 		widgetAccentFG,
 	)
 }

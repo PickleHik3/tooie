@@ -1,0 +1,226 @@
+#!/usr/bin/env sh
+set -eu
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/helpers.sh"
+load_tmux_profile_env "$SCRIPT_DIR/profile.env"
+
+show_battery="$(get_tmux_option '@status-tmux-widget-battery' 'on')"
+if ! is_on "$show_battery"; then
+  exit 0
+fi
+
+CACHE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/status-tmux/resources.json"
+
+json_get() {
+  key="$1"
+  file="$2"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r ".${key} // empty" "$file" 2>/dev/null || true
+  else
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*[^,}]*" "$file" 2>/dev/null | head -n1 | sed 's/.*:[[:space:]]*//; s/\"//g; s/[[:space:]]//g'
+  fi
+}
+
+find_sysfs_battery_dir() {
+  for d in /sys/class/power_supply/*; do
+    [ -d "$d" ] || continue
+    t="$(cat "$d/type" 2>/dev/null || true)"
+    case "$t" in
+      Battery|battery) printf '%s' "$d"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+read_sysfs_battery_level() {
+  bdir="$(find_sysfs_battery_dir 2>/dev/null || true)"
+  [ -n "$bdir" ] || return 1
+  lvl="$(cat "$bdir/capacity" 2>/dev/null || true)"
+  case "$lvl" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$lvl"
+}
+
+read_direct_battery_state() {
+  if command -v launcherctl >/dev/null 2>&1; then
+    bjson="$(launcherctl resources 2>/dev/null || true)"
+    if [ -n "$bjson" ]; then
+      lvl="$(printf '%s' "$bjson" | jq -r '.battery.levelPercent // .battery.level // empty' 2>/dev/null || true)"
+      chg="$(printf '%s' "$bjson" | jq -r '.battery.charging // false' 2>/dev/null || true)"
+      case "$lvl" in ''|*[!0-9]*) ;; *) printf '%s|%s' "$lvl" "$chg"; return 0 ;; esac
+    fi
+  fi
+
+  if command -v termux-battery-status >/dev/null 2>&1; then
+    bjson="$(termux-battery-status 2>/dev/null || true)"
+    if [ -n "$bjson" ]; then
+      lvl="$(printf '%s' "$bjson" | jq -r '.percentage // .level // empty' 2>/dev/null || true)"
+      chg="$(printf '%s' "$bjson" | jq -r '.status // ""' 2>/dev/null || true)"
+      case "$chg" in CHARGING|FULL) chg=true ;; *) chg=false ;; esac
+      case "$lvl" in ''|*[!0-9]*) ;; *) printf '%s|%s' "$lvl" "$chg"; return 0 ;; esac
+    fi
+  fi
+
+  lvl="$(read_sysfs_battery_level 2>/dev/null || true)"
+  case "$lvl" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s|false' "$lvl"
+}
+
+bat_state="$(read_direct_battery_state 2>/dev/null || true)"
+level="${bat_state%%|*}"
+charging="${bat_state#*|}"
+[ -n "$level" ] || level=0
+[ -n "$charging" ] || charging=false
+if [ "$level" -eq 0 ] && [ -f "$CACHE_FILE" ]; then
+  level="$(json_get battery.levelPercent "$CACHE_FILE")"
+  [ -n "$level" ] || level="$(json_get battery.level "$CACHE_FILE")"
+  cache_charging="$(json_get battery.charging "$CACHE_FILE")"
+  [ -n "$cache_charging" ] && charging="$cache_charging"
+fi
+case "$level" in ''|*[!0-9]*) level=0 ;; esac
+[ "$level" -lt 0 ] && level=0
+[ "$level" -gt 100 ] && level=100
+case "$charging" in true|1|yes|on) charging=true ;; *) charging=false ;; esac
+
+client_width="$(tmux display-message -p '#{client_width}' 2>/dev/null || true)"
+case "$client_width" in ''|*[!0-9]*) client_width=60 ;; esac
+[ "$client_width" -lt 24 ] && client_width=24
+
+# Keep a minimal inset so the separator reads nearly full-width.
+segments=$((client_width - 4))
+[ "$segments" -lt 16 ] && segments=16
+filled_units=$((level * segments * 8 / 100))
+full_segments=$((filled_units / 8))
+partial_units=$((filled_units % 8))
+[ "$full_segments" -gt "$segments" ] && full_segments="$segments"
+[ "$full_segments" -eq "$segments" ] && partial_units=0
+
+segment_color() {
+  idx="$1"
+  awk -v idx="$idx" -v segments="$segments" '
+    function hexpair_to_dec(pair) {
+      return strtonum("0x" pair)
+    }
+    function dec_to_hex(n) {
+      return sprintf("%02x", n)
+    }
+    function channel(hex, pos) {
+      return hexpair_to_dec(substr(hex, pos, 2))
+    }
+    BEGIN {
+      stops[0] = "ff9fbc"
+      stops[1] = "ffba8c"
+      stops[2] = "ffe28a"
+      stops[3] = "8fd3ff"
+      stops[4] = "9be58f"
+
+      if (segments <= 1) {
+        t = 1.0
+      } else {
+        t = (idx - 1) / (segments - 1)
+      }
+
+      span = 4 * t
+      si = int(span)
+      if (si >= 4) {
+        si = 3
+        local_t = 1.0
+      } else {
+        local_t = span - si
+      }
+
+      c1 = stops[si]
+      c2 = stops[si + 1]
+      r = int(channel(c1, 1) + ((channel(c2, 1) - channel(c1, 1)) * local_t) + 0.5)
+      g = int(channel(c1, 3) + ((channel(c2, 3) - channel(c1, 3)) * local_t) + 0.5)
+      b = int(channel(c1, 5) + ((channel(c2, 5) - channel(c1, 5)) * local_t) + 0.5)
+      printf("#%s%s%s", dec_to_hex(r), dec_to_hex(g), dec_to_hex(b))
+    }
+  '
+}
+
+mix_color() {
+  c1="$1"
+  c2="$2"
+  units="$3"
+  awk -v c1="${c1#\#}" -v c2="${c2#\#}" -v units="$units" '
+    function hexpair_to_dec(pair) {
+      return strtonum("0x" pair)
+    }
+    function dec_to_hex(n) {
+      return sprintf("%02x", n)
+    }
+    function channel(hex, pos) {
+      return hexpair_to_dec(substr(hex, pos, 2))
+    }
+    BEGIN {
+      t = units / 8.0
+      r = int(channel(c2, 1) + ((channel(c1, 1) - channel(c2, 1)) * t) + 0.5)
+      g = int(channel(c2, 3) + ((channel(c1, 3) - channel(c2, 3)) * t) + 0.5)
+      b = int(channel(c2, 5) + ((channel(c1, 5) - channel(c2, 5)) * t) + 0.5)
+      printf("#%s%s%s", dec_to_hex(r), dec_to_hex(g), dec_to_hex(b))
+    }
+  '
+}
+
+empty_color='#7c7268'
+state_mode="$(tmux display-message -p '#{?client_prefix,prefix,#{?pane_in_mode,copy,normal}}' 2>/dev/null || printf 'normal')"
+state_color=''
+case "$state_mode" in
+  prefix) state_color="$(get_tmux_option '@status-tmux-left-bg-prefix' '')" ;;
+  copy) state_color="$(get_tmux_option '@status-tmux-left-bg-copy' '')" ;;
+esac
+charge_icon=''
+charge_icon_color='#9be58f'
+icon_slot=0
+if [ "$charging" = "true" ]; then
+  icon_slot=$(( (segments + 1) / 2 ))
+fi
+out=""
+i=1
+while [ "$i" -le "$segments" ]; do
+  glyph='━'
+  color_idx="$i"
+  if [ "$i" -le "$full_segments" ]; then
+    if [ -n "$state_color" ]; then
+      c="$state_color"
+    else
+      c="$(segment_color "$color_idx")"
+    fi
+  elif [ "$i" -eq $((full_segments + 1)) ] && [ "$partial_units" -gt 0 ]; then
+    if [ -n "$state_color" ]; then
+      c="$(mix_color "$state_color" "$empty_color" "$partial_units")"
+    else
+      c="$(mix_color "$(segment_color "$color_idx")" "$empty_color" "$partial_units")"
+    fi
+  else
+    c="$empty_color"
+  fi
+  if [ "$charging" = "true" ] && [ "$i" -eq "$icon_slot" ]; then
+    out="${out}#[fg=${charge_icon_color}] ${charge_icon} "
+    i=$((i + 3))
+    continue
+  fi
+  out="${out}#[fg=${c}]${glyph}"
+  i=$((i + 1))
+done
+
+left_pad=$(( (client_width - segments) / 2 ))
+[ "$left_pad" -lt 1 ] && left_pad=1
+right_pad=$((client_width - segments - left_pad))
+[ "$right_pad" -lt 1 ] && right_pad=1
+
+pad=""
+i=0
+while [ "$i" -lt "$left_pad" ]; do
+  pad="${pad} "
+  i=$((i + 1))
+done
+
+tail=""
+i=0
+while [ "$i" -lt "$right_pad" ]; do
+  tail="${tail} "
+  i=$((i + 1))
+done
+
+printf '%s%s%s#[default]' "$pad" "$out" "$tail"

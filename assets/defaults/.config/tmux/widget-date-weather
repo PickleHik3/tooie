@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+set -eu
+PATH="/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${PATH:-}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/helpers.sh"
+
+show_weather="$(get_tmux_option '@status-tmux-widget-weather' 'on')"
+date_weather_fg="$(get_tmux_option '@status-tmux-color-date-weather' '')"
+date_weather_bg="$(get_tmux_option '@status-tmux-bg-date-weather' '')"
+date_weather_inset_fg="$(get_tmux_option '@status-tmux-color-date-weather-inset' '')"
+date_weather_inset_bg="$(get_tmux_option '@status-tmux-bg-date-weather-inset' '')"
+date_weather_icon_fg="$(get_tmux_option '@status-tmux-color-date-weather-icon' '')"
+weather_color="$(get_tmux_option '@status-tmux-color-weather' 'blue')"
+[ -n "$weather_color" ] || weather_color="blue"
+[ "$weather_color" = "default" ] && weather_color="blue"
+[ -n "$date_weather_fg" ] || date_weather_fg="$weather_color"
+bg_weather="$(get_tmux_option '@status-tmux-bg-weather' 'colour8')"
+[ -n "$date_weather_bg" ] || date_weather_bg="$bg_weather"
+[ -n "$date_weather_inset_fg" ] || date_weather_inset_fg="$date_weather_fg"
+[ -n "$date_weather_inset_bg" ] || date_weather_inset_bg="$bg_weather"
+[ -n "$date_weather_icon_fg" ] || date_weather_icon_fg="colour228"
+if [ "$date_weather_icon_fg" = "$date_weather_inset_fg" ]; then
+  date_weather_icon_fg="colour228"
+fi
+
+weekday_short="$(LC_ALL=C date '+%a' 2>/dev/null || date)"
+day_padded="$(LC_ALL=C date '+%d' 2>/dev/null || date)"
+month_short="$(LC_ALL=C date '+%b' 2>/dev/null || date)"
+date_text="${weekday_short} ${day_padded} ${month_short}"
+if is_on "$show_weather"; then
+  wx="$($SCRIPT_DIR/weather-cache 2>/dev/null || true)"
+  [ -n "$wx" ] || wx="…"
+  # Match rounded/rectangle weather coloring exactly: color the full weather token with weather_color.
+  printf '#[bg=%s]#[fg=%s] %s#[fg=%s] %s #[bg=default]#[default]' \
+    "$date_weather_bg" "$weather_color" "$wx" "$date_weather_fg" "$date_text"
+else
+  printf '#[bg=%s,fg=%s] %s #[bg=default]#[default]' "$date_weather_bg" "$date_weather_fg" "$date_text"
+fi
