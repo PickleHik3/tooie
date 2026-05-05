@@ -104,23 +104,49 @@ machine_to_asset_candidates() {
   case "$m" in
     aarch64|arm64)
       printf '%s\n' \
+        "btop-aarch64-unknown-linux-musl.tar.gz" \
         "btop-aarch64-unknown-linux-musl.tbz" \
+        "btop-aarch64-linux-musl.tar.gz" \
         "btop-aarch64-linux-musl.tbz"
       ;;
     x86_64|amd64)
       printf '%s\n' \
+        "btop-x86_64-unknown-linux-musl.tar.gz" \
         "btop-x86_64-unknown-linux-musl.tbz" \
+        "btop-x86_64-linux-musl.tar.gz" \
         "btop-x86_64-linux-musl.tbz"
       ;;
     armv7l|armv7|arm)
       printf '%s\n' \
+        "btop-armv7-unknown-linux-musleabi.tar.gz" \
+        "btop-armv7-unknown-linux-musleabi.tbz" \
         "btop-armv7-unknown-linux-musleabihf.tbz" \
+        "btop-armv7l-linux-musleabi.tar.gz" \
+        "btop-armv7l-linux-musleabi.tbz" \
         "btop-armv7l-linux-musleabihf.tbz"
       ;;
     i686|i386)
       printf '%s\n' \
+        "btop-i686-unknown-linux-musl.tar.gz" \
         "btop-i686-unknown-linux-musl.tbz" \
+        "btop-i686-linux-musl.tar.gz" \
         "btop-i686-linux-musl.tbz"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+extract_release_archive() {
+  archive="$1"
+  dest="$2"
+  case "$archive" in
+    *.tar.gz|*.tgz)
+      tar -xzf "$archive" -C "$dest"
+      ;;
+    *.tbz|*.tbz2|*.tar.bz2)
+      tar -xjf "$archive" -C "$dest"
       ;;
     *)
       return 1
@@ -149,9 +175,11 @@ download_release_btop() {
   mkdir -p "$work/extract"
 
   if [ -n "$BTOP_RELEASE_URL" ]; then
-    archive="$work/btop.tbz"
+    archive_name="$(basename "${BTOP_RELEASE_URL%%\?*}")"
+    [ -n "$archive_name" ] || archive_name="btop.archive"
+    archive="$work/$archive_name"
     if curl -fsSL "$BTOP_RELEASE_URL" -o "$archive"; then
-      tar -xjf "$archive" -C "$work/extract" || fail "failed extracting archive from TOOIE_BTOP_RELEASE_URL"
+      extract_release_archive "$archive" "$work/extract" || fail "failed extracting archive from TOOIE_BTOP_RELEASE_URL"
       found="$(find "$work/extract" -type f -name btop | head -n 1 || true)"
       [ -n "$found" ] || fail "downloaded archive did not contain a btop binary"
       chmod 755 "$found"
@@ -176,7 +204,7 @@ download_release_btop() {
     fi
     rm -rf "$work/extract"
     mkdir -p "$work/extract"
-    if ! tar -xjf "$archive" -C "$work/extract"; then
+    if ! extract_release_archive "$archive" "$work/extract"; then
       continue
     fi
     found="$(find "$work/extract" -type f -name btop | head -n 1 || true)"

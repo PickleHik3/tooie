@@ -322,7 +322,7 @@ else
   theme_items="$(prompt_multi_theme_items "Choose items to theme" "all" "all" "tmux" "termux" "starship")"
 fi
 
-if [ "$platform" = "linux" ] && theme_selection_has "$theme_items" "termux"; then
+if [ "$platform" = "linux" ] && csv_has "$(printf '%s' "$theme_items" | tr '[:upper:]' '[:lower:]')" "termux"; then
   err "termux item is only valid on termux platform."
   exit 1
 fi

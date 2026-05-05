@@ -12,7 +12,7 @@ ANDROID_BTOP_BIN="$ANDROID_BTOP_DIR/btop"
 ANDROID_CFG_STD_DIR="/data/local/tmp/btop-config/btop"
 ANDROID_CFG_MINI_DIR="/data/local/tmp/btop-mini/btop"
 
-BTOP_RELEASE_ASSET="${TOOIE_BTOP_RELEASE_ASSET:-btop-aarch64-unknown-linux-musl.tbz}"
+BTOP_RELEASE_ASSET="${TOOIE_BTOP_RELEASE_ASSET:-btop-aarch64-unknown-linux-musl.tar.gz}"
 BTOP_RELEASE_TAG="${TOOIE_BTOP_RELEASE_TAG:-latest}"
 BTOP_RELEASE_URL="${TOOIE_BTOP_RELEASE_URL:-}"
 BTOP_RELEASE_REPO="${TOOIE_BTOP_RELEASE_REPO:-}"
@@ -109,8 +109,18 @@ setup_remote_btop() {
 
   # Download/extract and normalize the executable path.
   launcher_exec "sh -c 'set -eu; mkdir -p $ANDROID_BTOP_DIR; rm -rf $ANDROID_BTOP_DIR/extract'" >/dev/null || return 1
-  launcher_exec "sh -c 'set -eu; curl -fsSL \"$download_url\" -o $ANDROID_BTOP_DIR/btop.tbz'" >/dev/null || return 1
-  launcher_exec "sh -c 'set -eu; mkdir -p $ANDROID_BTOP_DIR/extract; tar -xjf $ANDROID_BTOP_DIR/btop.tbz -C $ANDROID_BTOP_DIR/extract'" >/dev/null || return 1
+  launcher_exec "sh -c 'set -eu; curl -fsSL \"$download_url\" -o $ANDROID_BTOP_DIR/btop.archive'" >/dev/null || return 1
+  case "$download_url" in
+    *.tar.gz|*.tgz)
+      launcher_exec "sh -c 'set -eu; mkdir -p $ANDROID_BTOP_DIR/extract; tar -xzf $ANDROID_BTOP_DIR/btop.archive -C $ANDROID_BTOP_DIR/extract'" >/dev/null || return 1
+      ;;
+    *.tbz|*.tbz2|*.tar.bz2)
+      launcher_exec "sh -c 'set -eu; mkdir -p $ANDROID_BTOP_DIR/extract; tar -xjf $ANDROID_BTOP_DIR/btop.archive -C $ANDROID_BTOP_DIR/extract'" >/dev/null || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
   launcher_exec "sh -c 'set -eu; src=\$(find $ANDROID_BTOP_DIR/extract -type f -name btop | head -n 1 || true); [ -n \"\$src\" ] || exit 1; cp \"\$src\" $ANDROID_BTOP_BIN; chmod 755 $ANDROID_BTOP_BIN'" >/dev/null || return 1
 
   launcher_exec "sh -c 'set -eu; mkdir -p $ANDROID_CFG_STD_DIR; printf \"%s\n\" \"shown_boxes = \\\"cpu mem proc\\\"\" \"io_mode = False\" \"show_io_stat = False\" \"net_auto = False\" \"net_sync = False\" \"show_disks = False\" \"update_ms = 2000\" > $ANDROID_CFG_STD_DIR/btop.conf'" >/dev/null || return 1
